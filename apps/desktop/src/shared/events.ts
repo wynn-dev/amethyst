@@ -46,4 +46,7 @@ export interface Events {
    * changed since the previous batch; `removed` lists dismissed or evicted task ids.
    */
   'tasks:update': { tasks: TaskView[]; removed: string[] }
+
+  /** A native menu item was chosen; handled by the focused window. */
+  'menu:command': import('./menu').MenuCommandEvent
 }

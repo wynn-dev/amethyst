@@ -1,0 +1,224 @@
+import type { MenuCommand } from '@shared/menu'
+import { INSTANCE_TABS, type InstanceTab } from '@shared/menu'
+import { queryClient } from '@/data/query'
+import { instanceActions, instanceKeys } from '@/data/instances'
+import type { InstanceSummary } from '@/data/types'
+import { toast } from '@/ui/toast-store'
+import { router } from './router'
+import { focusFindTarget, useUi } from './ui-store'
+
+/** The instance whose detail view is showing, if any. */
+export function currentInstanceId(): string | undefined {
+  for (const m of router.state.matches) {
+    const id = (m.params as { instanceId?: string }).instanceId
+    if (id) return id
+  }
+  return undefined
+}
+
+export function currentInstance(): InstanceSummary | undefined {
+  const id = currentInstanceId()
+  return id ? queryClient.getQueryData<InstanceSummary[]>(instanceKeys.list)?.find((i) => i.id === id) : undefined
+}
+
+export function currentTab(): InstanceTab | undefined {
+  const path = router.state.location.pathname
+  const tab = path.split('/')[3]
+  return (INSTANCE_TABS as readonly string[]).includes(tab ?? '') ? (tab as InstanceTab) : undefined
+}
+
+export function openInstance(id: string, tab: InstanceTab = currentTab() ?? 'overview') {
+  router.navigate({ to: `/instances/$instanceId/${tab}`, params: { instanceId: id } })
+}
+
+export const TAB_LABELS: Record<InstanceTab, string> = {
+  overview: 'Overview',
+  mods: 'Mods',
+  'resource-packs': 'Resource Packs',
+  shaders: 'Shaders',
+  worlds: 'Worlds',
+  logs: 'Logs',
+  settings: 'Settings',
+}
+
+/**
+ * Opens the Settings window. Main intercepts `window.open` for the app's own `#/settings/...`
+ * URLs and shows (or focuses) the single Settings window at that pane.
+ */
+export function openSettings(pane = 'general', row?: string) {
+  const hash = `#/settings/${pane}${row ? `?row=${encodeURIComponent(row)}` : ''}`
+  window.open(`${location.origin}${location.pathname}${hash}`, 'amethyst-settings')
+}
+
+/** Feedback for commands whose service isn't wired yet. Never silently do nothing. */
+export function notYetAvailable(what: string) {
+  // TODO(wire): every caller of this is waiting on a runtime service.
+  toast({ kind: 'info', title: `${what} isn’t available yet`, message: 'This needs a background service that hasn’t been connected.' })
+}
+
+/** Runs a menu-bar or palette command. The single dispatcher keeps menu, palette and shortcuts in sync. */
+export function runCommand(command: MenuCommand, arg?: string): void {
+  const ui = useUi.getState()
+  const inst = currentInstance()
+  const needInstance = (fn: (i: InstanceSummary) => void) => {
+    if (inst) fn(inst)
+    else toast({ kind: 'info', title: 'Select an instance first' })
+  }
+
+  switch (command) {
+    case 'view.home':
+      return void router.navigate({ to: '/' })
+    case 'view.back':
+      return router.history.back()
+    case 'view.discover':
+      return void router.navigate({ to: '/discover', search: {} })
+    case 'view.palette':
+      return ui.set({ palette: !ui.palette })
+    case 'view.activity':
+      return ui.set({ activity: !ui.activity })
+    case 'view.toggleSidebar':
+      return ui.set({ sidebarCollapsed: !ui.sidebarCollapsed })
+    case 'view.toggleInspector':
+      return ui.set({ inspector: !ui.inspector })
+    case 'view.filterSidebar':
+      ui.set({ sidebarCollapsed: false })
+      requestAnimationFrame(() => document.getElementById('sidebar-filter')?.focus())
+      return
+    case 'view.tab': {
+      const id = currentInstanceId()
+      const tab = INSTANCE_TABS[Number(arg) - 1] ?? (INSTANCE_TABS as readonly string[]).find((t) => t === arg)
+      if (id && tab) openInstance(id, tab as InstanceTab)
+      return
+    }
+    case 'help.shortcuts':
+      return ui.set({ shortcuts: true })
+    case 'file.newInstance':
+      return ui.set({ newInstance: true })
+    case 'account.add':
+      return ui.set({ addAccount: true })
+    case 'account.manage':
+    case 'account.editSkin':
+      return openSettings('accounts')
+    case 'edit.find':
+      if (!focusFindTarget()) toast({ kind: 'info', title: 'Nothing to search here' })
+      return
+    case 'edit.findNext':
+    case 'edit.findPrevious':
+      window.dispatchEvent(new CustomEvent('amethyst:find-step', { detail: command === 'edit.findNext' ? 1 : -1 }))
+      return
+    case 'instance.play':
+      return needInstance((i) => i.state.kind === 'idle' && instanceActions.launch(i))
+    case 'instance.stop':
+    case 'instance.forceStop':
+      return needInstance((i) => i.state.kind === 'running' && instanceActions.stop(i, command === 'instance.forceStop'))
+    case 'instance.addMods':
+      return needInstance((i) => router.navigate({ to: '/discover', search: { type: 'mod', target: i.id } }))
+    case 'instance.openLogs':
+      return needInstance((i) => openInstance(i.id, 'logs'))
+    case 'instance.changeVersion':
+      return needInstance((i) => openInstance(i.id, 'settings'))
+    case 'instance.checkForUpdates':
+      return needInstance((i) => openInstance(i.id, 'mods'))
+    case 'instance.togglePin':
+      return needInstance((i) =>
+        queryClient.setQueryData<InstanceSummary[]>(instanceKeys.list, (l) => l?.map((x) => (x.id === i.id ? { ...x, pinned: !x.pinned } : x))),
+      )
+    case 'file.duplicate':
+      return needInstance((i) => ui.set({ duplicate: { id: i.id, name: i.name } }))
+    case 'file.trash':
+      return needInstance((i) => ui.set({ trash: { id: i.id, name: i.name } }))
+    case 'instance.repair':
+      return needInstance((i) => instanceActions.repair(i))
+    case 'app.about':
+      return openSettings('about')
+    case 'app.checkForUpdates':
+      return openSettings('updates')
+    case 'file.newFolder':
+      return notYetAvailable('New Folder')
+    case 'file.importModpack':
+      return notYetAvailable('Import Modpack')
+    case 'file.addExistingFolder':
+      return notYetAvailable('Add Existing Folder')
+    case 'file.importUrl':
+      return notYetAvailable('Import from URL')
+    case 'file.exportModpack':
+      return notYetAvailable('Export Modpack')
+    case 'file.showInFinder':
+      return notYetAvailable('Show in Finder')
+    case 'file.openDataFolder':
+      return notYetAvailable('Open Data Folder')
+    case 'instance.addFiles':
+      return notYetAvailable('Add Files')
+    case 'instance.openLogWindow':
+      return notYetAvailable('The log window')
+    case 'instance.rename':
+      return notYetAvailable('Rename')
+    case 'instance.changeIcon':
+      return notYetAvailable('Change Icon')
+    case 'help.openLauncherLogs':
+      return notYetAvailable('Open Launcher Logs')
+    case 'help.releaseNotes':
+      return notYetAvailable('Release Notes')
+    case 'help.reportIssue':
+      window.open('https://github.com/wynn-dev/amethyst/issues/new')
+      return
+  }
+}
+
+/** Every shortcut, for the ⌘/ overlay and the palette. Mirrors `src/main/menu.ts`. */
+export const SHORTCUTS: { group: string; items: { label: string; keys: string }[] }[] = [
+  {
+    group: 'General',
+    items: [
+      { label: 'Command Palette', keys: 'mod+k' },
+      { label: 'Settings', keys: 'mod+comma' },
+      { label: 'Keyboard Shortcuts', keys: 'mod+slash' },
+      { label: 'New Instance', keys: 'mod+n' },
+      { label: 'New Folder', keys: 'shift+mod+n' },
+      { label: 'Import Modpack', keys: 'mod+o' },
+      { label: 'Add Existing Folder', keys: 'shift+mod+o' },
+      { label: 'Import from URL', keys: 'alt+mod+o' },
+      { label: 'Find', keys: 'mod+f' },
+      { label: 'Find Next / Previous', keys: 'mod+g' },
+    ],
+  },
+  {
+    group: 'View',
+    items: [
+      { label: 'Home', keys: 'shift+mod+h' },
+      { label: 'Discover', keys: 'shift+mod+d' },
+      { label: 'Activity', keys: 'alt+mod+a' },
+      { label: 'Instance tabs (Overview … Settings)', keys: 'mod+1' },
+      { label: 'Show/Hide Sidebar', keys: 'ctrl+mod+s' },
+      { label: 'Show/Hide Inspector', keys: 'alt+mod+i' },
+      { label: 'Filter Sidebar', keys: 'alt+mod+f' },
+      { label: 'Enter Full Screen', keys: 'ctrl+mod+f' },
+    ],
+  },
+  {
+    group: 'Instance',
+    items: [
+      { label: 'Play', keys: 'mod+enter' },
+      { label: 'Stop', keys: 'mod+period' },
+      { label: 'Force Stop', keys: 'alt+mod+period' },
+      { label: 'Add Mods', keys: 'shift+mod+a' },
+      { label: 'Check for Updates', keys: 'shift+mod+u' },
+      { label: 'Open Logs', keys: 'mod+l' },
+      { label: 'Open Log Window', keys: 'alt+mod+l' },
+      { label: 'Export Modpack', keys: 'shift+mod+e' },
+      { label: 'Duplicate Instance', keys: 'mod+d' },
+      { label: 'Show in Finder', keys: 'shift+mod+r' },
+      { label: 'Move to Trash', keys: 'mod+backspace' },
+    ],
+  },
+  {
+    group: 'Lists and tables',
+    items: [
+      { label: 'Select All', keys: 'mod+a' },
+      { label: 'Toggle Enabled', keys: 'space' },
+      { label: 'Open', keys: 'enter' },
+      { label: 'Move Up / Down in Load Order', keys: 'alt+mod+up' },
+      { label: 'Move to Trash', keys: 'mod+backspace' },
+    ],
+  },
+]

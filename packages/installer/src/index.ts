@@ -1,2 +1,2 @@
-// Installers for Minecraft, Forge, NeoForge, Fabric, Quilt and OptiFine
+// Installers for Minecraft, Forge, NeoForge, Fabric and Quilt
 export {}

@@ -11,7 +11,7 @@ This file is authoritative. Where another spec conflicts with it, this file wins
 
 ## Kept scope
 - Instances: create, edit, duplicate, delete (to the Trash), and import an existing folder.
-- Installing vanilla, Forge, NeoForge, Fabric, Quilt and OptiFine.
+- Installing vanilla, Forge, NeoForge, Fabric and Quilt.
 - Launching, the game log, and the crash view.
 - Mods, resource packs, shader packs and saves.
 - Modrinth and CurseForge: browse, install, and update.
@@ -41,6 +41,7 @@ This file is authoritative. Where another spec conflicts with it, this file wins
 - Migration from XMCL or other launchers.
 - XMCL account and services.
 - FTB modpacks.
+- OptiFine. No OptiFine install and no special handling. Users can still add an OptiFine jar to `mods/` by hand. The Discover view points to Sodium/Iris (Fabric/Quilt) and Embeddium/Oculus (Forge/NeoForge) instead.
 - UI and theme extras:
   - the Home card grid and focus mode
   - the palette editor
@@ -57,6 +58,20 @@ This file is authoritative. Where another spec conflicts with it, this file wins
 - The world map viewer.
 - The advancement viewer.
 - Modrinth account collections. v1 has local Favourites only.
+
+## Apple Silicon native runtime
+- Every Minecraft version runs natively on arm64. Rosetta is never required.
+- The native libraries are chosen **per launch, from the architecture of the selected JVM** (probe it), never from the launcher's own architecture.
+- LWJGL 3:
+  - Versions that already ship `natives-macos-arm64` (1.19 and later) are used as-is.
+  - Older LWJGL 3 versions (Minecraft 1.13–1.18) are replaced with LWJGL 3.3.x macOS arm64 natives from Maven Central, matched by artifact family and version range.
+- LWJGL 2 (Minecraft 1.12.2 and older):
+  - Amethyst **builds its own** arm64 natives (LWJGL 2.9.x, and jinput where needed) from public source in a CI workflow in this repo.
+  - They are published on our own GitHub release (`natives-*` tag), with sha256 values pinned in the app.
+  - No third-party native binaries are used.
+- Java runtimes:
+  - Use Mojang's runtime manifest (`mac-os-arm64`) where Mojang ships a build.
+  - Otherwise use **Azul Zulu** through the official Azul metadata API, verified with sha256. This covers Java 8, Java 16, and any component Mojang lacks for arm64.
 
 ## Content model
 - Instances are **isolated**: each has its own saves, resource packs and shader packs, and there are no shared folders.

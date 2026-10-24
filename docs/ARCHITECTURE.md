@@ -26,7 +26,7 @@ packages/content      parsers: mods, resource packs, shader packs, saves, option
 packages/marketplace  Modrinth v2 + CurseForge v1 API clients
 packages/auth         Microsoft (MSA → XBL → XSTS → MC) + offline accounts, profiles, skins
 packages/game         version JSON model, inheritance resolution, launch (args, classpath, natives)
-packages/installer    vanilla, Forge, NeoForge, Fabric, Quilt, OptiFine installers
+packages/installer    vanilla, Forge, NeoForge, Fabric, Quilt installers
 packages/java         JVM discovery on macOS + Mojang runtime download (mac-os-arm64)
 packages/modpack      .mrpack and CurseForge zip import/export
 docs/specs            behavioural specs (source of truth for features)

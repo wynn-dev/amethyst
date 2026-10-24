@@ -1,0 +1,121 @@
+{
+  "spec": 1,
+  "profile": "NeoForge",
+  "version": "neoforge-26.3.0.97",
+  "minecraft": "26.3",
+  "json": "/version.json",
+  "logo": "/big_logo.png",
+  "welcome": "Welcome to the simple NeoForge installer",
+  "mirrorList": "https://mirrors.neoforged.net",
+  "hideExtract": true,
+  "data": {
+    "BINPATCH": {
+      "client": "/data/client.lzma",
+      "server": "/data/client.lzma"
+    },
+    "PATCHED": {
+      "client": "[net.neoforged:minecraft-client-patched:26.3.0.97]",
+      "server": "[net.neoforged:minecraft-server-patched:26.3.0.97]"
+    },
+    "MCP_VERSION": {
+      "client": "'26.3-1'",
+      "server": "'26.3-1'"
+    }
+  },
+  "processors": [
+    {
+      "sides": [
+        "server"
+      ],
+      "jar": "net.neoforged.installertools:installertools:4.0.17:fatjar",
+      "classpath": [
+        "net.neoforged.installertools:installertools:4.0.17:fatjar"
+      ],
+      "args": [
+        "--task",
+        "EXTRACT_FILES",
+        "--archive",
+        "{INSTALLER}",
+        "--from",
+        "data/run.sh",
+        "--to",
+        "{ROOT}/run.sh",
+        "--exec",
+        "{ROOT}/run.sh",
+        "--from",
+        "data/run.bat",
+        "--to",
+        "{ROOT}/run.bat",
+        "--from",
+        "data/user_jvm_args.txt",
+        "--to",
+        "{ROOT}/user_jvm_args.txt",
+        "--optional",
+        "{ROOT}/user_jvm_args.txt",
+        "--from",
+        "data/win_args.txt",
+        "--to",
+        "{ROOT}/libraries/net/neoforged/neoforge/26.3.0.97/win_args.txt",
+        "--from",
+        "data/unix_args.txt",
+        "--to",
+        "{ROOT}/libraries/net/neoforged/neoforge/26.3.0.97/unix_args.txt"
+      ]
+    },
+    {
+      "jar": "net.neoforged.installertools:installertools:4.0.17:fatjar",
+      "classpath": [
+        "net.neoforged.installertools:installertools:4.0.17:fatjar"
+      ],
+      "args": [
+        "--task",
+        "PROCESS_MINECRAFT_JAR",
+        "--no-mod-manifest",
+        "--input",
+        "{MINECRAFT_JAR}",
+        "--output",
+        "{PATCHED}",
+        "--extract-libraries-to",
+        "{ROOT}/libraries/",
+        "--apply-patches",
+        "{BINPATCH}"
+      ]
+    }
+  ],
+  "libraries": [
+    {
+      "name": "net.neoforged.fancymodloader:earlydisplay:12.0.12",
+      "downloads": {
+        "artifact": {
+          "sha1": "08437387fd35033b1ea0d3fac7cc28ced4efdc6b",
+          "size": 393248,
+          "url": "https://maven.neoforged.net/releases/net/neoforged/fancymodloader/earlydisplay/12.0.12/earlydisplay-12.0.12.jar",
+          "path": "net/neoforged/fancymodloader/earlydisplay/12.0.12/earlydisplay-12.0.12.jar"
+        }
+      }
+    },
+    {
+      "name": "net.neoforged.fancymodloader:loader:12.0.12",
+      "downloads": {
+        "artifact": {
+          "sha1": "f097a25d6289aa0b289e7cdb6de83a5c8c72f77e",
+          "size": 664069,
+          "url": "https://maven.neoforged.net/releases/net/neoforged/fancymodloader/loader/12.0.12/loader-12.0.12.jar",
+          "path": "net/neoforged/fancymodloader/loader/12.0.12/loader-12.0.12.jar"
+        }
+      }
+    },
+    {
+      "name": "net.neoforged:accesstransformers:11.0.2",
+      "downloads": {
+        "artifact": {
+          "sha1": "25dcb69c78b16669935f0ab91dff830ce192379d",
+          "size": 20292,
+          "url": "https://maven.neoforged.net/releases/net/neoforged/accesstransformers/11.0.2/accesstransformers-11.0.2.jar",
+          "path": "net/neoforged/accesstransformers/11.0.2/accesstransformers-11.0.2.jar"
+        }
+      }
+    }
+  ],
+  "serverJarPath": "{LIBRARY_DIR}/net/minecraft/server/{MINECRAFT_VERSION}/server-{MINECRAFT_VERSION}.jar"
+}

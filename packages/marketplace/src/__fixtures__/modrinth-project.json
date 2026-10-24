@@ -1,0 +1,23 @@
+{
+  "id": "AANobbMI",
+  "slug": "sodium",
+  "project_type": "mod",
+  "title": "Sodium",
+  "description": "Modern rendering engine",
+  "body": "# Sodium",
+  "client_side": "required",
+  "server_side": "unsupported",
+  "categories": ["optimization"],
+  "additional_categories": ["utility"],
+  "loaders": ["fabric", "quilt"],
+  "game_versions": ["1.20.1", "1.20.4"],
+  "versions": ["abcdEFGH"],
+  "downloads": 50000000,
+  "followers": 20000,
+  "icon_url": "https://cdn.modrinth.com/data/AANobbMI/icon.png",
+  "license": { "id": "PolyForm-Shield-1.0.0", "name": "PolyForm Shield", "url": null },
+  "published": "2021-01-03T00:00:00Z",
+  "updated": "2024-05-01T00:00:00Z",
+  "status": "approved",
+  "team": "4reLOAKe"
+}

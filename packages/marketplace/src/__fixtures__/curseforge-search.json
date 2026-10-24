@@ -1,0 +1,53 @@
+{
+  "data": [
+    {
+      "id": 394468,
+      "gameId": 432,
+      "name": "Sodium",
+      "slug": "sodium",
+      "links": { "websiteUrl": "https://www.curseforge.com/minecraft/mc-mods/sodium" },
+      "summary": "Rendering",
+      "status": 4,
+      "downloadCount": 1000,
+      "thumbsUpCount": 12,
+      "classId": 6,
+      "categories": [{ "id": 423, "name": "Map and Information" }],
+      "authors": [{ "id": 1, "name": "jellysquid3" }],
+      "logo": {
+        "thumbnailUrl": "https://media.forgecdn.net/avatars/thumbnails/1.png",
+        "url": "https://media.forgecdn.net/avatars/1.png"
+      },
+      "latestFilesIndexes": [
+        { "gameVersion": "1.20.1", "fileId": 5000001, "filename": "sodium.jar", "releaseType": 1, "modLoader": 4 },
+        { "gameVersion": "1.20.1", "fileId": 5000002, "filename": "sodium-q.jar", "releaseType": 1, "modLoader": 5 }
+      ],
+      "dateCreated": "2021-01-01T00:00:00Z",
+      "dateModified": "2024-05-02T00:00:00Z",
+      "allowModDistribution": true,
+      "isAvailable": true
+    },
+    {
+      "id": 238222,
+      "gameId": 432,
+      "name": "Just Enough Items (JEI)",
+      "slug": "jei",
+      "links": { "websiteUrl": "https://www.curseforge.com/minecraft/mc-mods/jei" },
+      "summary": "View items",
+      "status": 4,
+      "downloadCount": 300000000,
+      "thumbsUpCount": 5,
+      "classId": 6,
+      "categories": [{ "id": 421, "name": "API and Library" }],
+      "authors": [{ "id": 2, "name": "mezz" }],
+      "logo": null,
+      "latestFilesIndexes": [
+        { "gameVersion": "1.20.1", "fileId": 4712345, "filename": "jei.jar", "releaseType": 1, "modLoader": 1 }
+      ],
+      "dateCreated": "2015-01-01T00:00:00Z",
+      "dateModified": "2024-04-01T00:00:00Z",
+      "allowModDistribution": false,
+      "isAvailable": true
+    }
+  ],
+  "pagination": { "index": 0, "pageSize": 2, "resultCount": 2, "totalCount": 25000 }
+}

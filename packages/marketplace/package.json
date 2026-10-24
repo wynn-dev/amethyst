@@ -1,0 +1,14 @@
+{
+  "name": "@amethyst/marketplace",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Modrinth and CurseForge API clients",
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  }
+}

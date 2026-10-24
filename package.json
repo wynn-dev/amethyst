@@ -1,0 +1,26 @@
+{
+  "name": "amethyst-monorepo",
+  "private": true,
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "packageManager": "pnpm@12.6.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @amethyst/desktop dev",
+    "build": "pnpm --filter @amethyst/desktop build",
+    "dist": "pnpm --filter @amethyst/desktop dist",
+    "typecheck": "pnpm -r --parallel typecheck",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "oxlint": "^1.89.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}

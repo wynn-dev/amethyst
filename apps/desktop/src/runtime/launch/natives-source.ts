@@ -2,9 +2,12 @@
  * The manifest of Amethyst-built arm64 natives for LWJGL 2 era versions (Minecraft 1.12.2 and
  * older), published by this repository's CI on the `natives-lwjgl2-v1` GitHub release.
  *
- * It is fetched only when a launch needs it (an LWJGL 2 version on an arm64 JVM), cached under
- * `cache/natives/` and reused for a day; when it cannot be fetched and there is no cached copy,
- * the launch fails with `ENATIVES_UNAVAILABLE` and a clear message (never a crash).
+ * `@amethyst/game` pins that release's artifacts and sha256s (`DEFAULT_LWJGL2_ARM64_SOURCE`), which
+ * the runtime passes as the `fallback`: launches use the cached manifest, else the pinned one, at
+ * once and offline, while the release manifest is revalidated in the background (at most daily)
+ * and cached under `cache/natives/`. Without a fallback, the first use waits for the fetch and a
+ * failure is `ENATIVES_UNAVAILABLE` with a clear message (never a crash). A manifest that lacks
+ * the artifact a version needs also ends in `ENATIVES_UNAVAILABLE` (from the natives plan).
  */
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -35,6 +38,8 @@ export interface NativesSourceOptions {
   cacheDir: string
   fetchJson: (url: string, options: { signal?: AbortSignal }) => Promise<unknown>
   url?: string
+  /** Used at once when there is no fresh cached manifest (the pinned release). */
+  fallback?: Lwjgl2Arm64Source
   now?: () => number
 }
 
@@ -93,21 +98,37 @@ export class Lwjgl2NativesSource {
   async #get(signal?: AbortSignal): Promise<Lwjgl2Arm64Source> {
     const cached = await this.#readCache()
     if (cached && this.#now() - cached.fetchedAt < MAX_AGE_MS) return cached.source
+    const fallback = this.#o.fallback
+    if (fallback) {
+      // Never make a launch wait for GitHub: use what we have and revalidate in the background.
+      if (this.#now() - this.#failedAt >= RETRY_AFTER_MS) void this.#fetch().catch(() => {})
+      return cached?.source ?? fallback
+    }
     if (this.#now() - this.#failedAt < RETRY_AFTER_MS) {
       if (cached) return cached.source
       throw this.#unavailable(this.#lastError)
     }
     try {
+      return await this.#fetch(signal)
+    } catch (e) {
+      if (isAbortError(e) || signal?.aborted) throw e
+      if (cached) return cached.source
+      throw this.#unavailable(this.#lastError)
+    }
+  }
+
+  async #fetch(signal?: AbortSignal): Promise<Lwjgl2Arm64Source> {
+    try {
       const source = parseLwjgl2Arm64Source(await this.#o.fetchJson(this.#url, signal ? { signal } : {}))
       await this.#writeCache({ v: 1, url: this.#url, fetchedAt: this.#now(), source })
       return source
     } catch (e) {
-      if (isAbortError(e) || signal?.aborted) throw e
-      this.#failedAt = this.#now()
-      this.#lastError = errorMessage(e)
-      log.warn(`cannot fetch the LWJGL 2 natives manifest (${this.#url}): ${this.#lastError}`)
-      if (cached) return cached.source
-      throw this.#unavailable(this.#lastError)
+      if (!(isAbortError(e) || signal?.aborted)) {
+        this.#failedAt = this.#now()
+        this.#lastError = errorMessage(e)
+        log.warn(`cannot fetch the LWJGL 2 natives manifest (${this.#url}): ${this.#lastError}`)
+      }
+      throw e
     }
   }
 

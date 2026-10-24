@@ -37,8 +37,32 @@ describe('planNatives on an arm64 JVM', () => {
     ])
   })
 
-  it('1.7.10 with the placeholder manifest reports ENATIVES_UNAVAILABLE instead of crashing later', async () => {
-    const p = await plan('1.7.10', 'arm64', DEFAULT_LWJGL2_ARM64_SOURCE)
+  it('1.7.10 uses the pinned natives-lwjgl2-v1 artifacts by default', async () => {
+    const p = planNatives(await resolveVersion(FIXTURE_VERSIONS, '1.7.10'), { jvmArch: 'arm64' })
+    expect(p.ok).toBe(true)
+    expect(p.extract.map((l) => [l.name, l.download.url, l.download.sha256])).toEqual([
+      [
+        'dev.wynn.amethyst.natives:lwjgl-platform:2.9.1:natives-macos-arm64',
+        'https://github.com/wynn-dev/amethyst/releases/download/natives-lwjgl2-v1/lwjgl-platform-2.9.1-natives-osx-arm64.jar',
+        '50db657d6517ef94b4b2f8820394752d26bda2bef9cb1736518a41ed2e3b48a4',
+      ],
+      [
+        'dev.wynn.amethyst.natives:jinput-platform:2.0.5:natives-macos-arm64',
+        'https://github.com/wynn-dev/amethyst/releases/download/natives-lwjgl2-v1/jinput-platform-2.0.5-natives-osx-arm64.jar',
+        '5834fd1f79c4f904aac70b40f1989d32614b082da5cc16f1b1b3f999e6e0ba83',
+      ],
+    ])
+  })
+
+  it('the pinned manifest covers every required LWJGL 2 artifact', () => {
+    for (const r of REQUIRED_LWJGL2_ARTIFACTS) {
+      expect(DEFAULT_LWJGL2_ARM64_SOURCE.artifacts.some((a) => a.name === r.name && a.version === r.version), `${r.name} ${r.version}`).toBe(true)
+    }
+    expect(parseLwjgl2Arm64Source(JSON.parse(JSON.stringify(DEFAULT_LWJGL2_ARM64_SOURCE)))).toEqual(DEFAULT_LWJGL2_ARM64_SOURCE)
+  })
+
+  it('1.7.10 with an empty manifest reports ENATIVES_UNAVAILABLE instead of crashing later', async () => {
+    const p = await plan('1.7.10', 'arm64', { baseUrl: 'https://example.invalid/', artifacts: [] })
     expect(p.ok).toBe(false)
     expect(p.issues).toEqual([
       {

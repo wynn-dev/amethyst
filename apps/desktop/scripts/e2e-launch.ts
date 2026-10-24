@@ -7,11 +7,13 @@
  * downloads between runs): for each case it creates an instance, installs it, launches it with an
  * offline account, waits for the game-ready signal (or 60 s), kills it, then launches it again to
  * measure click → spawn with everything installed. Needs the network and a display (the game
- * window opens). Cases: vanilla-1.21.1, fabric-1.20.1, forge-1.20.1, vanilla-1.16.5, vanilla-1.8.9.
+ * window opens). Cases: vanilla-1.21.1, fabric-1.20.1, forge-1.20.1, vanilla-1.16.5, vanilla-1.12.2,
+ * vanilla-1.8.9, vanilla-1.7.10.
  */
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { DEFAULT_LWJGL2_ARM64_SOURCE } from '@amethyst/game'
 import { createMetadataClient } from '@amethyst/installer'
 import { createHttpClient, setDefaultHttpClient } from '@amethyst/net'
 import type { Events } from '@shared/events'
@@ -38,11 +40,24 @@ const CASES: Case[] = [
   // `latest`: the newest stable (Fabric) or recommended (Forge) build, looked up at run time.
   { name: 'fabric-1.20.1', runtime: { minecraft: '1.20.1', fabric: 'latest' } },
   { name: 'forge-1.20.1', runtime: { minecraft: '1.20.1', forge: 'latest' } },
+  // TODO(natives): fails with "Failed to create window: GLFW error 65548: Cocoa: Regular windows do
+  // not have icons on macOS". The LWJGL 3.3.1 GLFW reports glfwSetWindowIcon as an error and
+  // Minecraft 1.13–1.18 treats any GLFW error during start-up as fatal. Needs the patched
+  // lwjgl-glfw arm64 build (separate natives agent) wired into packages/game/src/natives/table.ts.
   { name: 'vanilla-1.16.5', runtime: { minecraft: '1.16.5' } },
-  { name: 'vanilla-1.8.9', runtime: { minecraft: '1.8.9' }, acceptError: 'ENATIVES_UNAVAILABLE' },
+  // LWJGL 2: the Amethyst-built arm64 natives of the natives-lwjgl2-v1 release.
+  { name: 'vanilla-1.12.2', runtime: { minecraft: '1.12.2' } },
+  { name: 'vanilla-1.8.9', runtime: { minecraft: '1.8.9' } },
+  { name: 'vanilla-1.7.10', runtime: { minecraft: '1.7.10' } },
 ]
 
 const READY_TIMEOUT_MS = 60_000
+/**
+ * Output that proves the game got past window and native set-up (OpenAL loaded, textures stitched).
+ * The ready markers of LWJGL 2 versions (`LWJGL Version:`) print before the window exists.
+ */
+const LOADED = /Sound engine started|OpenAL initialized|Created: \d+x\d+(x\d+)? .*atlas/
+const LOADED_TIMEOUT_MS = 45_000
 
 interface Result {
   case: string
@@ -51,6 +66,8 @@ interface Result {
   firstReadyMs?: number
   clickToSpawnMs?: number
   readyMs?: number
+  /** Time from spawn until the game reported sound/textures loaded (warm launch). */
+  loadedMs?: number
   ready: boolean
   error?: string
   passed: boolean
@@ -100,7 +117,7 @@ async function main(): Promise<void> {
   const instances = new InstanceManager({ layout, emit, host, tasks, fetchBytes })
   await instances.load()
   const meta = createMetadataClient({ cacheDir: layout.metaCache, maxAgeMs: Number.POSITIVE_INFINITY, http })
-  const natives = new Lwjgl2NativesSource({ cacheDir: layout.nativesCache, fetchJson: (url, o) => http.json(url, o.signal ? { signal: o.signal } : {}) })
+  const natives = new Lwjgl2NativesSource({ cacheDir: layout.nativesCache, fallback: DEFAULT_LWJGL2_ARM64_SOURCE, fetchJson: (url, o) => http.json(url, o.signal ? { signal: o.signal } : {}) })
   const telemetry = { capture: () => {}, redact: () => {}, reportError: () => {} }
   const java = new JavaManager({ layout, emit, settings, tasks, instances, http: async () => http })
   const install = new InstallManager({ layout, emit, tasks, settings, instances, java, meta: async () => meta, http: async () => http, natives, telemetry })
@@ -137,7 +154,7 @@ async function main(): Promise<void> {
   })
 
   /** Launch, wait for ready (or exit, or the timeout), kill, wait for exit. */
-  const playOnce = async (instanceId: string): Promise<{ started: LaunchStarted; readyMs?: number }> => {
+  const playOnce = async (instanceId: string): Promise<{ started: LaunchStarted; readyMs?: number; loadedMs?: number }> => {
     let resolveState!: (s: 'ready' | 'exited') => void
     const settled = new Promise<'ready' | 'exited'>((r) => (resolveState = r))
     let exited!: () => void
@@ -160,6 +177,21 @@ async function main(): Promise<void> {
       const timeout = new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), READY_TIMEOUT_MS).unref())
       const state = await Promise.race([settled, timeout])
       const readyMs = state === 'ready' ? Date.now() - spawnedAt : undefined
+      let loadedMs: number | undefined
+      let ended = false
+      void exit.then(() => (ended = true))
+      for (const deadline = Date.now() + LOADED_TIMEOUT_MS; state === 'ready' && !ended && Date.now() < deadline; ) {
+        if (launch.getLog(instanceId, { since: 0, limit: 5_000 }).lines.some((l) => LOADED.test(l.text))) {
+          loadedMs = Date.now() - spawnedAt
+          break
+        }
+        // oxlint-disable-next-line no-await-in-loop -- polling the log buffer
+        await new Promise((r) => setTimeout(r, 250))
+      }
+      if (state === 'ready' && loadedMs === undefined) {
+        const tail = launch.getLog(instanceId, { since: 0, limit: 5_000 }).lines.slice(-15)
+        out(`  ! ready but never loaded; last output:\n${tail.map((l) => `      ${l.text.split('\n')[0]}`).join('\n')}`)
+      }
       if (state !== 'ready') {
         const tail = launch.getLog(instanceId, { since: 0, limit: 5_000 }).lines.slice(-25)
         out(`  ! no ready signal (${state}); last output:\n${tail.map((l) => `      ${l.text.split('\n')[0]}`).join('\n')}`)
@@ -172,7 +204,7 @@ async function main(): Promise<void> {
           await exit
         }
       }
-      return { started, ...(readyMs !== undefined ? { readyMs } : {}) }
+      return { started, ...(readyMs !== undefined ? { readyMs } : {}), ...(loadedMs !== undefined ? { loadedMs } : {}) }
     } finally {
       listeners.delete(listener)
       launch.unsubscribeLog(instanceId)
@@ -206,9 +238,10 @@ async function main(): Promise<void> {
       const warm = await playOnce(inst.id)
       result.clickToSpawnMs = warm.started.clickToSpawnMs
       if (warm.readyMs !== undefined) result.readyMs = warm.readyMs
-      result.ready = warm.readyMs !== undefined && first.readyMs !== undefined
+      if (warm.loadedMs !== undefined) result.loadedMs = warm.loadedMs
+      result.ready = warm.readyMs !== undefined && first.readyMs !== undefined && warm.loadedMs !== undefined
       result.passed = result.ready
-      out(`  warm launch: click → spawn ${warm.started.clickToSpawnMs} ms, ready ${warm.readyMs ?? 'no'}`)
+      out(`  warm launch: click → spawn ${warm.started.clickToSpawnMs} ms, ready ${warm.readyMs ?? 'no'}, loaded ${warm.loadedMs ?? 'no'}`)
     } catch (e) {
       const code = (e as { code?: string }).code ?? 'ERROR'
       result.error = `${code}: ${(e as Error).message}`
@@ -220,7 +253,7 @@ async function main(): Promise<void> {
   out('=== results')
   for (const r of results) {
     out(
-      `${r.passed ? 'PASS' : 'FAIL'} ${r.case.padEnd(15)} install ${r.installMs ?? '-'} ms | first click→spawn ${r.firstClickToSpawnMs ?? '-'} ms, ready +${r.firstReadyMs ?? '-'} ms | warm click→spawn ${r.clickToSpawnMs ?? '-'} ms, ready +${r.readyMs ?? '-'} ms${r.error ? ` | ${r.error}` : ''}`,
+      `${r.passed ? 'PASS' : 'FAIL'} ${r.case.padEnd(15)} install ${r.installMs ?? '-'} ms | first click→spawn ${r.firstClickToSpawnMs ?? '-'} ms, ready +${r.firstReadyMs ?? '-'} ms | warm click→spawn ${r.clickToSpawnMs ?? '-'} ms, ready +${r.readyMs ?? '-'} ms, loaded +${r.loadedMs ?? '-'} ms${r.error ? ` | ${r.error}` : ''}`,
     )
   }
   process.stdout.write(`E2E ${JSON.stringify(results)}\n`)

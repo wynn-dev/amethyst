@@ -2,6 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { DEFAULT_LWJGL2_ARM64_SOURCE } from '@amethyst/game'
 import { LWJGL2_NATIVES_MANIFEST_URL, Lwjgl2NativesSource } from './natives-source'
 
 let dir: string
@@ -48,6 +49,21 @@ describe('Lwjgl2NativesSource', () => {
     // Not retried on every launch.
     await expect(source.get()).rejects.toMatchObject({ code: 'ENATIVES_UNAVAILABLE' })
     expect(fetchJson).toHaveBeenCalledOnce()
+  })
+
+  it('uses the pinned release at once (offline too) and caches the fetched manifest for next time', async () => {
+    let fail = true
+    const fetchJson = vi.fn<() => Promise<unknown>>(async () => {
+      if (fail) throw new Error('offline')
+      return MANIFEST
+    })
+    const now = 1_000
+    const a = new Lwjgl2NativesSource({ cacheDir: dir, fetchJson, fallback: DEFAULT_LWJGL2_ARM64_SOURCE, now: () => now })
+    expect(await a.get()).toBe(DEFAULT_LWJGL2_ARM64_SOURCE)
+    fail = false
+    const b = new Lwjgl2NativesSource({ cacheDir: dir, fetchJson, fallback: DEFAULT_LWJGL2_ARM64_SOURCE, now: () => now })
+    expect(await b.get()).toBe(DEFAULT_LWJGL2_ARM64_SOURCE)
+    await vi.waitFor(async () => expect((await new Lwjgl2NativesSource({ cacheDir: dir, fetchJson: async () => ({}), now: () => now }).get()).artifacts).toHaveLength(1))
   })
 
   it('rejects a malformed manifest as unavailable', async () => {

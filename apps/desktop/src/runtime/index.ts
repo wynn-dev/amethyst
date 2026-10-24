@@ -200,8 +200,12 @@ const metadata = once(async (): Promise<MetadataClient> => {
 })
 
 const nativesSource = once(async (): Promise<Lwjgl2NativesSource> => {
-  const { Lwjgl2NativesSource } = await import('./launch/natives-source')
-  return new Lwjgl2NativesSource({ cacheDir: layout.nativesCache, fetchJson: async (url, o) => (await httpClient()).json(url, o.signal ? { signal: o.signal } : {}) })
+  const [{ Lwjgl2NativesSource }, { DEFAULT_LWJGL2_ARM64_SOURCE }] = await Promise.all([import('./launch/natives-source'), import('@amethyst/game')])
+  return new Lwjgl2NativesSource({
+    cacheDir: layout.nativesCache,
+    fallback: DEFAULT_LWJGL2_ARM64_SOURCE,
+    fetchJson: async (url, o) => (await httpClient()).json(url, o.signal ? { signal: o.signal } : {}),
+  })
 })
 const lazyNatives: Pick<Lwjgl2NativesSource, 'get'> = { get: async (signal) => (await nativesSource()).get(signal) }
 

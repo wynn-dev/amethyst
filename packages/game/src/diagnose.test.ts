@@ -134,7 +134,7 @@ describe('diagnose', { timeout: 30_000 }, () => {
 
   it('reports unavailable arm64 natives and checks replacement artifacts by sha256', async () => {
     const v = await resolveVersion(FIXTURE_VERSIONS, '1.7.10')
-    const placeholder = await diagnose(v, root, { jvmArch: 'arm64', lwjgl2: DEFAULT_LWJGL2_ARM64_SOURCE, assets: false })
+    const placeholder = await diagnose(v, root, { jvmArch: 'arm64', lwjgl2: { ...DEFAULT_LWJGL2_ARM64_SOURCE, artifacts: [] }, assets: false })
     expect(placeholder[0]).toMatchObject({ kind: 'native', problem: 'unavailable', name: 'org.lwjgl.lwjgl:lwjgl-platform:2.9.1:natives-osx' })
 
     const jar = Buffer.from('arm64 natives jar')

@@ -1,0 +1,14 @@
+{
+  "name": "@amethyst/auth",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Microsoft and offline accounts, profiles and skins",
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  }
+}

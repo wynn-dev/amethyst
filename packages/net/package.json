@@ -1,0 +1,14 @@
+{
+  "name": "@amethyst/net",
+  "version": "0.0.0",
+  "private": true,
+  "description": "HTTP client and parallel, resumable, checksum-verified downloader",
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  }
+}

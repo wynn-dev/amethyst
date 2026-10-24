@@ -1,6 +1,6 @@
 /**
  * The runtime utility process. Owns every domain service (instances, resources, marketplace,
- * accounts, tasks, settings; installs and launch later) so the Electron main thread only ever
+ * accounts, tasks, settings, versions, Java, installs, launch, modpacks) so the Electron main thread only ever
  * handles windows and OS integration. Renderers reach it over direct MessagePorts handed out by
  * the main process.
  *
@@ -17,8 +17,29 @@ import { pathKey } from '@amethyst/content'
 import type { HttpClient } from '@amethyst/net'
 import type { Events } from '@shared/events'
 import { RUNTIME_ENV } from '@shared/paths'
-import type { AccountsService, IndexStatus, InstancesService, MarketplaceService, ReportedError, ResourcesService, SettingsService, TasksService } from '@shared/services'
+import type {
+  AccountsService,
+  IndexStatus,
+  InstallService,
+  InstancesService,
+  JavaService,
+  LaunchService,
+  MarketplaceService,
+  ModpackService,
+  ReportedError,
+  ResourcesService,
+  SettingsService,
+  TasksService,
+  VersionsService,
+} from '@shared/services'
+import type { MetadataClient } from '@amethyst/installer'
 import type { AccountManager } from './accounts/service'
+import type { InstallManager } from './install/service'
+import type { JavaManager } from './java/service'
+import type { LaunchManager } from './launch/service'
+import type { Lwjgl2NativesSource } from './launch/natives-source'
+import type { ModpackManager } from './modpacks/service'
+import type { VersionsManager } from './versions/service'
 import type { RuntimeConfig } from './context'
 import { DbClient } from './db/client'
 import { InstanceManager, instancesService } from './instances/service'
@@ -30,7 +51,7 @@ import type { ResourceManager } from './resources/service'
 import type { ResourceWorkerHandlers } from './resources/worker-handlers'
 import { attachPort, emit, handleHostResponse, host, registerService } from './rpc'
 import { settingsService, SettingsStore } from './settings/service'
-import { applyConsent, reportError, shutdownTelemetry, telemetryService, useConsentSource } from './telemetry'
+import { applyConsent, capture, redactFromReports, reportError, shutdownTelemetry, telemetryService, useConsentSource, type TelemetryHooks } from './telemetry'
 import { TaskRegistry, tasksService } from './tasks/registry'
 import { errorMessage } from './util/errors'
 
@@ -79,6 +100,15 @@ instances.addHooks({
     if (index.ok) await db.query('placements.deleteUnder', { prefix: pathKey(path.resolve(dir)) }).catch(() => undefined)
   },
 })
+// Instances cannot be renamed or deleted while a game runs from them or an install writes into them.
+let installManager: InstallManager | undefined
+let launchManager: LaunchManager | undefined
+let javaManager: JavaManager | undefined
+let modpackManager: ModpackManager | undefined
+instances.addHooks({
+  isBusy: (id) => (installManager?.isBusy(id) ?? false) || (launchManager?.isActive(id) ?? false) || (modpackManager?.isBusy(id) ?? false),
+})
+const telemetryHooks: TelemetryHooks = { capture, redact: redactFromReports, reportError }
 
 let index: IndexStatus = { ok: false, error: 'not opened yet' }
 let bootMs = 0
@@ -121,7 +151,17 @@ let resourceManager: ResourceManager | undefined
 const resources = once(async () => {
   await booted
   const { ResourceManager } = await import('./resources/service')
-  resourceManager = new ResourceManager({ layout, emit, host, instances, db: index.ok ? db : undefined, pool: await pool(), tasks, settings })
+  resourceManager = new ResourceManager({
+    layout,
+    emit,
+    host,
+    instances,
+    db: index.ok ? db : undefined,
+    pool: await pool(),
+    tasks,
+    settings,
+    isRunning: (id) => launchManager?.isActive(id) ?? false,
+  })
   return resourceManager
 })
 
@@ -151,6 +191,86 @@ const marketplace = once(async () => {
     host,
   })
   return market
+})
+
+/** Version-list metadata, cached under `cache/meta/`. Lists are revalidated by the versions service, never at boot. */
+const metadata = once(async (): Promise<MetadataClient> => {
+  const [{ createMetadataClient }, http] = await Promise.all([import('@amethyst/installer'), httpClient()])
+  return createMetadataClient({ cacheDir: layout.metaCache, maxAgeMs: Number.POSITIVE_INFINITY, http })
+})
+
+const nativesSource = once(async (): Promise<Lwjgl2NativesSource> => {
+  const [{ Lwjgl2NativesSource }, { DEFAULT_LWJGL2_ARM64_SOURCE }] = await Promise.all([import('./launch/natives-source'), import('@amethyst/game')])
+  return new Lwjgl2NativesSource({
+    cacheDir: layout.nativesCache,
+    fallback: DEFAULT_LWJGL2_ARM64_SOURCE,
+    fetchJson: async (url, o) => (await httpClient()).json(url, o.signal ? { signal: o.signal } : {}),
+  })
+})
+const lazyNatives: Pick<Lwjgl2NativesSource, 'get'> = { get: async (signal) => (await nativesSource()).get(signal) }
+
+const java = once(async () => {
+  await booted
+  const { JavaManager } = await import('./java/service')
+  javaManager = new JavaManager({ layout, emit, settings, tasks, instances, http: httpClient })
+  return javaManager
+})
+
+const versions = once(async (): Promise<VersionsManager> => {
+  await booted
+  const { VersionsManager } = await import('./versions/service')
+  return new VersionsManager({
+    layout,
+    emit,
+    instances,
+    meta: metadata,
+    versionInUse: (id) => (installManager?.isVersionBusy(id) ?? false) || (launchManager?.isVersionRunning(id) ?? false),
+  })
+})
+
+const installs = once(async () => {
+  const [{ InstallManager }, javaImpl] = await Promise.all([import('./install/service'), java()])
+  installManager = new InstallManager({ layout, emit, tasks, settings, instances, java: javaImpl, meta: metadata, http: httpClient, natives: lazyNatives, telemetry: telemetryHooks })
+  return installManager
+})
+
+const launcher = once(async () => {
+  const [{ LaunchManager }, installImpl, javaImpl] = await Promise.all([import('./launch/service'), installs(), java()])
+  const osVersion = process.env[RUNTIME_ENV.osVersion]
+  launchManager = new LaunchManager({
+    layout,
+    emit,
+    settings,
+    tasks,
+    version: config.version,
+    ...(osVersion ? { osVersion } : {}),
+    instances,
+    install: installImpl,
+    java: javaImpl,
+    accounts,
+    natives: lazyNatives,
+    http: httpClient,
+    host,
+    telemetry: telemetryHooks,
+  })
+  return launchManager
+})
+
+const modpacks = once(async () => {
+  const [{ ModpackManager }, installImpl, resourcesImpl, marketImpl] = await Promise.all([import('./modpacks/service'), installs(), resources(), marketplace()])
+  modpackManager = new ModpackManager({
+    layout,
+    emit,
+    tasks,
+    settings,
+    instances,
+    install: installImpl,
+    resources: resourcesImpl,
+    market: marketImpl,
+    http: httpClient,
+    telemetry: telemetryHooks,
+  })
+  return modpackManager
 })
 
 // ---------------------------------------------------------------------------------------------
@@ -266,6 +386,67 @@ registerService(
   'tasks',
   deferred<TasksService>({ list: true, cancel: true, dismiss: true, clearFinished: true }, () => tasksImpl),
 )
+registerService(
+  'versions',
+  deferred<VersionsService>({ listMinecraft: true, listLoaders: true, refresh: true, listInstalled: true, deleteInstalled: true }, async () => {
+    const [{ versionsService }, manager] = await Promise.all([import('./versions/service'), versions()])
+    return versionsService(manager)
+  }),
+)
+registerService(
+  'java',
+  deferred<JavaService>({ list: true, rescan: true, addPath: true, removePath: true, installRuntime: true, recommend: true }, async () => {
+    const [{ javaService }, manager] = await Promise.all([import('./java/service'), java()])
+    // Recommend from the installed version JSON when the instance has one.
+    const resolveForRecommend = async (instanceId: string) => {
+      const versionId = instances.resolve(instanceId).config.versionId
+      if (!versionId) return undefined
+      const { resolveVersion } = await import('@amethyst/game')
+      return resolveVersion(path.join(layout.minecraft, 'versions'), versionId)
+    }
+    return javaService(manager, resolveForRecommend)
+  }),
+)
+registerService(
+  'install',
+  deferred<InstallService>({ plan: true, status: true, install: true, repair: true }, async () => {
+    const [{ installService }, manager] = await Promise.all([import('./install/service'), installs()])
+    return installService(manager)
+  }),
+)
+registerService(
+  'launch',
+  deferred<LaunchService>(
+    { launch: true, kill: true, listRunning: true, getLog: true, subscribeLog: true, unsubscribeLog: true, openCrashReport: true },
+    async () => {
+      const [{ launchService }, manager] = await Promise.all([import('./launch/service'), launcher()])
+      return launchService(manager)
+    },
+  ),
+)
+registerService(
+  'modpacks',
+  deferred<ModpackService>(
+    {
+      preview: true,
+      import: true,
+      installFromMarket: true,
+      watchManualDownloads: true,
+      stopWatchingManualDownloads: true,
+      provideManualFile: true,
+      listManualFiles: true,
+      checkUpdate: true,
+      planUpdate: true,
+      applyUpdate: true,
+      rollback: true,
+      export: true,
+    },
+    async () => {
+      const [{ modpackService }, manager] = await Promise.all([import('./modpacks/service'), modpacks()])
+      return modpackService(manager)
+    },
+  ),
+)
 
 // ---------------------------------------------------------------------------------------------
 // Process lifecycle
@@ -276,6 +457,10 @@ process.parentPort.on('message', (event: { data: unknown; ports: MessagePortMain
   if (data?.t === 'connect') {
     for (const port of event.ports) attachPort(port)
     emit('runtime:ready', { at: Date.now() })
+    // Java discovery runs once, a little after the first window painted (never at boot).
+    void java()
+      .then((j) => j.scheduleInitialScan(3_000))
+      .catch((e: unknown) => log.warn('cannot schedule Java discovery', e))
     return
   }
   if (data?.t === 'error' && data.error) {
@@ -294,11 +479,15 @@ async function shutdown(): Promise<void> {
   if (stopping) return
   stopping = true
   tasks.dispose()
+  launchManager?.dispose()
+  javaManager?.dispose()
+  modpackManager?.dispose()
   const settled = await Promise.allSettled([
     settings.flush(),
     instances.flush(),
     market?.flush(),
     accountManager?.flush(),
+    javaManager?.flush(),
   ])
   resourceManager?.dispose()
   for (const s of settled) if (s.status === 'rejected') log.warn('shutdown step failed', s.reason)

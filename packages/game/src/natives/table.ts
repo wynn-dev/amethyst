@@ -37,7 +37,17 @@ export const LWJGL3_REPLACEMENT_VERSION = '3.3.1'
 /** First LWJGL 3 release whose macOS natives include arm64. Older modules are replaced. */
 export const LWJGL3_MIN_ARM64 = '3.3.0'
 
-/** LWJGL 3 modules used by Minecraft 1.13–1.18.2 (and their snapshots), each as `{ jar, nativesArm64 }`. */
+/**
+ * LWJGL 3 modules used by Minecraft 1.13–1.18.2 (and their snapshots), each as `{ jar, nativesArm64 }`.
+ *
+ * TODO(natives): the upstream `lwjgl-glfw` 3.3.1 arm64 natives below bundle a GLFW 3.4 build whose
+ * `glfwSetWindowIcon` raises GLFW_FEATURE_UNAVAILABLE (65548, "Cocoa: Regular windows do not have
+ * icons on macOS"). Minecraft 1.13–1.18 installs an error callback that throws during start-up, so
+ * those versions log "Failed to create window" and never open a window (seen with 1.16.5). Replace
+ * `lwjgl-glfw.nativesArm64` with the Amethyst-built patched arm64 GLFW (icon call a silent no-op)
+ * once it is published, pinned by sha256 like the LWJGL 2 natives. GLFW 3.3.x is not an option:
+ * LWJGL 3.3.1 requires GLFW 3.4 functions.
+ */
 export const LWJGL3_ARM64: Readonly<Record<string, { jar: PinnedArtifact; nativesArm64: PinnedArtifact }>> = {
   lwjgl: {
     jar: pin(CENTRAL, 'org.lwjgl', 'lwjgl', '3.3.1', undefined, 'ae58664f88e18a9bb2c77b063833ca7aaec484cb', 724243),

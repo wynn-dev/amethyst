@@ -31,13 +31,27 @@ export const AMETHYST_NATIVES_GROUP = 'dev.wynn.amethyst.natives'
 /** Classifier of the Amethyst-built jars. */
 export const AMETHYST_NATIVES_CLASSIFIER = 'natives-macos-arm64'
 
+/** The GitHub release the Amethyst-built LWJGL 2 arm64 natives are published on. */
+export const LWJGL2_ARM64_RELEASE_TAG = 'natives-lwjgl2-v1'
+
+const pinned = (name: string, version: string, sha256: string, size: number): Lwjgl2Arm64Artifact =>
+  Object.freeze({ name, version, url: `${name}-${version}-natives-osx-arm64.jar`, sha256, size })
+
 /**
- * Placeholder manifest until the CI job publishes the first `natives-lwjgl2-*` release. With no
- * artifacts, plans for LWJGL 2 versions on an arm64 JVM report `ENATIVES_UNAVAILABLE`.
+ * The pinned manifest of the `natives-lwjgl2-v1` release (`manifest.json` there), so LWJGL 2
+ * versions launch without fetching it. Every jar is verified by sha256 before use. The jars carry
+ * their licences under `META-INF/`, which extraction skips.
  */
 export const DEFAULT_LWJGL2_ARM64_SOURCE: Lwjgl2Arm64Source = Object.freeze({
-  baseUrl: 'https://github.com/wynn-dev/amethyst/releases/download/natives-lwjgl2-1/',
-  artifacts: Object.freeze([]) as readonly Lwjgl2Arm64Artifact[],
+  baseUrl: `https://github.com/wynn-dev/amethyst/releases/download/${LWJGL2_ARM64_RELEASE_TAG}/`,
+  artifacts: Object.freeze([
+    pinned('lwjgl-platform', '2.9.0', '8828a272251e35fa6bac65e2201f3bb1fd25525012754c9f2f307f946dd0949d', 711714),
+    pinned('lwjgl-platform', '2.9.1-nightly-20131017', 'e63caf9b9fe95d0c1bf7d077505aa471f8b37c03fae56726c36560e6d630f719', 713399),
+    pinned('lwjgl-platform', '2.9.1-nightly-20131120', '50db657d6517ef94b4b2f8820394752d26bda2bef9cb1736518a41ed2e3b48a4', 714207),
+    pinned('lwjgl-platform', '2.9.1', '50db657d6517ef94b4b2f8820394752d26bda2bef9cb1736518a41ed2e3b48a4', 714207),
+    pinned('lwjgl-platform', '2.9.2-nightly-20140822', '05b05974c0c8ac735dd09683dbb6d98b882b0806b9102f582b0d57b36a92e8f4', 716930),
+    pinned('jinput-platform', '2.0.5', '5834fd1f79c4f904aac70b40f1989d32614b082da5cc16f1b1b3f999e6e0ba83', 6712),
+  ]) as readonly Lwjgl2Arm64Artifact[],
 })
 
 /** An artifact the LWJGL 2 CI job must build, with the Minecraft versions that need it. */

@@ -132,6 +132,7 @@ See [`docs/specs/performance.md`](specs/performance.md) for the full rules. The 
 - Resource metadata index: `better-sqlite3` in WAL mode, owned by a worker thread in the runtime.
   Writes are batched in transactions.
 - Secrets (refresh tokens) encrypted with Electron `safeStorage` (Keychain-backed).
+- The full on-disk layout and its guarantees are documented in [`docs/STORAGE.md`](STORAGE.md).
 
 ## Releases
 

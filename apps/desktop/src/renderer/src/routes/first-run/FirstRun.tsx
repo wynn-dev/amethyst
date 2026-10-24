@@ -4,6 +4,7 @@ import { CheckCircle2, Coffee, Compass, Download, Plus, UserRound } from 'lucide
 import { Badge, Button, Skeleton, Switch, cn } from '@/ui'
 import { FIRST_RUN_STEPS, useFirstRun, type FirstRunStep } from '@/data/firstRun'
 import { useSettings, useUpdateSettings } from '@/data/settings'
+import { useAppearance, usePatchAppearance } from '@/data/appearance'
 import { useJavaRuntimes } from '@/data/misc'
 import { CRASH_COPY, USAGE_COPY } from '@/data/privacy'
 import type { Account } from '@/data/types'
@@ -190,16 +191,16 @@ function Welcome() {
 }
 
 function AppearanceStep() {
-  const s = useSettings()
-  const update = useUpdateSettings()
+  const a = useAppearance()
+  const patch = usePatchAppearance()
   return (
     <>
       <StepHeader title="Choose a look" description="Changes apply right away. You can change them later in Settings." />
       <div className="flex flex-col items-center gap-7">
-        <ModePicker size="lg" value={s.appearance} onValueChange={(appearance) => update({ appearance })} />
+        <ModePicker size="lg" value={a.theme} onValueChange={(theme) => patch({ theme })} />
         <div className="flex flex-col items-center gap-2">
           <span className="text-small font-semibold text-label-2">Accent colour</span>
-          <AccentPicker value={s.accent} onValueChange={(accent) => update({ accent })} labels />
+          <AccentPicker value={a.accentColor} onValueChange={(accentColor) => patch({ accentColor })} labels />
         </div>
       </div>
     </>

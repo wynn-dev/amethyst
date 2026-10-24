@@ -1771,14 +1771,27 @@ export interface UpdaterService {
   quitAndInstall(): Promise<void>
 }
 
+/**
+ * Native open panels for theme media, served by main (the renderer is sandboxed and never sees
+ * file contents). Pass the chosen path to {@link SettingsService.setBackground}.
+ */
+export interface MediaPickerService {
+  /**
+   * Show the open panel for a background image or video (attached to the focused window).
+   * Resolves `null` when cancelled. The runtime still checks the file's content.
+   */
+  pickBackground(): Promise<{ path: string } | null>
+}
+
 /** Services in the Electron main process (window and OS integration only). */
 export interface MainServices {
   app: AppService
   updater: UpdaterService
+  mediaPicker: MediaPickerService
 }
 
 /** Names routed to main by the preload; everything else goes to the runtime. */
-export const MAIN_SERVICES = ['app', 'updater'] as const satisfies readonly (keyof MainServices)[]
+export const MAIN_SERVICES = ['app', 'updater', 'mediaPicker'] as const satisfies readonly (keyof MainServices)[]
 
 /** Everything the renderer can call (`api.<service>.<method>()`). */
 export type Services = RuntimeServices & MainServices

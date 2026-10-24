@@ -8,11 +8,10 @@ import { useAppInfo } from '@/data/misc'
 import { useSettings, useSettingsStore, useUpdateSettings, type Settings } from '@/data/settings'
 import { CRASH_COPY, USAGE_COPY } from '@/data/privacy'
 import { SettingRow } from './context'
-import { ModePicker, AccentPicker } from './appearance-pickers'
 import { PrivacyDetailsSheet } from './PrivacyDetails'
 import { AmethystMark } from './AmethystMark'
 import { AccountsPane } from './accounts'
-import { AppearancePane } from './appearance'
+import { AppearancePane, AppearanceQuickRows } from './appearance'
 import { GamePane, JavaPane } from './java-game'
 
 const PANES: Record<SettingsPaneId, () => ReactNode> = {
@@ -70,12 +69,7 @@ function GeneralPane() {
   return (
     <Form>
       <FormSection>
-        <SettingRow row="appearance" label="Appearance" stacked>
-          <ModePicker value={s.appearance} onValueChange={(appearance) => update({ appearance })} />
-        </SettingRow>
-        <SettingRow row="accent" label="Accent colour">
-          <AccentPicker value={s.accent} onValueChange={(accent) => update({ accent })} />
-        </SettingRow>
+        <AppearanceQuickRows />
       </FormSection>
 
       <FormSection title="Launching">

@@ -19,7 +19,7 @@ import {
 } from '@/ui'
 import { useInstanceActions, useInstanceFolders, useInstances, useUpdateFolder, useUpdateInstance, versionLabel } from '@/data/instances'
 import type { InstanceFolder, InstanceSummary } from '@/data/types'
-import { useSettings } from '@/data/settings'
+import { useAppearance } from '@/data/appearance'
 import { notYetAvailable, openInstance } from './commands'
 import { SIDEBAR_MAX, SIDEBAR_MIN, useUi } from './ui-store'
 import { BlockIcon } from './visuals'
@@ -43,7 +43,7 @@ export function AppSidebar() {
   const filter = useUi((s) => s.sidebarFilter)
   const setUi = useUi((s) => s.set)
   const width = useUi((s) => s.sidebarWidth)
-  const translucent = useSettings().translucentSidebar
+  const translucent = useAppearance().vibrancy
   const [pinnedOpen, setPinnedOpen] = useState(true)
   const [instancesOpen, setInstancesOpen] = useState(true)
   const pathname = useRouterState({ select: (s) => s.location.pathname })

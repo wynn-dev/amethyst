@@ -1,10 +1,11 @@
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { app, BrowserWindow, protocol } from 'electron'
+import { app, BrowserWindow, dialog, protocol } from 'electron'
 import { ASSET_SCHEME } from '@shared/paths'
 import type { ReportedError } from '@shared/services'
 import { serveAssetRequest } from './asset-protocol'
+import { createMediaPicker } from './media-picker'
 import { installAppMenu } from './menu'
 import { registerMainService, startMainRpc } from './rpc/server'
 import { RuntimeSupervisor, showHiddenWindows } from './runtime'
@@ -33,7 +34,7 @@ process.on('unhandledRejection', (reason) => {
 })
 
 // Local images and videos (icons, backgrounds, skins) are served from the data root only; see asset-path.ts.
-protocol.registerSchemesAsPrivileged([{ scheme: ASSET_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }])
+protocol.registerSchemesAsPrivileged([{ scheme: ASSET_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true } }])
 
 let mainWindow: BrowserWindow | undefined
 
@@ -170,6 +171,14 @@ app.whenReady().then(() => {
       }
     },
   })
+  registerMainService(
+    'mediaPicker',
+    createMediaPicker((options) => {
+      // Attach the panel as a sheet to the window that asked (usually Settings).
+      const win = BrowserWindow.getFocusedWindow()
+      return win ? dialog.showOpenDialog(win, options) : dialog.showOpenDialog(options)
+    }),
+  )
   startMainRpc()
   installAppMenu(() => mainWindow ?? createMainWindow())
   // Window first, runtime in parallel: nothing on the paint path waits for background services.

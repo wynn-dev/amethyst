@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { app, BrowserWindow, nativeTheme, shell, type WebContents } from 'electron'
 import { MAIN_EVENT_CHANNEL } from '@shared/rpc'
 import type { MenuCommandEvent } from '@shared/menu'
+import { writeBackgroundFixture } from './screenshot-fixtures'
 
 /**
  * Window management beyond the main window: the Settings window (B7), routing renderer
@@ -103,7 +104,32 @@ interface Shot {
   settings?: { pane: string }
   /** Extra settle time in ms. */
   wait?: number
+  /** RPC calls made through the main window's bridge before the shot (awaited, in order). */
+  invoke?: RpcStep[]
+  /** JavaScript run in the captured window before settling (e.g. scroll a row into view). */
+  script?: string
+  /** RPC calls made after the shot, to leave the state as it was. */
+  cleanup?: RpcStep[]
 }
+
+/** `[service, method, args]`; the string `BACKGROUND_FIXTURE` in args becomes the generated image's path. */
+type RpcStep = [string, string, unknown[]]
+
+const ACCENT_SHOTS: [string, string][] = [
+  ['amethyst', '#9b5de5'],
+  ['blue', '#007aff'],
+  ['indigo', '#5856d6'],
+  ['pink', '#ff2d55'],
+  ['red', '#ff3b30'],
+  ['orange', '#ff9500'],
+  ['yellow', '#e5b000'],
+  ['green', '#28a745'],
+  ['graphite', '#8e8e93'],
+]
+const resetAppearance: RpcStep[] = [
+  ['settings', 'setBackground', [null]],
+  ['settings', 'patch', [{ appearance: { accentColor: '#9b5de5' } }]],
+]
 
 const firstRun = (step: string, completed = false) =>
   `localStorage.setItem('amethyst:first-run', ${JSON.stringify(JSON.stringify({ state: { completed, step }, version: 1 }))})`
@@ -136,6 +162,23 @@ const SHOTS: Shot[] = [
   { name: 'settings-accounts', hash: '', settings: { pane: 'accounts' } },
   { name: 'settings-appearance', hash: '', settings: { pane: 'appearance' } },
   { name: 'settings-privacy', hash: '', settings: { pane: 'privacy' } },
+  // Skins and appearance. The skin pages are dev-only routes (run the screenshot mode under `electron-vite dev`).
+  { name: 'skins-viewers', hash: '#/dev/skins', wait: 800 },
+  { name: 'skins-editors', hash: '#/dev/skins?view=editors', wait: 1200 },
+  ...ACCENT_SHOTS.map(([name, color]): Shot => ({ name: `appearance-accent-${name}`, hash: '', settings: { pane: 'appearance' }, invoke: [['settings', 'patch', [{ appearance: { accentColor: color } }]]] })),
+  {
+    name: 'appearance-background',
+    hash: '',
+    settings: { pane: 'appearance' },
+    invoke: [
+      ['settings', 'patch', [{ appearance: { accentColor: '#9b5de5' } }]],
+      ['settings', 'setBackground', [{ path: 'BACKGROUND_FIXTURE' }]],
+    ],
+    wait: 300,
+    script: `document.getElementById('row-background')?.scrollIntoView({ block: 'center' })`,
+  },
+  { name: 'home-background', hash: '#/' },
+  { name: 'instance-background', hash: '#/instances/survival/mods', cleanup: resetAppearance },
 ]
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -163,6 +206,16 @@ async function reload(contents: WebContents) {
  */
 export async function runScreenshots(main: BrowserWindow, dir: string, onDone: () => void): Promise<void> {
   await mkdir(dir, { recursive: true })
+  const background = await writeBackgroundFixture(dir)
+  // `AMETHYST_SCREENSHOT_FILTER=<regex>` captures only the matching shots (setup of skipped shots still runs).
+  const filter = process.env.AMETHYST_SCREENSHOT_FILTER ? new RegExp(process.env.AMETHYST_SCREENSHOT_FILTER) : undefined
+  const call = async (steps: RpcStep[] | undefined) => {
+    for (const [service, method, args] of steps ?? []) {
+      const json = JSON.stringify(args).replaceAll('"BACKGROUND_FIXTURE"', JSON.stringify(background))
+      const r = await bounded(contents.executeJavaScript(`window.amethyst.invoke(${JSON.stringify(service)}, ${JSON.stringify(method)}, ${json})`))
+      if (r && !(r as { ok: boolean }).ok) console.warn(`SCREENSHOT RPC ${service}.${method} failed: ${JSON.stringify(r)}`)
+    }
+  }
   const contents = main.webContents
   contents.setBackgroundThrottling(false)
   if (!contents.getURL() || contents.isLoading()) await new Promise<void>((r) => contents.once('did-finish-load', () => r()))
@@ -188,6 +241,11 @@ export async function runScreenshots(main: BrowserWindow, dir: string, onDone: (
   async function captureShot(shot: Shot, theme: 'light' | 'dark') {
     if (shot.setup) await bounded(contents.executeJavaScript(`${shot.setup}; true`))
     if (shot.reload) await reload(contents)
+    await call(shot.invoke)
+    if (filter && !filter.test(shot.name)) {
+      await call(shot.cleanup)
+      return
+    }
     await bounded(contents.executeJavaScript(`${mark}; true`))
     let target = main
     if (shot.settings) {
@@ -206,6 +264,10 @@ export async function runScreenshots(main: BrowserWindow, dir: string, onDone: (
         sendMenuCommand(contents, shot.command)
       }
     }
+    if (shot.script) {
+      await settle(target.webContents)
+      await bounded(target.webContents.executeJavaScript(`${shot.script}; true`))
+    }
     await settle(target.webContents, shot.wait)
     const image = await Promise.race([target.webContents.capturePage(), sleep(10_000).then(() => undefined)])
     if (!image) {
@@ -213,6 +275,7 @@ export async function runScreenshots(main: BrowserWindow, dir: string, onDone: (
       return
     }
     await writeFile(join(dir, `${theme}-${shot.name}.png`), image.toPNG())
+    await call(shot.cleanup)
     // Overlays opened by a command are discarded with a reload before the next shot.
     if (shot.command) await reload(contents)
   }

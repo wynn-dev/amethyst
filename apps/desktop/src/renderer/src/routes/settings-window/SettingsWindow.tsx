@@ -5,7 +5,7 @@ import { SearchField, SourceList, SourceListItem, ToastViewport, Toolbar, Toolba
 import { subscribe } from '@/lib/rpc'
 import { SETTINGS_INDEX, SETTINGS_PANES, type SettingsPaneId } from '@/app/settings-index'
 import { useUi } from '@/app/ui-store'
-import { useSettings } from '@/data/settings'
+import { useAppearance } from '@/data/appearance'
 import { SettingsSearchContext, matchesQuery } from './context'
 
 const AddAccountSheet = lazy(() => import('@/routes/sheets/AddAccountSheet'))
@@ -44,7 +44,7 @@ export function PaneGlyph({ pane, size = 20 }: { pane: SettingsPaneId; size?: nu
 export function SettingsWindow() {
   const { pane } = useParams({ strict: false }) as { pane?: string }
   const { row } = useSearch({ strict: false }) as { row?: string }
-  const translucent = useSettings().translucentSidebar
+  const translucent = useAppearance().vibrancy
   const addAccount = useUi((s) => s.addAccount)
   const [query, setQuery] = useState('')
   const searchRef = useRef<HTMLInputElement>(null)

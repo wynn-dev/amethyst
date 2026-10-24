@@ -63,7 +63,6 @@ export const SETTINGS_INDEX: SettingsRowIndex[] = [
     row: 'translucent',
     title: 'Translucent sidebar',
     keywords: ['vibrancy', 'transparency'],
-    toggle: { get: (s) => s.translucentSidebar, patch: (_, on) => ({ translucentSidebar: on }) },
   },
   { pane: 'appearance', row: 'background', title: 'Background image or video', keywords: ['wallpaper', 'blur', 'dim'] },
   { pane: 'java', row: 'runtimes', title: 'Installed Java runtimes', keywords: ['jdk', 'jre'] },

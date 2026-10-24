@@ -1,0 +1,20 @@
+{
+ "objects": {
+  "icons/minecraft.icns": {
+   "hash": "f00657542252858a721e715a2e888a9226404e35",
+   "size": 374665
+  },
+  "minecraft/sounds/random/click.ogg": {
+   "hash": "ec4f4d122ab7c5d44e48419de0e3de1b0922514d",
+   "size": 9138
+  },
+  "minecraft/lang/de_de.json": {
+   "hash": "73011080cfbb9c118b910c9afd0d9ef7503f6461",
+   "size": 613530
+  },
+  "pack.mcmeta": {
+   "hash": "6cb57c8bf7f43ecb75339be01e23b5be0c83f0c9",
+   "size": 19652
+  }
+ }
+}

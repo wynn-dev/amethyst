@@ -220,7 +220,14 @@ importers:
 
   packages/content: {}
 
-  packages/game: {}
+  packages/game:
+    dependencies:
+      '@amethyst/task':
+        specifier: workspace:*
+        version: link:../task
+      '@amethyst/zip':
+        specifier: workspace:*
+        version: link:../zip
 
   packages/installer: {}
 

@@ -24,3 +24,7 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+      - name: Smoke test (renderer ↔ main ↔ runtime RPC)
+        run: pnpm --filter @amethyst/desktop exec electron .
+        env:
+          AMETHYST_SMOKE: '1'

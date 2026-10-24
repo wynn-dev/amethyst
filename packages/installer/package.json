@@ -10,5 +10,11 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@amethyst/game": "workspace:*",
+    "@amethyst/net": "workspace:*",
+    "@amethyst/task": "workspace:*",
+    "@amethyst/zip": "workspace:*"
   }
 }

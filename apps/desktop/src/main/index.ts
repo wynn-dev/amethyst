@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs'
+import { mkdirSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { app, BrowserWindow, protocol } from 'electron'
@@ -6,6 +6,7 @@ import { ASSET_SCHEME } from '@shared/paths'
 import type { ReportedError } from '@shared/services'
 import { serveAssetRequest } from './asset-protocol'
 import { installAppMenu } from './menu'
+import { registerOsServices } from './os-services'
 import { registerMainService, startMainRpc } from './rpc/server'
 import { RuntimeSupervisor, showHiddenWindows } from './runtime'
 import { Updater } from './updater'
@@ -40,6 +41,14 @@ let mainWindow: BrowserWindow | undefined
 // `AMETHYST_SCREENSHOT=<dir>` (dev only): start from a fresh profile so first run and fixtures are predictable.
 const screenshotDir = isDev ? process.env.AMETHYST_SCREENSHOT : undefined
 if (screenshotDir) app.setPath('userData', join(screenshotDir, '.profile'))
+
+// `AMETHYST_E2E_UI=content` (dev only): drive the content and Discover UI end to end (e2e-content.ts).
+const e2eUi = isDev ? process.env.AMETHYST_E2E_UI : undefined
+const e2eRoot = e2eUi === 'content' ? process.env.AMETHYST_E2E_ROOT || mkdtempSync(join(tmpdir(), 'amethyst-e2e-content-')) : undefined
+if (e2eRoot) {
+  mkdirSync(e2eRoot, { recursive: true })
+  app.setPath('userData', e2eRoot)
+}
 
 function createMainWindow(): BrowserWindow {
   const win = new BrowserWindow({
@@ -138,6 +147,15 @@ function createMainWindow(): BrowserWindow {
     })
   }
 
+  if (e2eRoot) {
+    void import('./e2e-content').then(({ runContentE2E }) =>
+      runContentE2E(win, e2eRoot, (ok) => {
+        runtime.stop()
+        app.exit(ok ? 0 : 1)
+      }),
+    )
+  }
+
   mainWindow = win
   win.on('closed', () => {
     if (mainWindow === win) mainWindow = undefined
@@ -170,6 +188,7 @@ app.whenReady().then(() => {
       }
     },
   })
+  registerOsServices()
   startMainRpc()
   installAppMenu(() => mainWindow ?? createMainWindow())
   // Window first, runtime in parallel: nothing on the paint path waits for background services.

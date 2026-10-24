@@ -1,6 +1,8 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { fixture, queryClient } from './query'
-import { fixtureFolders, fixtureInstanceDetail, fixtureInstances } from './fixtures'
+import type { InstanceDetail as RuntimeInstanceDetail, InstanceSummary as RuntimeInstanceRow } from '@shared/services'
+import { api } from '@/lib/rpc'
+import { fixtureFolders } from './fixtures'
 import type { InstanceDetail, InstanceFolder, InstanceSummary } from './types'
 import { toast } from '@/ui/toast-store'
 
@@ -17,7 +19,8 @@ export const instanceKeys = {
 export function useInstances() {
   return useQuery({
     queryKey: instanceKeys.list,
-    queryFn: () => fixture(() => structuredClone(fixtureInstances), () => []),
+    // Interim wiring (content agent) so content tabs open for real instances; the sidebar wiring replaces it.
+    queryFn: async () => (await api.instances.list()).map(toSummary),
   })
 }
 
@@ -39,12 +42,40 @@ export function useInstanceFolders() {
 export function useInstance(id: string) {
   return useQuery({
     queryKey: instanceKeys.detail(id),
-    queryFn: () =>
-      fixture<InstanceDetail | null>(
-        () => fixtureInstanceDetail(id) ?? null,
-        () => null,
-      ),
+    queryFn: async (): Promise<InstanceDetail | null> => {
+      try {
+        const d = await api.instances.get(id)
+        return { ...toSummary(d), path: d.path, notes: d.description, diskBytes: 0, counts: { modsEnabled: 0, modsTotal: 0, resourcePacks: 0, shaders: 0, worlds: 0 }, issues: [], screenshots: [] }
+      } catch (e) {
+        if ((e as { code?: string }).code === 'ENOT_FOUND') return null
+        throw e
+      }
+    },
   })
+}
+
+/** Runtime instance row → sidebar view model (interim, see useInstances). */
+function toSummary(r: RuntimeInstanceRow & { upstream?: RuntimeInstanceDetail['upstream'] }): InstanceSummary {
+  let hue = 0
+  for (const ch of r.id) hue = (hue * 31 + ch.charCodeAt(0)) % 360
+  const state: InstanceSummary['state'] =
+    r.activity === 'running' ? { kind: 'running', pid: 0, since: r.lastPlayedAt } : r.activity === 'launching' ? { kind: 'launching' } : r.activity === 'installing' ? { kind: 'installing', progress: 0, taskId: '' } : { kind: 'idle' }
+  return {
+    id: r.id,
+    name: r.name,
+    ...(r.iconUrl ? { iconUrl: r.iconUrl } : {}),
+    iconHue: hue,
+    minecraft: r.minecraft,
+    loader: r.loader ? { kind: r.loader.kind, version: r.loader.version } : { kind: 'vanilla' },
+    pinned: false,
+    state,
+    ...(r.lastPlayedAt ? { lastPlayedAt: r.lastPlayedAt } : {}),
+    playTimeMs: r.playTimeMs,
+    createdAt: r.createdAt,
+    ...(r.upstream
+      ? { upstream: { source: r.upstream.kind, projectId: String(r.upstream.projectId), projectName: r.name, version: 'versionId' in r.upstream ? r.upstream.versionId : String(r.upstream.fileId) } }
+      : {}),
+  }
 }
 
 function patchInstance(id: string, patch: Partial<InstanceSummary>) {

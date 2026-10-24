@@ -5,6 +5,7 @@ import { QueryError } from '@/app/RouteStates'
 import { notYetAvailable, openInstance, runCommand } from '@/app/commands'
 import { ArtTile, formatBytes, formatDate, formatDuration, formatRelative } from '@/app/visuals'
 import { useInstance } from '@/data/instances'
+import { openModpackUpdate } from '@/data/modpacks'
 import type { InstanceDetail, InstanceIssue } from '@/data/types'
 import { useInstanceId } from './parts'
 
@@ -123,7 +124,7 @@ function UpstreamCard({ inst }: { inst: InstanceDetail }) {
     <Card
       title="Modpack"
       action={
-        <Button variant="borderless" size="sm" onClick={() => notYetAvailable('Version history')}>
+        <Button variant="borderless" size="sm" onClick={() => openModpackUpdate(inst.id, inst.name)}>
           Version History…
         </Button>
       }
@@ -137,7 +138,7 @@ function UpstreamCard({ inst }: { inst: InstanceDetail }) {
             {hasUpdate ? <span className="text-accent">· {up.latestVersion} available</span> : <span>· Up to date</span>}
           </p>
         </div>
-        <Button variant={hasUpdate ? 'primary' : 'push'} onClick={() => notYetAvailable('Modpack update')}>
+        <Button variant={hasUpdate ? 'primary' : 'push'} onClick={() => openModpackUpdate(inst.id, inst.name)}>
           {hasUpdate ? 'Update…' : 'Check for Updates'}
         </Button>
       </div>

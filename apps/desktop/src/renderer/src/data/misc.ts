@@ -9,11 +9,9 @@ import {
   fixtureJava,
   fixtureLogFiles,
   fixtureLogLines,
-  fixtureProject,
-  fixtureProjects,
   fixtureTasks,
 } from './fixtures'
-import type { CrashSummary, LoaderKind, LoaderVersion, ProjectType } from './types'
+import type { CrashSummary, LoaderKind, LoaderVersion } from './types'
 
 /**
  * Log and crash files for an instance, newest first. "Live" is present only while running.
@@ -119,34 +117,6 @@ export function useLoaderVersions(kind: LoaderKind, minecraft: string | undefine
         () => [],
       ),
   })
-}
-
-/**
- * Discover search. `query` empty = landing (featured/trending).
- * TODO(wire): replace with api.marketplace.search({ type, query, source, sort, gameVersion, loader, categories, offset })
- * → { hits: ProjectHit[]; total: number; failedSources: Source[] } (paged, infinite scroll).
- */
-export function useProjectSearch(type: ProjectType, query: string, source: 'all' | 'modrinth' | 'curseforge') {
-  return useQuery({
-    queryKey: ['discover', type, query, source],
-    queryFn: () =>
-      fixture(
-        () => {
-          const all = fixtureProjects(type, query)
-          return source === 'all' ? all : all.filter((p) => p.source === source)
-        },
-        () => [],
-        query ? 180 : 0,
-      ),
-  })
-}
-
-/**
- * One project page.
- * TODO(wire): replace with api.marketplace.getProject(source, id) → ProjectDetail.
- */
-export function useProject(id: string) {
-  return useQuery({ queryKey: ['project', id], queryFn: () => fixture(() => fixtureProject(id) ?? null, () => null) })
 }
 
 /** The launcher's own version info. Already wired: MainServices.app exists today. */

@@ -308,6 +308,108 @@ describe('ResourceManager', () => {
 
     await m.deleteBackup(inst.id, backup.id)
     expect(await m.listBackups(inst.id)).toEqual([])
+
+    const out = path.join(root, 'exports', 'Castle.zip')
+    await mkdir(path.dirname(out), { recursive: true })
+    const exported = await m.exportWorld(inst.id, 'my world', out)
+    expect(exported.path).toBe(out)
+    expect(exported.size).toBeGreaterThan(0)
+    await expect(m.exportWorld(inst.id, 'my world', path.join(inst.path, 'saves', 'My World', 'x.zip'))).rejects.toMatchObject({ code: 'EINVALID_ARGUMENT' })
+    await expect(m.exportWorld(inst.id, 'ghost', out)).rejects.toMatchObject({ code: 'ENOT_FOUND' })
+    m.dispose()
+  })
+
+  it('sets deleted files aside for Undo, then sends them to the Trash', async () => {
+    const inst = await instances.create({ name: 'Undo', runtime: { minecraft: '1.21.1', fabric: '0.16.5' } })
+    await fabricJar(path.join(inst.path, 'mods', 'a.jar'), 'a')
+    await fabricJar(path.join(inst.path, 'mods', 'b.jar.disabled'), 'b')
+    const m = new ResourceManager({
+      layout,
+      emit,
+      host: { trash: async (p) => void trashed.push(p) },
+      instances,
+      db,
+      pool,
+      tasks,
+      settings: { value: defaultSettings() },
+      undoGraceMs: 60,
+    })
+    await m.refresh(inst.id, 'mods')
+    const first = await m.delete(inst.id, 'mods', ['a.jar', 'b.jar'], { undoable: true })
+    expect(first.done).toEqual(['a.jar', 'b.jar'])
+    expect(first.undoToken).toMatch(/^[0-9a-f]{16}$/)
+    expect((await m.list(inst.id, 'mods')).total).toBe(0)
+    expect(trashed).toEqual([])
+
+    // Undo restores both files under their names, the disabled one still disabled.
+    expect(await m.undoDelete(inst.id, first.undoToken ?? '')).toEqual({ done: ['a.jar', 'b.jar'], failed: [] })
+    expect((await readdir(path.join(inst.path, 'mods'))).toSorted()).toEqual(['a.jar', 'b.jar.disabled'])
+    expect((await m.list(inst.id, 'mods')).items.map((r) => [r.id, r.enabled])).toEqual([
+      ['a.jar', true],
+      ['b.jar', false],
+    ])
+    await expect(m.undoDelete(inst.id, first.undoToken ?? '')).rejects.toMatchObject({ code: 'ENOT_FOUND' })
+
+    // Without Undo, the window ends and the files go to the Trash under their own names.
+    const second = await m.delete(inst.id, 'mods', ['a.jar'], { undoable: true })
+    await new Promise((r) => setTimeout(r, 150))
+    expect(trashed.map((p) => path.basename(p))).toEqual(['a.jar'])
+    await expect(m.undoDelete(inst.id, second.undoToken ?? '')).rejects.toMatchObject({ code: 'ENOT_FOUND' })
+    expect(await exists(path.join(inst.path, '.amethyst', 'trash', second.undoToken ?? ''))).toBe(false)
+
+    // A plain delete trashes at once and offers nothing to undo.
+    expect(await m.delete(inst.id, 'mods', ['b.jar'])).toMatchObject({ done: ['b.jar'], undoToken: null })
+    m.dispose()
+  })
+
+  it('orders resource packs through options.txt and pages with filters', async () => {
+    const inst = await instances.create({ name: 'Packs', runtime: { minecraft: '1.21.1' } })
+    const packs = path.join(inst.path, 'resourcepacks')
+    for (const name of ['A.zip', 'B.zip', 'C.zip']) await jar(path.join(packs, name), { 'pack.mcmeta': JSON.stringify({ pack: { pack_format: 34, description: name } }) })
+    await writeFile(path.join(inst.path, 'options.txt'), 'resourcePacks:["vanilla","file/A.zip"]\n')
+    const m = manager()
+    await m.refresh(inst.id, 'resourcepacks')
+    await m.setPackOrder(inst.id, ['c.zip', 'a.zip'])
+    expect(await readFile(path.join(inst.path, 'options.txt'), 'utf8')).toBe('resourcePacks:["vanilla","file/A.zip","file/C.zip"]\n')
+    const rows = (await m.list(inst.id, 'resourcepacks')).items
+    expect(rows.map((r) => [r.id, r.enabled, r.order ?? null, r.packFormats?.min ?? null])).toEqual([
+      ['a.zip', true, 1, 34],
+      ['b.zip', false, null, 34],
+      ['c.zip', true, 0, 34],
+    ])
+    await expect(m.setPackOrder(inst.id, ['ghost.zip'])).rejects.toMatchObject({ code: 'ENOT_FOUND' })
+
+    expect((await m.list(inst.id, 'resourcepacks', { direction: 'desc' })).items.map((r) => r.id)).toEqual(['c.zip', 'b.zip', 'a.zip'])
+    expect((await m.list(inst.id, 'resourcepacks', { ids: ['b.zip', 'c.zip'] })).total).toBe(2)
+    expect((await m.list(inst.id, 'resourcepacks', { sources: ['modrinth'] })).total).toBe(0)
+    expect((await m.list(inst.id, 'resourcepacks', { sources: ['local'], offset: 1, limit: 1 })).items.map((r) => r.id)).toEqual(['b.zip'])
+    m.dispose()
+  })
+
+  it('finds duplicate, missing and incompatible mods', async () => {
+    const inst = await instances.create({ name: 'Problems', runtime: { minecraft: '1.21.1', fabric: '0.16.5' } })
+    const mods = path.join(inst.path, 'mods')
+    const fabric = (file: string, json: object) => jar(path.join(mods, file), { 'fabric.mod.json': JSON.stringify({ schemaVersion: 1, version: '1.0.0', ...json }) })
+    await fabric('lib.jar', { id: 'lib' })
+    await fabric('lib-old.jar', { id: 'lib', version: '0.9.0' })
+    await fabric('needs.jar', { id: 'needs', depends: { lib: '*', minecraft: '1.21.x', fabricloader: '>=0.15', 'fabric-api': '*', ghost: '*' } })
+    await fabric('api-user.jar', { id: 'apiuser', depends: { 'fabric-api-base': '*' } })
+    await fabric('fabric-api.jar', { id: 'fabric-api' })
+    await fabric('enemy.jar', { id: 'enemy', breaks: { needs: '*' } })
+    await writeFile(path.join(mods, 'damaged.jar'), 'not a zip')
+    await jar(path.join(mods, 'forge-only.jar'), { 'META-INF/mods.toml': 'modLoader="javafml"\nloaderVersion="[47,)"\n[[mods]]\nmodId="forgeonly"\nversion="1.0"\n' })
+    const m = manager()
+    await m.refresh(inst.id, 'mods')
+    const a = await m.analyze(inst.id)
+    expect(a.duplicates).toEqual([{ modId: 'lib', ids: ['lib-old.jar', 'lib.jar'] }])
+    expect(a.missing).toEqual([{ id: 'needs.jar', modId: 'ghost' }])
+    expect(a.incompatible.map((i) => [i.id, i.reason, i.with ?? null])).toEqual([
+      ['enemy.jar', 'conflict', 'needs.jar'],
+      ['forge-only.jar', 'loader', null],
+    ])
+    expect(a.dependents['lib.jar']).toEqual(['needs.jar'])
+    expect(a.dependents['fabric-api.jar']).toEqual(['needs.jar'])
+    expect(a.broken.map((b) => b.id)).toEqual(['damaged.jar'])
     m.dispose()
   })
 })

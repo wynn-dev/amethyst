@@ -601,6 +601,12 @@ export interface ResourceRow {
   problem: ResourceProblem | null
   /** True while the file is listed but not yet hashed and parsed (first scan of a cold index). */
   pending: boolean
+  /** Mods: where the mod must be installed, once parsed. */
+  side?: 'client' | 'server' | 'both'
+  /** Resource packs: the supported pack formats (`pack.mcmeta`), once parsed. */
+  packFormats?: { min: number; max: number }
+  /** Enabled resource packs: position in the load order, 0 = top (highest priority). */
+  order?: number
   /** Worlds only. */
   world?: {
     /** `LevelName` from `level.dat` (separate from the folder name). */
@@ -626,8 +632,14 @@ export interface ResourceQuery {
   search?: string
   /** Default `name`. */
   sort?: 'name' | 'fileName' | 'modified' | 'size'
+  /** Default `asc` for `name`/`fileName`, `desc` (newest, largest first) for `modified`/`size`. */
+  direction?: 'asc' | 'desc'
   /** Only enabled (`true`) or disabled (`false`) rows. */
   enabled?: boolean
+  /** Only these row ids (e.g. the rows with an update or a problem). */
+  ids?: string[]
+  /** Only rows attributed to these platforms; `local` means no attribution. */
+  sources?: (MarketPlatform | 'local')[]
 }
 
 /** A page of rows. */
@@ -690,6 +702,30 @@ export interface BulkResult {
   failed: { id: string; code: string; message: string }[]
 }
 
+/** What {@link ResourcesService.delete} did. */
+export interface DeleteResult extends BulkResult {
+  /**
+   * With `undoable`, the files wait (inside the instance's `.amethyst/trash/`) for about 30 s
+   * before they go to the macOS Trash: pass this to {@link ResourcesService.undoDelete} to put
+   * them back. `null` when nothing can be undone.
+   */
+  undoToken: string | null
+}
+
+/** Load-time problems among an instance's enabled mods, for the Problems sheet. */
+export interface ModAnalysis {
+  /** Enabled mods that share a mod id (or are identical files): keep one. */
+  duplicates: { modId: string; ids: string[] }[]
+  /** Required dependencies that no enabled mod provides. */
+  missing: { id: string; modId: string; range?: string }[]
+  /** Mods for another loader, or declaring a conflict with another enabled mod (`with`). */
+  incompatible: { id: string; reason: 'loader' | 'conflict'; message: string; with?: string }[]
+  /** Row id → ids of the enabled mods that require it. */
+  dependents: Record<string, string[]>
+  /** Files that are damaged or not mods at all (enabled or not). */
+  broken: { id: string; message: string }[]
+}
+
 /** One world backup. */
 export interface BackupRow {
   /** `<world folder>/<stamp>`; pass it back to restore or delete. */
@@ -738,8 +774,23 @@ export interface ResourcesService {
    * be). Worlds cannot be disabled.
    */
   setEnabled(instanceId: string, kind: ResourceKind, ids: string[], enabled: boolean): Promise<BulkResult>
-  /** Move files (or world folders) to the macOS Trash. */
-  delete(instanceId: string, kind: ResourceKind, ids: string[]): Promise<BulkResult>
+  /**
+   * Move files (or world folders) to the macOS Trash. With `undoable`, they are first set aside
+   * for about 30 s so {@link undoDelete} can restore them (then they go to the Trash).
+   */
+  delete(instanceId: string, kind: ResourceKind, ids: string[], options?: { undoable?: boolean }): Promise<DeleteResult>
+  /** Put back the files of an undoable {@link delete}. Rejects with `ENOT_FOUND` once they went to the Trash. */
+  undoDelete(instanceId: string, undoToken: string): Promise<BulkResult>
+  /**
+   * Set the enabled resource packs and their load order (`ids` top first: the first one wins).
+   * Packs not listed are disabled; built-in and mod packs in `options.txt` are kept. Rejects with
+   * `EBUSY` while the game runs.
+   */
+  setPackOrder(instanceId: string, ids: string[]): Promise<void>
+  /** Duplicate, missing-dependency and incompatibility problems among the enabled mods. */
+  analyze(instanceId: string): Promise<ModAnalysis>
+  /** Zip a world to `output` (an absolute path from a save panel). Runs as a task. */
+  exportWorld(instanceId: string, worldId: string, output: string): Promise<{ path: string; size: number }>
   /**
    * Add local files: jars and packs are stored once in the content store and cloned into the
    * folder; worlds may be zips or folders. Name clashes get ` (2)`; identical files are skipped.
@@ -1660,6 +1711,19 @@ export interface ModpackExportInput {
   exclude?: string[]
 }
 
+/** A top-level entry of an instance folder, for the export include picker. */
+export interface ExportFileRow {
+  /** Relative path; folders end with `/`, as {@link ModpackExportInput.include} expects. */
+  path: string
+  isDirectory: boolean
+  /** Bytes (folders: the sum of their files, capped by a scan budget). */
+  size: number
+  /** Files (folders: how many inside). */
+  files: number
+  /** Included unless the user changes it (mods, packs, config, options.txt…). */
+  defaultSelected: boolean
+}
+
 /** What an export wrote. */
 export interface ModpackExportResult {
   path: string
@@ -1711,6 +1775,8 @@ export interface ModpackService {
   rollback(instanceId: string, backupId: string): Promise<void>
   /** Write the instance as a `.mrpack` or CurseForge zip (a `modpack.export` task). */
   export(instanceId: string, input: ModpackExportInput): Promise<ModpackExportResult>
+  /** The instance folder's top-level entries with sizes, for the export include picker. */
+  listExportFiles(instanceId: string): Promise<ExportFileRow[]>
 }
 
 // =============================================================================================
@@ -1771,14 +1837,37 @@ export interface UpdaterService {
   quitAndInstall(): Promise<void>
 }
 
+/** A file type filter for open and save panels. */
+export interface FileFilter {
+  name: string
+  /** Extensions without the dot, e.g. `['jar']`. */
+  extensions: string[]
+}
+
+/** Native open and save panels (main). Paths are absolute; a cancelled panel returns `[]` / `null`. */
+export interface DialogService {
+  openFiles(options?: { title?: string; buttonLabel?: string; filters?: FileFilter[]; multiple?: boolean; directories?: boolean }): Promise<string[]>
+  saveFile(options?: { title?: string; defaultName?: string; filters?: FileFilter[] }): Promise<string | null>
+}
+
+/** Finder and browser hand-offs (main). */
+export interface ShellService {
+  /** Open an `https:` URL in the default browser. Other schemes reject with `EINVALID_ARGUMENT`. */
+  openExternal(url: string): Promise<void>
+  /** Reveal a file or folder in Finder. Rejects with `ENOT_FOUND` when it does not exist. */
+  showItemInFolder(path: string): Promise<void>
+}
+
 /** Services in the Electron main process (window and OS integration only). */
 export interface MainServices {
   app: AppService
   updater: UpdaterService
+  dialog: DialogService
+  shell: ShellService
 }
 
 /** Names routed to main by the preload; everything else goes to the runtime. */
-export const MAIN_SERVICES = ['app', 'updater'] as const satisfies readonly (keyof MainServices)[]
+export const MAIN_SERVICES = ['app', 'updater', 'dialog', 'shell'] as const satisfies readonly (keyof MainServices)[]
 
 /** Everything the renderer can call (`api.<service>.<method>()`). */
 export type Services = RuntimeServices & MainServices

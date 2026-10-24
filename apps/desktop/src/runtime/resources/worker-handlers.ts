@@ -12,6 +12,7 @@ import path from 'node:path'
 import {
   ContentStore,
   createScanWorkerHandlers,
+  exportWorld,
   importWorld,
   importWorldFolder,
   listSaves,
@@ -72,6 +73,8 @@ export interface ResourceWorkerHandlers {
   /** Hash a file into the content store. */
   ingest(args: { storeRoot: string; source: string; expectedSha1?: string }, signal?: AbortSignal): Promise<IngestResult>
   importWorld(args: { source: string; savesDir: string }, signal?: AbortSignal): Promise<ImportedWorld>
+  /** Zip a world folder to `output`. */
+  exportWorld(args: { source: string; output: string }, signal?: AbortSignal): Promise<{ path: string; size: number }>
 }
 
 const ICON_MAX_BYTES = 2 * 1024 * 1024
@@ -180,6 +183,11 @@ export function createResourceWorkerHandlers(): ResourceWorkerHandlers & Record<
     async importWorld({ source, savesDir }, signal) {
       const st = await stat(source)
       return st.isDirectory() ? importWorldFolder(source, savesDir, { signal }) : importWorld(source, savesDir, { signal })
+    },
+
+    async exportWorld({ source, output }, signal) {
+      const result = await exportWorld(source, output, { signal })
+      return { path: result.zipPath, size: result.size }
     },
   }
 }

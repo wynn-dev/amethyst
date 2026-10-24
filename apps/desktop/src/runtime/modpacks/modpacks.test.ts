@@ -9,7 +9,7 @@ import { dataLayout, type DataLayout } from '../layout'
 import { InstanceManager } from '../instances/service'
 import { defaultSettings } from '../settings/schema'
 import { TaskRegistry } from '../tasks/registry'
-import { ModpackManager, type ModpackApi } from './service'
+import { ModpackManager, sourceRows, type ModpackApi } from './service'
 
 let root: string
 let layout: DataLayout
@@ -176,5 +176,47 @@ describe('ModpackManager import', () => {
     const resumed = await manager.import({ source: { path: archive }, instanceId: id })
     expect(resumed.instanceId).toBe(id)
     expect(instances.list()).toHaveLength(1)
+  })
+})
+
+describe('ModpackManager export files', () => {
+  it('lists the top-level entries with sizes and the default selection', async () => {
+    const { manager, instances } = await setup()
+    const inst = await instances.create({ name: 'Exportable', runtime: { minecraft: '1.21.1', fabric: '0.16.5' } })
+    await mkdir(path.join(inst.path, 'mods'), { recursive: true })
+    await writeFile(path.join(inst.path, 'mods', 'a.jar'), 'aaaa')
+    await mkdir(path.join(inst.path, 'config', 'deep'), { recursive: true })
+    await writeFile(path.join(inst.path, 'config', 'deep', 'x.toml'), 'xx')
+    await writeFile(path.join(inst.path, 'options.txt'), 'fov:0\n')
+    await mkdir(path.join(inst.path, 'logs'), { recursive: true })
+    await writeFile(path.join(inst.path, 'logs', 'latest.log'), 'log')
+    const rows = await manager.listExportFiles(inst.id)
+    expect(rows.map((r) => [r.path, r.size, r.files, r.defaultSelected])).toEqual([
+      ['config/', 2, 1, true],
+      ['logs/', 3, 1, false],
+      ['mods/', 4, 1, true],
+      ['options.txt', 6, 1, true],
+      ['resourcepacks/', 0, 0, true],
+      ['shaderpacks/', 0, 0, true],
+    ])
+    manager.dispose()
+  })
+})
+
+describe('sourceRows', () => {
+  it('records Modrinth and CurseForge files by hash, and nothing else', () => {
+    const rows = sourceRows(
+      [
+        { hashes: { sha1: 'AA' }, origin: { kind: 'modrinth', projectId: 'P', versionId: 'V' } },
+        { hashes: { sha1: 'bb' }, origin: { kind: 'curseforge', projectId: 7, fileId: 42 } },
+        { hashes: { sha1: 'cc' }, origin: { kind: 'url' } },
+        { hashes: {}, origin: { kind: 'modrinth', projectId: 'P', versionId: 'V' } },
+      ],
+      5,
+    )
+    expect(rows).toEqual([
+      { sha1: 'aa', platform: 'modrinth', projectId: 'P', versionId: 'V', confidence: 'manifest', resolvedAt: 5 },
+      { sha1: 'bb', platform: 'curseforge', projectId: '7', versionId: '42', confidence: 'manifest', resolvedAt: 5 },
+    ])
   })
 })

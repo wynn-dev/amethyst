@@ -269,6 +269,7 @@ const modpacks = once(async () => {
     market: marketImpl,
     http: httpClient,
     telemetry: telemetryHooks,
+    ...(index.ok ? { db } : {}),
   })
   return modpackManager
 })
@@ -354,6 +355,10 @@ registerService(
       restoreBackup: true,
       deleteBackup: true,
       pruneBackups: true,
+      undoDelete: true,
+      setPackOrder: true,
+      analyze: true,
+      exportWorld: true,
     },
     async () => {
       const [{ resourcesService }, manager] = await Promise.all([import('./resources/service'), resources()])
@@ -440,6 +445,7 @@ registerService(
       applyUpdate: true,
       rollback: true,
       export: true,
+      listExportFiles: true,
     },
     async () => {
       const [{ modpackService }, manager] = await Promise.all([import('./modpacks/service'), modpacks()])

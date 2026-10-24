@@ -10,6 +10,7 @@ import { useUi } from '@/app/ui-store'
 import { BlockIcon } from '@/app/visuals'
 import { instanceActions, useInstance, useInstances, versionLabel } from '@/data/instances'
 import { useWorlds } from '@/data/content'
+import { openModpackExport } from '@/data/modpacks'
 import { useAccounts } from '@/data/misc'
 import type { InstanceSummary } from '@/data/types'
 import { useInstanceId } from './parts'
@@ -102,7 +103,7 @@ export function InstanceLayout() {
 function OverflowMenu({ inst }: { inst: InstanceSummary }) {
   const set = useUi((s) => s.set)
   const items: MenuEntry[] = [
-    { label: 'Export Modpack…', shortcut: 'shift+mod+e', onSelect: () => notYetAvailable('Export Modpack') },
+    { label: 'Export Modpack…', shortcut: 'shift+mod+e', onSelect: () => openModpackExport(inst.id, inst.name) },
     { label: 'Duplicate…', shortcut: 'mod+d', onSelect: () => set({ duplicate: { id: inst.id, name: inst.name } }) },
     { label: 'Open Logs', shortcut: 'mod+l', onSelect: () => openInstance(inst.id, 'logs') },
     { kind: 'separator' },

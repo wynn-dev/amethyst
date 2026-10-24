@@ -51,6 +51,8 @@ export interface Bridge {
   invoke(service: string, method: string, args: unknown[]): Promise<RpcResult<unknown>>
   on(listener: (event: string, payload: unknown) => void): () => void
   platform: string
+  /** The absolute path of a dropped or picked `File` (Electron `webUtils.getPathForFile`), `''` when it has none. */
+  pathForFile(file: File): string
 }
 
 export function toRpcError(e: unknown): RpcError {

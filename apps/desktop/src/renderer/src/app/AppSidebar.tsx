@@ -21,6 +21,7 @@ import { useInstanceActions, useInstanceFolders, useInstances, useUpdateFolder, 
 import type { InstanceFolder, InstanceSummary } from '@/data/types'
 import { useSettings } from '@/data/settings'
 import { notYetAvailable, openInstance } from './commands'
+import { openModpackExport } from '@/data/modpacks'
 import { SIDEBAR_MAX, SIDEBAR_MIN, useUi } from './ui-store'
 import { BlockIcon } from './visuals'
 import { AccountChip } from './AccountChip'
@@ -214,7 +215,7 @@ function InstanceRow({ inst, indent, selected, folders }: { inst: InstanceSummar
         { label: 'New Folder…', onSelect: () => notYetAvailable('New Folder') },
       ],
     },
-    { label: 'Export Modpack…', onSelect: () => notYetAvailable('Export Modpack') },
+    { label: 'Export Modpack…', onSelect: () => openModpackExport(inst.id, inst.name) },
     { kind: 'separator' },
     { label: 'Move to Trash…', destructive: true, onSelect: () => setUi({ trash: { id: inst.id, name: inst.name } }) },
   ]

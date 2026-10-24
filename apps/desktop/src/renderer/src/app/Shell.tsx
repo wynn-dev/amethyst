@@ -5,6 +5,7 @@ import { ToastViewport, cn } from '@/ui'
 import { AppSidebar } from './AppSidebar'
 import { BackgroundLayer } from './BackgroundLayer'
 import { GlobalSurfaces } from './GlobalSurfaces'
+import { ModpackSurfaces } from './ModpackSurfaces'
 import { RouteError } from './RouteStates'
 import { runCommand } from './commands'
 import { useUi } from './ui-store'
@@ -34,6 +35,7 @@ export function Shell() {
         <ToastViewport />
       </main>
       <GlobalSurfaces />
+      <ModpackSurfaces />
     </div>
   )
 }

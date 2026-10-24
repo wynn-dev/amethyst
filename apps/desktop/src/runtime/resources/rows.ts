@@ -29,7 +29,10 @@ export interface RowExtras {
 export function entryRow(id: string, entry: ContentEntry, extras: RowExtras = {}): ResourceRow {
   const mod = entry.mod
   const description = mod?.description ?? entry.resourcePack?.descriptionPlain ?? ''
+  const formats = entry.resourcePack?.formats
   return {
+    ...(mod ? { side: mod.environment } : {}),
+    ...(formats ? { packFormats: { min: formats.min.major, max: formats.max.major } } : {}),
     id,
     kind: entry.kind,
     fileName: entry.fileName,
@@ -137,4 +140,15 @@ export function entryDetail(row: ResourceRow, entry: ContentEntry | undefined, s
 /** Whether two rows differ (cheap structural comparison of small objects). */
 export function rowChanged(a: ResourceRow | undefined, b: ResourceRow): boolean {
   return a === undefined || JSON.stringify(a) !== JSON.stringify(b)
+}
+
+/**
+ * Load-order positions of enabled resource packs from the `options.txt` list (bottom to top
+ * priority): 0 is the top. Keyed by the file name on disk.
+ */
+export function packOrder(enabledList: readonly string[]): Map<string, number> {
+  const files = enabledList.filter((id) => id.startsWith('file/')).map((id) => id.slice('file/'.length))
+  const out = new Map<string, number>()
+  files.forEach((name, i) => out.set(name, files.length - 1 - i))
+  return out
 }

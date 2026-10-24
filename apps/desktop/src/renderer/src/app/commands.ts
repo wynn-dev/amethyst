@@ -2,6 +2,9 @@ import type { MenuCommand } from '@shared/menu'
 import { INSTANCE_TABS, type InstanceTab } from '@shared/menu'
 import { queryClient } from '@/data/query'
 import { instanceActions, instanceKeys } from '@/data/instances'
+import { addResourceFiles } from '@/data/content'
+import { openModpackExport, openModpackImport, useModpackUi } from '@/data/modpacks'
+import { pickFiles } from '@/lib/files'
 import type { InstanceSummary } from '@/data/types'
 import { toast } from '@/ui/toast-store'
 import { router } from './router'
@@ -136,19 +139,26 @@ export function runCommand(command: MenuCommand, arg?: string): void {
     case 'file.newFolder':
       return notYetAvailable('New Folder')
     case 'file.importModpack':
-      return notYetAvailable('Import Modpack')
+      return void pickFiles('modpack', { title: 'Import Modpack' }).then(([path]) => path && openModpackImport({ path }))
     case 'file.addExistingFolder':
       return notYetAvailable('Add Existing Folder')
     case 'file.importUrl':
-      return notYetAvailable('Import from URL')
+      return useModpackUi.getState().set({ importUrl: true })
     case 'file.exportModpack':
-      return notYetAvailable('Export Modpack')
+      return needInstance((i) => openModpackExport(i.id, i.name))
     case 'file.showInFinder':
       return notYetAvailable('Show in Finder')
     case 'file.openDataFolder':
       return notYetAvailable('Open Data Folder')
     case 'instance.addFiles':
-      return notYetAvailable('Add Files')
+      return needInstance((i) => {
+        const tab = currentTab()
+        const kind = tab === 'resource-packs' ? 'resourcepacks' : tab === 'shaders' ? 'shaderpacks' : tab === 'worlds' ? 'saves' : 'mods'
+        if (kind === 'mods' && tab !== 'mods') openInstance(i.id, 'mods')
+        void pickFiles(kind).then(async (paths) => {
+          if (paths.length > 0) await addResourceFiles(i.id, kind, paths)
+        })
+      })
     case 'instance.openLogWindow':
       return notYetAvailable('The log window')
     case 'instance.rename':

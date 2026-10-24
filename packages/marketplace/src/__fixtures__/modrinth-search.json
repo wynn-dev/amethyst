@@ -1,0 +1,58 @@
+{
+  "hits": [
+    {
+      "project_id": "AANobbMI",
+      "project_type": "mod",
+      "slug": "sodium",
+      "title": "Sodium",
+      "description": "Modern rendering engine",
+      "author": "jellysquid3",
+      "categories": ["fabric", "optimization", "quilt"],
+      "display_categories": ["fabric", "optimization", "quilt"],
+      "versions": ["1.20.1", "1.20.4"],
+      "downloads": 50000000,
+      "follows": 20000,
+      "icon_url": "https://cdn.modrinth.com/data/AANobbMI/icon.png",
+      "date_created": "2021-01-03T00:00:00Z",
+      "date_modified": "2024-05-01T00:00:00Z",
+      "latest_version": "abcdEFGH",
+      "license": "PolyForm-Shield-1.0.0",
+      "client_side": "required",
+      "server_side": "unsupported"
+    },
+    {
+      "project_id": "P7dR8mSH",
+      "project_type": "mod",
+      "slug": "fabric-api",
+      "title": "Fabric API",
+      "description": "Core API",
+      "author": "modmuss50",
+      "categories": ["fabric", "library"],
+      "versions": ["1.20.1"],
+      "downloads": 90000000,
+      "follows": 15000,
+      "icon_url": null,
+      "date_created": "2019-01-01T00:00:00Z",
+      "date_modified": "2024-06-01T00:00:00Z",
+      "client_side": "optional",
+      "server_side": "optional"
+    },
+    {
+      "project_id": "DPack001",
+      "project_type": "mod",
+      "slug": "terralith-dp",
+      "title": "Terralith DP",
+      "description": "Datapack",
+      "author": "Stardust",
+      "categories": ["datapack", "worldgen"],
+      "versions": ["1.20.1"],
+      "downloads": 1,
+      "follows": 1,
+      "date_created": "2022-01-01T00:00:00Z",
+      "date_modified": "2024-01-01T00:00:00Z"
+    }
+  ],
+  "offset": 0,
+  "limit": 3,
+  "total_hits": 5
+}

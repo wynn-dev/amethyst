@@ -6,7 +6,7 @@ A fast, native-feeling Minecraft launcher for macOS on Apple Silicon.
 
 ## Features (planned)
 
-- Vanilla, Forge, NeoForge, Fabric, Quilt and OptiFine, with arm64-native LWJGL on every version
+- Vanilla, Forge, NeoForge, Fabric and Quilt, running natively on Apple Silicon for every Minecraft version
 - Isolated instances with deduplicated mods, resource packs and shader packs
 - Modrinth and CurseForge browsing, installs and updates; `.mrpack` and CurseForge modpack import/export
 - Microsoft and offline accounts, 3D skin viewer, skin and cape changes

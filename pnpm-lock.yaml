@@ -242,7 +242,20 @@ importers:
         specifier: workspace:*
         version: link:../zip
 
-  packages/installer: {}
+  packages/installer:
+    dependencies:
+      '@amethyst/game':
+        specifier: workspace:*
+        version: link:../game
+      '@amethyst/net':
+        specifier: workspace:*
+        version: link:../net
+      '@amethyst/task':
+        specifier: workspace:*
+        version: link:../task
+      '@amethyst/zip':
+        specifier: workspace:*
+        version: link:../zip
 
   packages/java: {}
 

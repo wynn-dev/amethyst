@@ -2,4 +2,5 @@
 export interface Events {
   'runtime:ready': { at: number }
   'runtime:restarted': { at: number; reason: string }
+  'menu:command': import('./menu').MenuCommandEvent
 }

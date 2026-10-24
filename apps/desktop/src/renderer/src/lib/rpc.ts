@@ -33,7 +33,8 @@ export const api = new Proxy({} as Services, {
 type Listener<K extends keyof Events> = (payload: Events[K]) => void
 const listeners = new Map<string, Set<Listener<never>>>()
 
-window.amethyst.on((event, payload) => {
+// The bridge is absent outside Electron (component tests); events simply never arrive there.
+window.amethyst?.on((event, payload) => {
   listeners.get(event)?.forEach((fn) => (fn as (p: unknown) => void)(payload))
 })
 

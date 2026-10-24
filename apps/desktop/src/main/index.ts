@@ -1,16 +1,23 @@
 import { join } from 'node:path'
-import { app, BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow } from 'electron'
 import { registerMainService, startMainRpc } from './rpc/server'
 import { RuntimeSupervisor } from './runtime'
+import { installAppMenu } from './menu'
+import { guardNavigation, runScreenshots } from './windows'
 
 const isDev = !app.isPackaged
 const runtime = new RuntimeSupervisor()
+let mainWindow: BrowserWindow | undefined
+
+// `AMETHYST_SCREENSHOT=<dir>` (dev only): start from a fresh profile so first run and fixtures are predictable.
+const screenshotDir = isDev ? process.env.AMETHYST_SCREENSHOT : undefined
+if (screenshotDir) app.setPath('userData', join(screenshotDir, '.profile'))
 
 function createMainWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: 1200,
     height: 780,
-    minWidth: 900,
+    minWidth: 960,
     minHeight: 600,
     show: false,
     titleBarStyle: 'hiddenInset',
@@ -41,12 +48,24 @@ function createMainWindow(): BrowserWindow {
     })
   }
 
-  // Never let the renderer navigate away or open windows; hand external links to the OS.
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith('https://')) shell.openExternal(url)
-    return { action: 'deny' }
+  // Never let the renderer navigate away or open windows; hand external links to the OS, and
+  // route the app's own `#/settings/…` URLs to the Settings window.
+  guardNavigation(win.webContents)
+
+  if (screenshotDir) {
+    runScreenshots(win, screenshotDir, () => {
+      runtime.stop()
+      app.exit(0)
+    }).catch((e) => {
+      console.error('screenshot mode failed', e)
+      app.exit(1)
+    })
+  }
+
+  mainWindow = win
+  win.on('closed', () => {
+    if (mainWindow === win) mainWindow = undefined
   })
-  win.webContents.on('will-navigate', (event) => event.preventDefault())
 
   if (isDev && process.env.ELECTRON_RENDERER_URL) {
     win.loadURL(process.env.ELECTRON_RENDERER_URL)
@@ -68,6 +87,7 @@ app.whenReady().then(() => {
     },
   })
   startMainRpc()
+  installAppMenu(() => mainWindow ?? createMainWindow())
   // Window first, runtime in parallel: nothing on the paint path waits for background services.
   createMainWindow()
   runtime.start()

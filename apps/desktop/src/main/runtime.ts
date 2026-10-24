@@ -3,10 +3,13 @@ import { app, ipcMain, MessageChannelMain, safeStorage, shell, utilityProcess, t
 import { CONNECT_CHANNEL, PORT_CHANNEL, ServiceRegistry, type RpcMessage } from '@shared/rpc'
 import type { HostServices } from '@shared/services'
 import { RUNTIME_ENV } from '@shared/paths'
+import { closeAuthWindow, openAuthWindow } from './auth-window'
 import { emitMain } from './rpc/server'
 
 const host: HostServices = {
   async encrypt(plain) {
+    // No plaintext fallback: without the Keychain the runtime keeps credentials in memory only.
+    if (!safeStorage.isEncryptionAvailable()) throw Object.assign(new Error('Encryption is not available'), { code: 'ESECRET_UNAVAILABLE' })
     return safeStorage.encryptString(plain).toString('base64')
   },
   async decrypt(cipher) {
@@ -18,6 +21,14 @@ const host: HostServices = {
   },
   async trash(path) {
     await shell.trashItem(path)
+  },
+  openAuthWindow: (url, redirectUri) => openAuthWindow(url, redirectUri),
+  async closeAuthWindow() {
+    closeAuthWindow()
+  },
+  async openExternal(url) {
+    if (!/^https:\/\//i.test(url)) throw Object.assign(new Error('Only https: links can be opened'), { code: 'EINVALID_ARGUMENT' })
+    await shell.openExternal(url)
   },
 }
 

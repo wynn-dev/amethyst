@@ -5,5 +5,5 @@ packages:
 allowBuilds:
   electron: true
   esbuild: true
-  better-sqlite3: true
+  better-sqlite3: false
   electron-winstaller: false

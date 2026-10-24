@@ -16,11 +16,20 @@
     "typecheck": "tsc -p tsconfig.node.json && tsc -p tsconfig.web.json"
   },
   "dependencies": {
+    "better-sqlite3": "^13.0.3",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },
   "devDependencies": {
+    "@amethyst/auth": "workspace:*",
+    "@amethyst/content": "workspace:*",
+    "@amethyst/marketplace": "workspace:*",
+    "@amethyst/nbt": "workspace:*",
+    "@amethyst/net": "workspace:*",
+    "@amethyst/task": "workspace:*",
+    "@amethyst/zip": "workspace:*",
     "@tailwindcss/vite": "^4.3.3",
+    "@types/better-sqlite3": "^9.6.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",

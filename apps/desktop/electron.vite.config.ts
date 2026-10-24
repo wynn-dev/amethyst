@@ -34,6 +34,9 @@ export default defineConfig({
           index: resolve(import.meta.dirname, 'src/main/index.ts'),
           // Runtime utility process: every domain service.
           runtime: resolve(import.meta.dirname, 'src/runtime/index.ts'),
+          // Worker threads owned by the runtime: the SQLite index and the scan pool.
+          'db-worker': resolve(import.meta.dirname, 'src/runtime/db/worker.ts'),
+          'scan-worker': resolve(import.meta.dirname, 'src/runtime/resources/scan-worker.ts'),
         },
       },
     },

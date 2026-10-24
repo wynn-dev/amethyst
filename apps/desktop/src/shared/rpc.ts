@@ -19,6 +19,8 @@ export interface RpcError {
   name: string
   message: string
   code?: string
+  /** Optional structured, cloneable details (e.g. a help `link`, `reauth`, offending `keys`). */
+  details?: Record<string, unknown>
 }
 
 export type RpcResult<T> = { ok: true; value: T } | { ok: false; error: RpcError }
@@ -52,8 +54,33 @@ export interface Bridge {
 }
 
 export function toRpcError(e: unknown): RpcError {
-  if (e instanceof Error) return { name: e.name, message: e.message, code: (e as { code?: string }).code }
-  return { name: 'Error', message: String(e) }
+  if (!(e instanceof Error)) return { name: 'Error', message: String(e) }
+  const out: RpcError = { name: e.name, message: e.message, code: (e as { code?: string }).code }
+  const details = errorDetails(e)
+  if (details) out.details = details
+  return out
+}
+
+/** Structured details of an error: its `details` object, or what its `toJSON()` adds beyond name/message/code. */
+function errorDetails(e: Error): Record<string, unknown> | undefined {
+  const own = (e as { details?: unknown }).details
+  let raw: unknown = own
+  if (raw === undefined && typeof (e as { toJSON?: unknown }).toJSON === 'function') {
+    try {
+      raw = (e as unknown as { toJSON(): unknown }).toJSON()
+    } catch {
+      return undefined
+    }
+  }
+  if (typeof raw !== 'object' || raw === null) return undefined
+  const { name: _n, message: _m, code: _c, ...rest } = raw as Record<string, unknown>
+  // Only plain JSON survives every boundary; drop anything structured clone would choke on.
+  try {
+    const plain = JSON.parse(JSON.stringify(rest)) as Record<string, unknown>
+    return Object.keys(plain).length > 0 ? plain : undefined
+  } catch {
+    return undefined
+  }
 }
 
 type Impl = Record<string, (...args: never[]) => Promise<unknown>>
@@ -117,6 +144,6 @@ export class RpcClient {
 
 export async function unwrap<T>(result: Promise<RpcResult<unknown>>): Promise<T> {
   const r = await result
-  if (!r.ok) throw Object.assign(new Error(r.error.message), { name: r.error.name, code: r.error.code })
+  if (!r.ok) throw Object.assign(new Error(r.error.message), { name: r.error.name, code: r.error.code, details: r.error.details })
   return r.value as T
 }

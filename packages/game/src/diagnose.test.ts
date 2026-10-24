@@ -33,11 +33,16 @@ async function install() {
   const fabric = Buffer.from('fabric lib')
   const log = Buffer.from('<Configuration/>')
   const objects: Record<string, { hash: string; size: number }> = {}
+  const writes: [string, Buffer][] = []
   for (let i = 0; i < ASSETS; i++) {
     const data = Buffer.from(`asset ${i}`)
     const hash = sha1(data)
     objects[`minecraft/sounds/${i}.ogg`] = { hash, size: data.length }
-    await put(`assets/objects/${hash.slice(0, 2)}/${hash}`, data)
+    writes.push([`assets/objects/${hash.slice(0, 2)}/${hash}`, data])
+  }
+  // Writing thousands of files one at a time is slow on CI runners; batch them.
+  for (let i = 0; i < writes.length; i += 128) {
+    await Promise.all(writes.slice(i, i + 128).map(([rel, data]) => put(rel, data)))
   }
   const index = JSON.stringify({ objects })
   await put('assets/indexes/5.json', index)
@@ -61,7 +66,8 @@ async function install() {
   return { version, objects }
 }
 
-describe('diagnose', () => {
+// Fixture setup creates 3,500 files per test; the speed assertion below is what guards diagnose itself.
+describe('diagnose', { timeout: 30_000 }, () => {
   it('reports nothing for a complete installation, quickly, with 3,500 assets', async () => {
     const { version } = await install()
     const started = Date.now()

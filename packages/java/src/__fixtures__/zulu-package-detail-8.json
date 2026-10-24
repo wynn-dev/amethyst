@@ -1,0 +1,62 @@
+{
+  "abi": "any",
+  "arch": "arm",
+  "archive_type": "tar.gz",
+  "availability_type": "CA",
+  "build_date": "2026-10-21T05:58:59",
+  "certifications": [
+    "tck"
+  ],
+  "cpu_gen": [
+    "v8"
+  ],
+  "crac_supported": false,
+  "crs_supported": false,
+  "distro_version": [
+    8,
+    98,
+    0,
+    107
+  ],
+  "download_url": "https://cdn.azul.com/zulu/bin/zulu8.98.0.107-ca-jre8.0.512-macosx_aarch64.tar.gz",
+  "hw_bitness": 64,
+  "java_package_features": [
+    "headfull"
+  ],
+  "java_package_type": "jre",
+  "java_version": [
+    8,
+    0,
+    512
+  ],
+  "javafx_bundled": false,
+  "last_modified": "2026-10-21T16:54:11",
+  "latest": true,
+  "lib_c_type": null,
+  "md5_hash": "6d73e97d8f645f825949a40765640d73",
+  "name": "zulu8.98.0.107-ca-jre8.0.512-macosx_aarch64.tar.gz",
+  "openjdk_build_number": 8,
+  "os": "macos",
+  "package_uuid": "841e5f64-a746-4803-8b56-4e14767efb1b",
+  "product": "zulu",
+  "release_status": "ga",
+  "release_type": "PSU",
+  "sha256_hash": "e363187e4c49650906b17466d5f158a2a488a0ed8dde296a54399fa45d19e895",
+  "signatures": [
+    {
+      "details": {
+        "digest_algo": "8",
+        "key_id": "B1998361219BD9C9",
+        "sig_algo": "1",
+        "sig_version": "4",
+        "timestamp": "2026-10-21T13:47:25"
+      },
+      "signature": "(trimmed)",
+      "signature_index": 0,
+      "type": "openpgp",
+      "url": "https://api.azul.com/metadata/v1/zulu/packages/841e5f64-a746-4803-8b56-4e14767efb1b/signature-binary?signature-index=0"
+    }
+  ],
+  "size": 40166300,
+  "support_term": "lts"
+}

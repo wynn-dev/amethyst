@@ -1,0 +1,43 @@
+Amethyst: keep a destroyed LWJGL window alive until AppKit's pending work on it has run.
+
+Display.destroy(), and every Display.setDisplayMode()/setFullscreen() on a live Display (LWJGL
+re-creates the window), closes the NSWindow, which frees it at once (releasedWhenClosed). Removing
+the view just before queues an AppKit tracking-area update for that window on the main run loop;
+on current macOS it can run after the window is gone and crash in objc_msgSend
+(-[_NSTrackingAreaAKManager _activeTrackingAreasNeedUpdate], NSZombie: "-[MacOSXKeyableWindow
+windowNumber]: message sent to deallocated instance"). It reproduced locally in about one run in
+five of the smoke test's fullscreen toggle. The CALayer (Display.setParent) path closes its hidden
+offscreen window the same way, and crashed once in __NSThreadPerformPerform after a canvas test.
+Both windows are now released two seconds later on the main run loop instead, which balances
+the original alloc.
+
+Applies to: all (the code is identical in every 2.9.x version built).
+
+--- a/src/native/macosx/org_lwjgl_opengl_Display.m
++++ b/src/native/macosx/org_lwjgl_opengl_Display.m
+@@ -169,5 +169,7 @@
+ 				// release the nsview and remove it from any parent nsview
+ 				[window_info->view removeFromSuperviewWithoutNeedingDisplay];
++				[window_info->window setReleasedWhenClosed:NO];
+ 				[window_info->window close];
++				[window_info->window performSelector:@selector(release) withObject:nil afterDelay:2.0];
+ 				window_info->window = nil;
+ 			}
+--- a/src/native/macosx/org_lwjgl_opengl_MacOSXCanvasPeerInfo.m
++++ b/src/native/macosx/org_lwjgl_opengl_MacOSXCanvasPeerInfo.m
+@@ -185,5 +185,7 @@
+ - (void) createWindow:(NSOpenGLPixelFormat*)pixel_format {
+ 	if (window_info->window != nil) {
++		[window_info->window setReleasedWhenClosed:NO];
+ 		[window_info->window close];
++		[window_info->window performSelector:@selector(release) withObject:nil afterDelay:2.0];
+ 	}
+ 	
+@@ -201,5 +203,7 @@
+ 	if (window_info->window != nil) {
+ 		[window_info->view removeFromSuperviewWithoutNeedingDisplay];
++		[window_info->window setReleasedWhenClosed:NO];
+ 		[window_info->window close];
++		[window_info->window performSelector:@selector(release) withObject:nil afterDelay:2.0];
+ 		window_info->window = nil;
+     }

@@ -1,0 +1,93 @@
+# Builds the Apple Silicon natives for LWJGL 2 era Minecraft (<= 1.12.2) from upstream source
+# (natives/lwjgl2/build.sh) and publishes them on their own GitHub release, `natives-lwjgl2-v<N>`.
+#
+# The app pins one release's manifest.json (sha256 + size per jar). Releases made here are
+# immutable inputs of shipped app builds: nothing may delete or overwrite them. In particular the
+# nightly app workflow, which replaces the `nightly` release on every push, must only ever touch
+# the `nightly` tag.
+name: Natives (LWJGL 2, arm64)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'natives/lwjgl2/**'
+      - '.github/workflows/natives-lwjgl2.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: natives-lwjgl2
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      # One release per workflow run; a re-run of the same run re-uploads to the same tag.
+      NATIVES_TAG: natives-lwjgl2-v${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          xcrun --sdk macosx --show-sdk-version
+          cmake --version | head -n 1
+          python3 --version
+
+      - name: Build
+        env:
+          NATIVES_BASE_URL: https://github.com/${{ github.repository }}/releases/download/${{ env.NATIVES_TAG }}/
+        run: natives/lwjgl2/build.sh
+
+      - name: Check artifacts
+        run: |
+          cd natives/lwjgl2/dist
+          cat manifest.json
+          for jar in *.jar; do
+            dir="$RUNNER_TEMP/check/${jar%.jar}"
+            mkdir -p "$dir"
+            unzip -q "$jar" -d "$dir"
+            for lib in "$dir"/*.dylib "$dir"/*.jnilib; do
+              [ -f "$lib" ] || continue
+              archs="$(lipo -archs "$lib")"
+              echo "$jar: $(basename "$lib"): $archs"
+              [ "$archs" = arm64 ] || { echo "::error::$lib is $archs"; exit 1; }
+            done
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.NATIVES_TAG }}
+          path: natives/lwjgl2/dist/
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd natives/lwjgl2/dist
+          files=(*.jar manifest.json licenses/*.txt)
+          if gh release view "$NATIVES_TAG" > /dev/null 2>&1; then
+            gh release upload "$NATIVES_TAG" "${files[@]}" --clobber
+          else
+            {
+              echo "Apple Silicon (arm64, macOS 13+) natives for Minecraft <= 1.12.2, built from upstream source by"
+              echo "[natives/lwjgl2/build.sh](https://github.com/${GITHUB_REPOSITORY}/tree/${GITHUB_SHA}/natives/lwjgl2) at ${GITHUB_SHA}."
+              echo
+              echo "The launcher pins \`manifest.json\` of this release. Do not delete or edit it."
+              echo
+              echo '```json'
+              cat manifest.json
+              echo '```'
+            } > "$RUNNER_TEMP/notes.md"
+            gh release create "$NATIVES_TAG" "${files[@]}" \
+              --title "$NATIVES_TAG" \
+              --notes-file "$RUNNER_TEMP/notes.md" \
+              --target "$GITHUB_SHA" \
+              --latest=false
+          fi

@@ -1,0 +1,11 @@
+Matching Java Virtual Machines (9):
+    27 (arm64) "Oracle Corporation" - "OpenJDK 27" /Users/me/Library/Java/JavaVirtualMachines/openjdk-27/Contents/Home
+    25.0.1 (arm64) "Eclipse Adoptium" - "OpenJDK 25.0.1" /Library/Java/JavaVirtualMachines/temurin-25.jdk/Contents/Home
+    21.0.7 (arm64) "Amazon.com Inc." - "Amazon Corretto 21" /Library/Java/JavaVirtualMachines/amazon-corretto-21.jdk/Contents/Home
+    17.0.20.1 (arm64) "Azul Systems, Inc." - "Zulu 17.68.203" /Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home
+    17.0.12 (x86_64) "International Business Machines Corporation" - "IBM Semeru Runtime Open Edition 17 (OpenJ9)" /Library/Java/JavaVirtualMachines/ibm-semeru-open-17.jdk/Contents/Home
+    21.0.2 (arm64) "GraalVM Community" - "GraalVM CE 21.0.2+13.1" /Users/me/Library/Java/JavaVirtualMachines/graalvm-ce-21/Contents/Home
+    1.8.0_452 (arm64) "BellSoft" - "Liberica JDK 8 Full" /Library/Java/JavaVirtualMachines/liberica-jdk-8-full.jdk/Contents/Home
+    1.8.411.09 (x86_64) "Oracle Corporation" - "Java" /Library/Internet Plug-Ins/JavaAppletPlugin.plugin/Contents/Home
+    26-ea (arm64) "Oracle Corporation" - "OpenJDK 26-ea" /Users/me/Library/Java/JavaVirtualMachines/openjdk-26-ea "early access"/Contents/Home
+/Users/me/Library/Java/JavaVirtualMachines/openjdk-27/Contents/Home

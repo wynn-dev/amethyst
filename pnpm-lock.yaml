@@ -237,7 +237,17 @@ importers:
 
   packages/installer: {}
 
-  packages/java: {}
+  packages/java:
+    dependencies:
+      '@amethyst/net':
+        specifier: workspace:*
+        version: link:../net
+      '@amethyst/task':
+        specifier: workspace:*
+        version: link:../task
+      lzma1:
+        specifier: ^0.6.1
+        version: 0.6.1
 
   packages/marketplace: {}
 
@@ -1709,6 +1719,10 @@ packages:
   lru-cache@6.0.0:
     resolution: {integrity: sha512-Jo6dJ04CmSjuznwJSS3pUeWmd/H0ffTlkXXgwZi+eq1UCmqQwCh+eLsYOYCwY991i2Fah4h1BEMCx4qThGbsiA==}
     engines: {node: '>=10'}
+
+  lzma1@0.6.1:
+    resolution: {integrity: sha512-AUTPETf1bEe3hM9v05xsJ1K6BUdGguqIFBa0hCH2rBN/l670rHGDwkhvdY+4P97jPKjp5UjttX29gCuzsqusDA==}
+    engines: {bun: '>=1.0.0', node: '>=18.0.0'}
 
   magic-string@0.30.21:
     resolution: {integrity: sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ==}
@@ -3659,6 +3673,8 @@ snapshots:
   lru-cache@6.0.0:
     dependencies:
       yallist: 4.0.0
+
+  lzma1@0.6.1: {}
 
   magic-string@0.30.21:
     dependencies:

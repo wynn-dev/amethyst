@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<array>
+	<dict>
+		<key>JVMArch</key>
+		<string>arm64</string>
+		<key>JVMBundleID</key>
+		<string>net.java.openjdk.jdk</string>
+		<key>JVMEnabled</key>
+		<true/>
+		<key>JVMHomePath</key>
+		<string>/Users/me/Library/Java/JavaVirtualMachines/openjdk-27/Contents/Home</string>
+		<key>JVMName</key>
+		<string>OpenJDK 27</string>
+		<key>JVMPlatformVersion</key>
+		<string>27</string>
+		<key>JVMVendor</key>
+		<string>Oracle Corporation</string>
+		<key>JVMVersion</key>
+		<string>27</string>
+	</dict>
+	<dict>
+		<key>JVMArch</key>
+		<string>x86_64</string>
+		<key>JVMBundleID</key>
+		<string>com.example.jdk</string>
+		<key>JVMEnabled</key>
+		<false/>
+		<key>JVMHomePath</key>
+		<string>/Library/Java/JavaVirtualMachines/R&amp;D &lt;test&gt;.jdk/Contents/Home</string>
+		<key>JVMName</key>
+		<string>Example &quot;JDK&quot; 17</string>
+		<key>JVMPlatformVersion</key>
+		<string>17.0.12</string>
+		<key>JVMVendor</key>
+		<string>Example &amp; Sons</string>
+		<key>JVMVersion</key>
+		<string>17.0.12</string>
+	</dict>
+</array>
+</plist>

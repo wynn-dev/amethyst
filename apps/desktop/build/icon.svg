@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Placeholder app icon: a faceted amethyst gem on a macOS-style rounded square. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a1748"/>
+      <stop offset="1" stop-color="#120a22"/>
+    </linearGradient>
+    <linearGradient id="crown" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#e9d5ff"/>
+      <stop offset="1" stop-color="#c084fc"/>
+    </linearGradient>
+    <linearGradient id="pavilion" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#a855f7"/>
+      <stop offset="1" stop-color="#581c87"/>
+    </linearGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+  <!-- Crown (top) facets -->
+  <polygon points="332,330 692,330 792,450 232,450" fill="url(#crown)"/>
+  <polygon points="332,330 432,450 232,450" fill="#f3e8ff"/>
+  <polygon points="512,330 432,450 592,450" fill="#d8b4fe"/>
+  <polygon points="692,330 592,450 792,450" fill="#e9d5ff"/>
+  <!-- Pavilion (bottom) facets -->
+  <polygon points="232,450 432,450 512,800" fill="#c084fc"/>
+  <polygon points="432,450 592,450 512,800" fill="url(#pavilion)"/>
+  <polygon points="592,450 792,450 512,800" fill="#6b21a8"/>
+  <!-- Outline and table highlight -->
+  <polygon points="332,330 692,330 792,450 512,800 232,450" fill="none" stroke="#faf5ff" stroke-opacity="0.35" stroke-width="6" stroke-linejoin="round"/>
+  <line x1="232" y1="450" x2="792" y2="450" stroke="#faf5ff" stroke-opacity="0.35" stroke-width="6"/>
+</svg>

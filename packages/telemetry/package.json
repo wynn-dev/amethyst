@@ -1,0 +1,18 @@
+{
+  "name": "@amethyst/telemetry",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Consent-gated, scrubbed PostHog telemetry",
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./events": "./src/events.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "posthog-node": "^5.57.1"
+  }
+}

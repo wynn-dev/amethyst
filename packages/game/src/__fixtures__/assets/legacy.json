@@ -1,0 +1,21 @@
+{
+ "virtual": true,
+ "objects": {
+  "icons/minecraft.icns": {
+   "hash": "991b421dfd401f115241601b2b373140a8d78572",
+   "size": 114786
+  },
+  "sounds/random/click.ogg": {
+   "hash": "2fe092579d9637e2d160319820ee08e60a237bb7",
+   "size": 7046
+  },
+  "sound/step/grass1.ogg": {
+   "hash": "227ab99bf7c6cf0b2002e0f7957d0ff7e5cb0c96",
+   "size": 7126
+  },
+  "music/calm1.ogg": {
+   "hash": "50a59a4f56e4046701b758ddbb1c1587efa4cadf",
+   "size": 2530812
+  }
+ }
+}

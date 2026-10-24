@@ -1,0 +1,21 @@
+{
+ "map_to_resources": true,
+ "objects": {
+  "READ_ME_I_AM_VERY_IMPORTANT": {
+   "hash": "0d000710b71ca9aafabd8f587768431d0b560b32",
+   "size": 546
+  },
+  "icons/minecraft.icns": {
+   "hash": "991b421dfd401f115241601b2b373140a8d78572",
+   "size": 114786
+  },
+  "newsound/step/grass1.ogg": {
+   "hash": "41cbf5dd08e951ad65883854e74d2e034929f572",
+   "size": 7468
+  },
+  "music/calm1.ogg": {
+   "hash": "50a59a4f56e4046701b758ddbb1c1587efa4cadf",
+   "size": 2530812
+  }
+ }
+}

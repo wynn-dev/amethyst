@@ -95,3 +95,16 @@ describe('watchForManualFiles', () => {
     expect((await collect(existing)).map((m) => m.sha1)).toEqual([sha('sha1', 'gamma')])
   })
 })
+
+describe('watchForManualFiles without watcher events', () => {
+  it('still finds new files through the safety poll', async () => {
+    const want = [expected('late.jar', 'late file', 9)]
+    const watcher = watchForManualFiles(downloads, want, { pollMs: 50 })
+    await watcher.ready
+    const done = collect(watcher)
+    // Write through a temp name and rename: the pattern FSEvents is worst at reporting.
+    await writeFile(path.join(downloads, 'late.jar.part'), 'late file')
+    await rename(path.join(downloads, 'late.jar.part'), path.join(downloads, 'late.jar'))
+    expect((await done).map((m) => m.expected.fileId)).toEqual([9])
+  })
+})

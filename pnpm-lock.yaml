@@ -248,7 +248,23 @@ importers:
 
   packages/marketplace: {}
 
-  packages/modpack: {}
+  packages/modpack:
+    dependencies:
+      '@amethyst/content':
+        specifier: workspace:*
+        version: link:../content
+      '@amethyst/marketplace':
+        specifier: workspace:*
+        version: link:../marketplace
+      '@amethyst/net':
+        specifier: workspace:*
+        version: link:../net
+      '@amethyst/task':
+        specifier: workspace:*
+        version: link:../task
+      '@amethyst/zip':
+        specifier: workspace:*
+        version: link:../zip
 
   packages/nbt: {}
 

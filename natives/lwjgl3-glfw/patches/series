@@ -1,0 +1,4 @@
+# Patches for LWJGL-CI's GLFW fork at the commit pinned in ../versions.sh, applied in this order
+# with `patch -p1 -F 0`. Each patch explains itself in its header.
+lwjgl-ci-library-overrides.patch
+cocoa-silent-window-icon.patch

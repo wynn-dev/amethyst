@@ -1,0 +1,12 @@
+Amethyst arm64 GLFW for LWJGL 3.3.1 (macOS 13+, Apple Silicon)
+
+This jar contains a native library compiled by the Amethyst project from public upstream source,
+plus the small patches kept in natives/lwjgl3-glfw/patches of
+https://github.com/wynn-dev/amethyst. The exact upstream commit is listed in
+natives/lwjgl3-glfw/versions.sh and natives/lwjgl3-glfw/README.md.
+
+macos/arm64/org/lwjgl/glfw/libglfw.dylib
+  GLFW (https://github.com/glfw/glfw) at the commit LWJGL 3.3.1 was built from, with the
+  macOS-relevant part of LWJGL-CI's build configuration (https://github.com/LWJGL-CI/glfw) and
+  one Amethyst patch (glfwSetWindowIcon is a silent no-op on macOS).
+  zlib/libpng licence: see GLFW-LICENSE.txt.

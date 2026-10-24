@@ -65,6 +65,7 @@ This file is authoritative. Where another spec conflicts with it, this file wins
 - LWJGL 3:
   - Versions that already ship `natives-macos-arm64` (1.19 and later) are used as-is.
   - Older LWJGL 3 versions (Minecraft 1.13–1.18) are replaced with LWJGL 3.3.x macOS arm64 natives from Maven Central, matched by artifact family and version range.
+  - The exception is GLFW for those versions. LWJGL 3.3.1's GLFW reports an error from `glfwSetWindowIcon` on macOS, and Minecraft before 1.19 treats that error as fatal. Amethyst therefore builds its own `libglfw.dylib` in CI (`natives/lwjgl3-glfw`): the same upstream GLFW source as LWJGL 3.3.1, with that call made a silent no-op. It is published and pinned the same way as the LWJGL 2 natives.
 - LWJGL 2 (Minecraft 1.12.2 and older):
   - Amethyst **builds its own** arm64 natives (LWJGL 2.9.x, and jinput where needed) from public source in a CI workflow in this repo.
   - They are published on our own GitHub release (`natives-*` tag), with sha256 values pinned in the app.

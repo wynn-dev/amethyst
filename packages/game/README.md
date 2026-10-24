@@ -43,7 +43,7 @@ the original natives are used.
 | 1.12 … 1.18.2 | — | `java-objc-bridge` 1.0.0 → 1.1 (universal `libjcocoa.dylib` inside the jar); its x86_64 natives jar removed |
 | 1.12 … 1.13.2 | — | `text2speech` 1.10.x → 1.11.3; text2speech natives removed (no macOS entry anyway) |
 | 1.8.2 … 1.16.5 | — | JNA 3.4.0 / 4.4.0 → 5.10.0 (first arm64 JNA is 5.7.0; objc-bridge 1.1 needs 5.10.0) |
-| 17w43a … 1.13-pre3 | 3.1.2 | every `org.lwjgl` module → 3.3.1 jar + `natives-macos-arm64` jar on the classpath |
+| 17w43a … 1.13-pre3 | 3.1.2 | every `org.lwjgl` module → 3.3.1 jar + `natives-macos-arm64` jar on the classpath, except GLFW's natives: the Amethyst-patched GLFW jar instead (see below) |
 | 1.13 … 1.13.2 | 3.1.6 | same |
 | 1.14 … 1.18.2 (1.14.3: 3.2.2) | 3.2.1 / 3.2.2 | same (3.2.2 entries are disallowed on macOS by Mojang's rules) |
 | 1.19 … 26.x | 3.3.1+ | used as shipped (`natives-macos-arm64` already listed) |
@@ -56,6 +56,25 @@ below 1.1, …), so snapshots and loader JSON (Forge, NeoForge, Fabric, Quilt) a
 The pinned replacements live in [`src/natives/table.ts`](src/natives/table.ts) (sha1 from the Maven
 `.sha1` sidecars, sizes from `Content-Length`; the LWJGL 3.3.1 values equal Mojang's 1.19 pins).
 `AMETHYST_NET_TESTS=1 pnpm test` re-verifies them against Maven Central.
+
+### Patched GLFW for LWJGL 3.3.1 built by CI
+
+LWJGL 3.3.1's official GLFW (a GLFW 3.4 development snapshot) reports `GLFW_FEATURE_UNAVAILABLE`
+from `glfwSetWindowIcon` on macOS. Minecraft before 1.19 calls it while its start-up GLFW error
+callback still treats every error as fatal, so 1.13–1.18 on LWJGL 3.3.1 show "GLFW error 65548:
+Cocoa: Regular windows do not have icons on macOS" and never open a window. A CI job
+(`natives/lwjgl3-glfw`) rebuilds the exact upstream source of that GLFW with the call made a silent
+no-op and publishes it on a `natives-lwjgl3-glfw-*` GitHub release.
+
+The app consumes a `GlfwArm64Source { baseUrl, artifacts: [{ name: 'lwjgl-glfw', version: '3.3.1',
+url, sha256, size }] }` manifest (`DEFAULT_GLFW_ARM64_SOURCE` in
+[`src/natives/glfw.ts`](src/natives/glfw.ts); an empty placeholder until the first release is
+pinned, so 1.13–1.18 report `ENATIVES_UNAVAILABLE` on arm64). The jar has the layout of LWJGL's own
+natives jars (`macos/arm64/org/lwjgl/glfw/libglfw.dylib` plus its `.sha1`), goes on the
+**classpath** in place of `org.lwjgl:lwjgl-glfw:3.3.1:natives-macos-arm64` (not extracted: LWJGL's
+`SharedLibraryLoader` loads it), and is stored locally as
+`libraries/dev/wynn/amethyst/natives/lwjgl-glfw-patched/3.3.1/lwjgl-glfw-patched-3.3.1-natives-macos-arm64.jar`.
+1.19+ ship LWJGL 3.3.1 themselves and keep the official GLFW.
 
 ### LWJGL 2 arm64 artifacts built by CI
 

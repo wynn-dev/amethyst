@@ -10,7 +10,7 @@
  * and plans are invalidated.
  */
 
-export const NATIVES_TABLE_REVISION = 1
+export const NATIVES_TABLE_REVISION = 2
 
 /** One pinned artifact. `path` is relative to `<root>/libraries`. */
 export interface PinnedArtifact {
@@ -55,6 +55,8 @@ export const LWJGL3_ARM64: Readonly<Record<string, { jar: PinnedArtifact; native
     jar: pin(CENTRAL, 'org.lwjgl', 'lwjgl-opengl', '3.3.1', undefined, '831a5533a21a5f4f81bbc51bb13e9899319b5411', 921563),
     nativesArm64: pin(CENTRAL, 'org.lwjgl', 'lwjgl-opengl', '3.3.1', 'natives-macos-arm64', 'eafe34b871d966292e8db0f1f3d6b8b110d4e91d', 41665),
   },
+  // planNatives puts the Amethyst-patched GLFW (glfw.ts) on the classpath instead of these
+  // natives; they stay pinned for reference and for natives.net.test.ts.
   'lwjgl-glfw': {
     jar: pin(CENTRAL, 'org.lwjgl', 'lwjgl-glfw', '3.3.1', undefined, 'cbac1b8d30cb4795149c1ef540f912671a8616d0', 128801),
     nativesArm64: pin(CENTRAL, 'org.lwjgl', 'lwjgl-glfw', '3.3.1', 'natives-macos-arm64', 'cac0d3f712a3da7641fa174735a5f315de7ffe0a', 129077),

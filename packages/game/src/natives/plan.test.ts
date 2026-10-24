@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { FIXTURE_VERSIONS, TEST_LWJGL2_SOURCE } from '../__fixtures__/helpers'
+import { FIXTURE_VERSIONS, TEST_GLFW_SOURCE, TEST_LWJGL2_SOURCE } from '../__fixtures__/helpers'
 import { resolveVersion } from '../resolve'
+import { DEFAULT_GLFW_ARM64_SOURCE, parseGlfwArm64Source, type GlfwArm64Source } from './glfw'
 import { DEFAULT_LWJGL2_ARM64_SOURCE, parseLwjgl2Arm64Source, REQUIRED_LWJGL2_ARTIFACTS } from './lwjgl2'
 import { planNatives, type NativesPlan } from './plan'
 
-const plan = async (id: string, jvmArch: string, lwjgl2 = TEST_LWJGL2_SOURCE) => planNatives(await resolveVersion(FIXTURE_VERSIONS, id), { jvmArch, lwjgl2 })
+const plan = async (id: string, jvmArch: string, lwjgl2 = TEST_LWJGL2_SOURCE, glfw: GlfwArm64Source = TEST_GLFW_SOURCE) =>
+  planNatives(await resolveVersion(FIXTURE_VERSIONS, id), { jvmArch, lwjgl2, glfw })
+
+const PATCHED_GLFW = 'dev.wynn.amethyst.natives:lwjgl-glfw-patched:3.3.1:natives-macos-arm64'
 
 /** Names of the libraries that matter for natives: LWJGL, jinput, objc bridge, text2speech, twitch, JNA. */
 const relevant = (p: NativesPlan) =>
@@ -73,22 +77,52 @@ describe('planNatives on an arm64 JVM', () => {
     expect(p.libraries.find((l) => l.name === 'ca.weblite:java-objc-bridge:1.1')?.download.sha1).toBe('1227f9e0666314f9de41477e3ec277e542ed7f7b')
   })
 
-  for (const id of ['1.16.5', '1.18.2']) {
-    it(`${id}: LWJGL 3.2.1 becomes 3.3.1 with natives-macos-arm64 on the classpath`, async () => {
+  for (const [id, from] of [['1.13.2', '3.1.6'], ['1.16.5', '3.2.1'], ['1.18.2', '3.2.1']] as const) {
+    it(`${id}: LWJGL ${from} becomes 3.3.1 with natives-macos-arm64 on the classpath, and the patched GLFW`, async () => {
       const p = await plan(id, 'arm64')
       expect(p.ok).toBe(true)
+      expect(p.issues).toEqual([])
       expect(p.lwjgl).toBe(3)
       expect(p.extract).toEqual([])
       const lwjgl = p.libraries.filter((l) => l.coordinate.group === 'org.lwjgl')
       expect(new Set(lwjgl.map((l) => l.coordinate.version))).toEqual(new Set(['3.3.1']))
-      const modules = ['lwjgl', 'lwjgl-jemalloc', 'lwjgl-openal', 'lwjgl-opengl', 'lwjgl-glfw', 'lwjgl-stb', 'lwjgl-tinyfd']
-      expect(lwjgl.map((l) => l.name).toSorted()).toEqual(modules.flatMap((m) => [`org.lwjgl:${m}:3.3.1`, `org.lwjgl:${m}:3.3.1:natives-macos-arm64`]).toSorted())
+      const modules = id === '1.13.2' ? ['lwjgl', 'lwjgl-jemalloc', 'lwjgl-openal', 'lwjgl-opengl', 'lwjgl-glfw', 'lwjgl-stb'] : ['lwjgl', 'lwjgl-jemalloc', 'lwjgl-openal', 'lwjgl-opengl', 'lwjgl-glfw', 'lwjgl-stb', 'lwjgl-tinyfd']
+      // Every module's official arm64 natives except GLFW's, which the patched jar replaces.
+      expect(lwjgl.map((l) => l.name).toSorted()).toEqual(
+        modules.flatMap((m) => (m === 'lwjgl-glfw' ? [`org.lwjgl:${m}:3.3.1`] : [`org.lwjgl:${m}:3.3.1`, `org.lwjgl:${m}:3.3.1:natives-macos-arm64`])).toSorted(),
+      )
       expect(lwjgl.every((l) => l.download.url.startsWith('https://repo1.maven.org/maven2/org/lwjgl/') && l.download.sha1?.length === 40)).toBe(true)
+      const glfw = p.libraries.filter((l) => l.name === PATCHED_GLFW)
+      expect(glfw).toHaveLength(1)
+      expect(glfw[0]).toMatchObject({
+        isNative: false,
+        download: {
+          path: 'dev/wynn/amethyst/natives/lwjgl-glfw-patched/3.3.1/lwjgl-glfw-patched-3.3.1-natives-macos-arm64.jar',
+          url: 'https://example.invalid/glfw/lwjgl-glfw-patched-3.3.1-natives-macos-arm64.jar',
+          sha256: TEST_GLFW_SOURCE.artifacts[0]?.sha256,
+          size: 62116,
+        },
+      })
+      expect(p.classpath.map((l) => l.name)).toContain(PATCHED_GLFW)
+      expect(p.replacements.filter((r) => r.to === PATCHED_GLFW).map((r) => r.from)).toEqual([`org.lwjgl:lwjgl-glfw:${from}`, `org.lwjgl:lwjgl-glfw:${from}:natives-macos`])
       expect(p.libraries.some((l) => l.coordinate.classifier === 'natives-macos')).toBe(false)
       expect(p.libraries.find((l) => l.coordinate.artifact === 'java-objc-bridge')?.coordinate.version).toBe('1.1')
       expect(p.libraries.filter((l) => l.coordinate.artifact === 'java-objc-bridge')).toHaveLength(1)
     })
   }
+
+  it('1.16.5 without a patched GLFW build reports ENATIVES_UNAVAILABLE once', async () => {
+    const p = await plan('1.16.5', 'arm64', TEST_LWJGL2_SOURCE, DEFAULT_GLFW_ARM64_SOURCE)
+    expect(p.ok).toBe(false)
+    expect(p.issues).toEqual([
+      {
+        code: 'ENATIVES_UNAVAILABLE',
+        library: 'org.lwjgl:lwjgl-glfw:3.2.1',
+        message: 'No patched arm64 GLFW for LWJGL 3.3.1 is available; Minecraft 1.16.5 cannot open its window with the official build',
+      },
+    ])
+    expect(p.libraries.some((l) => l.coordinate.artifact.startsWith('lwjgl-glfw') && l.coordinate.classifier !== undefined)).toBe(false)
+  })
 
   it('1.16.5: JNA 4.4.0 is upgraded; 1.18.2 keeps text2speech 1.12.4 and JNA 5.10.0', async () => {
     const a = await plan('1.16.5', 'arm64')
@@ -99,8 +133,8 @@ describe('planNatives on an arm64 JVM', () => {
   })
 
   for (const id of ['1.19.4', '1.21']) {
-    it(`${id}: used as shipped`, async () => {
-      const p = await plan(id, 'arm64')
+    it(`${id}: used as shipped (with the official GLFW, even without a patched build)`, async () => {
+      const p = await plan(id, 'arm64', TEST_LWJGL2_SOURCE, DEFAULT_GLFW_ARM64_SOURCE)
       expect(p.ok).toBe(true)
       expect(p.replacements).toEqual([])
       expect(p.warnings).toEqual([])
@@ -152,6 +186,24 @@ describe('planNatives on an x64 (Rosetta) JVM', () => {
 
   it('rejects unknown architectures', async () => {
     await expect(plan('1.21', 'ppc')).rejects.toThrow(TypeError)
+  })
+})
+
+describe('GLFW manifest', () => {
+  it('validates untrusted manifests', () => {
+    expect(parseGlfwArm64Source(TEST_GLFW_SOURCE)).toEqual(TEST_GLFW_SOURCE)
+    const a = TEST_GLFW_SOURCE.artifacts[0]
+    expect(() => parseGlfwArm64Source(null)).toThrow(TypeError)
+    expect(() => parseGlfwArm64Source({ baseUrl: 'http://x/', artifacts: [] })).toThrow(/https/)
+    expect(() => parseGlfwArm64Source({ baseUrl: 'https://x/', artifacts: [{ ...a, sha256: 'abc' }] })).toThrow(/sha256/)
+    expect(() => parseGlfwArm64Source({ baseUrl: 'https://x/', artifacts: [{ ...a, size: 0 }] })).toThrow(/size/)
+    expect(() => parseGlfwArm64Source({ baseUrl: 'https://x/', artifacts: [{ ...a, url: 'http://evil/x.jar' }] })).toThrow(/https/)
+    expect(parseGlfwArm64Source({ baseUrl: 'https://x/', artifacts: [{ ...a, sha256: 'AB'.repeat(32) }] }).artifacts[0]?.sha256).toBe('ab'.repeat(32))
+  })
+
+  it('the placeholder default has no artifacts until a natives-lwjgl3-glfw release is pinned', () => {
+    expect(DEFAULT_GLFW_ARM64_SOURCE.baseUrl).toMatch(/^https:\/\/github\.com\/wynn-dev\/amethyst\/releases\/download\/natives-lwjgl3-glfw-v\d+\/$/)
+    expect(DEFAULT_GLFW_ARM64_SOURCE.artifacts).toEqual([])
   })
 })
 

@@ -170,8 +170,8 @@ on the JDK 8 from the build and on `java_home -v 17`. Checks:
 `.github/workflows/natives-lwjgl2.yml` runs on `macos-15` (arm64) for `workflow_dispatch` and for
 pushes to `main` that touch `natives/lwjgl2/**`. It runs `build.sh`, checks every library with
 `lipo`, and uploads the jars, `manifest.json` and the licence texts to the release
-`natives-lwjgl2-v<run number>` (created with `--latest=false`, so it never becomes the
-repository's "latest" release). These releases are inputs of shipped app builds and must never be
+`natives-lwjgl2-v<run number>` (created as a pre-release with `--latest=false`, so it never
+becomes the repository's "Latest" release). These releases are inputs of shipped app builds and must never be
 deleted or edited; the nightly app workflow must only touch the `nightly` tag.
 
 ## How the launcher consumes it

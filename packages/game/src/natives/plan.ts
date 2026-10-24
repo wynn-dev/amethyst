@@ -18,11 +18,13 @@ import {
   lwjgl2ArtifactUrl,
   type Lwjgl2Arm64Source,
 } from './lwjgl2'
+import { DEFAULT_GLFW_ARM64_SOURCE, findGlfwArtifact, GLFW_PATCHED_ARTIFACT, glfwArtifactUrl, type GlfwArm64Artifact, type GlfwArm64Source } from './glfw'
 import {
   JNA_ARM64,
   JNA_MIN_ARM64,
   LWJGL3_ARM64,
   LWJGL3_MIN_ARM64,
+  LWJGL3_REPLACEMENT_VERSION,
   NATIVES_TABLE_REVISION,
   OBJC_BRIDGE_ARM64,
   OBJC_BRIDGE_MIN,
@@ -38,6 +40,11 @@ export interface PlanNativesOptions {
   osVersion?: string
   /** Where the Amethyst-built LWJGL 2 arm64 natives come from. Defaults to the pinned manifest. */
   lwjgl2?: Lwjgl2Arm64Source
+  /**
+   * Where the Amethyst-built, patched GLFW for LWJGL 3.3.1 comes from (Minecraft 1.13–1.18).
+   * Defaults to the pinned manifest.
+   */
+  glfw?: GlfwArm64Source
   /**
    * The "replace natives" escape hatch (on by default). When false, an arm64 JVM gets the
    * original x86_64-only natives and a warning.
@@ -117,6 +124,7 @@ export function planNatives(version: Pick<ResolvedVersion, 'libraries' | 'minecr
   }
 
   const source = options.lwjgl2 ?? DEFAULT_LWJGL2_ARM64_SOURCE
+  const glfwSource = options.glfw ?? DEFAULT_GLFW_ARM64_SOURCE
   const present = new Set(original.map((l) => libraryKey(l.coordinate)))
   const out: ResolvedLibrary[] = []
   const replace = (from: ResolvedLibrary, to: ResolvedLibrary[], reason: string) => {
@@ -125,6 +133,19 @@ export function planNatives(version: Pick<ResolvedVersion, 'libraries' | 'minecr
     out.push(...to)
   }
   const unavailable = (lib: ResolvedLibrary, message: string) => issues.push({ code: 'ENATIVES_UNAVAILABLE', library: lib.name, message })
+  // The arm64 natives of an upgraded LWJGL 3 module. For GLFW that is the patched build, not
+  // Maven Central's: see glfw.ts. Reported once even though the jar and its natives entry both ask.
+  let glfwReported = false
+  const lwjgl3Natives = (lib: ResolvedLibrary, artifact: string, entry: (typeof LWJGL3_ARM64)[string]): ResolvedLibrary[] => {
+    if (artifact !== 'lwjgl-glfw') return [pinned(entry.nativesArm64)]
+    const a = findGlfwArtifact(glfwSource, LWJGL3_REPLACEMENT_VERSION)
+    if (a) return [patchedGlfw(glfwSource, a)]
+    if (!glfwReported) {
+      glfwReported = true
+      unavailable(lib, `No patched arm64 GLFW for LWJGL ${LWJGL3_REPLACEMENT_VERSION} is available; Minecraft ${mc} cannot open its window with the official build`)
+    }
+    return []
+  }
 
   for (const lib of original) {
     const { group, artifact, version: v, classifier } = lib.coordinate
@@ -147,12 +168,12 @@ export function planNatives(version: Pick<ResolvedVersion, 'libraries' | 'minecr
     if (group === 'org.lwjgl' && compareVersions(v, LWJGL3_MIN_ARM64) < 0) {
       const entry = LWJGL3_ARM64[artifact]
       if (!classifier && !lib.isNative) {
-        if (entry) replace(lib, [pinned(entry.jar), pinned(entry.nativesArm64)], `LWJGL ${v} has no arm64 natives; upgraded to ${entry.jar.name.split(':')[2]}`)
+        if (entry) replace(lib, [pinned(entry.jar), ...lwjgl3Natives(lib, artifact, entry)], `LWJGL ${v} has no arm64 natives; upgraded to ${entry.jar.name.split(':')[2]}`)
         else unavailable(lib, `No arm64 replacement is known for LWJGL module ${artifact} ${v}`)
         continue
       }
       if (lib.isNative || isMacNativesClassifier(classifier)) {
-        if (entry) replace(lib, [pinned(entry.nativesArm64)], `LWJGL ${v} natives are x86_64-only`)
+        if (entry) replace(lib, lwjgl3Natives(lib, artifact, entry), `LWJGL ${v} natives are x86_64-only`)
         else unavailable(lib, `No arm64 replacement is known for LWJGL module ${artifact} ${v} natives`)
         continue
       }
@@ -212,6 +233,22 @@ function amethystNative(name: string, version: string, source: Lwjgl2Arm64Source
     download: { path: mavenPath(coordinate), url: lwjgl2ArtifactUrl(source, { ...a, name, version }), sha256: a.sha256, size: a.size },
     isNative: true,
     extractExclude: ['META-INF/'],
+    source: AMETHYST,
+  }
+}
+
+/**
+ * The patched GLFW jar, on the classpath in place of `org.lwjgl:lwjgl-glfw:3.3.1:natives-macos-arm64`.
+ * It is not extracted: LWJGL's SharedLibraryLoader loads `macos/arm64/org/lwjgl/glfw/libglfw.dylib`
+ * from it like from the official jar.
+ */
+function patchedGlfw(source: GlfwArm64Source, a: GlfwArm64Artifact): ResolvedLibrary {
+  const coordinate: MavenCoordinate = { group: AMETHYST_NATIVES_GROUP, artifact: GLFW_PATCHED_ARTIFACT, version: a.version, classifier: AMETHYST_NATIVES_CLASSIFIER, extension: 'jar' }
+  return {
+    name: formatMavenName(coordinate),
+    coordinate,
+    download: { path: mavenPath(coordinate), url: glfwArtifactUrl(source, a), sha256: a.sha256, size: a.size },
+    isNative: false,
     source: AMETHYST,
   }
 }

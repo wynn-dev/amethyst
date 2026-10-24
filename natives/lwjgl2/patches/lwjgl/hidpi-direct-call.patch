@@ -1,0 +1,22 @@
+Amethyst: call -[NSView setWantsBestResolutionOpenGLSurface:] directly.
+
+Upstream (HiDPI support, added 2013-11-11) invoked it through performSelector:withObject:YES so
+it would compile on pre-10.7 SDKs. That passes a BOOL where an object is expected, which modern
+clang rejects (-Wint-conversion is an error) and which only worked by calling-convention accident.
+The method exists on every supported macOS (10.7+), so call it directly. Behaviour is unchanged:
+it still runs only when LWJGL enables high-DPI mode (Retina) for the window.
+
+Applies to: 2.9.1-nightly-20131120, 2.9.1, 2.9.2-nightly-20140822.
+
+--- a/src/native/macosx/org_lwjgl_opengl_Display.m
++++ b/src/native/macosx/org_lwjgl_opengl_Display.m
+@@ -78,8 +78,7 @@
+ 	[window_info->view setParent:window_info];
+ 	
+ 	if (window_info->enableHighDPI) {
+-		// call method using runtime selector as its a 10.7+ api and allows compiling on older SDK's
+-		[window_info->view performSelector:NSSelectorFromString(@"setWantsBestResolutionOpenGLSurface:") withObject:YES];
++		[window_info->view setWantsBestResolutionOpenGLSurface:YES];
+ 	}
+ 	
+ 	// set nsapp delegate for catching app quit events

@@ -1,0 +1,44 @@
+Amethyst: let LWJGL's blocking main-thread calls run inside AWT's nested run loop.
+
+LWJGL creates and destroys its NSWindow / CALayer with
+performSelectorOnMainThread:...waitUntilDone:YES, which only runs in the run loop's common modes.
+When AWT is up (Display.setParent on an AWT Canvas: Minecraft <= 1.5.2 runs in an applet Frame),
+the AppKit thread can be inside AWT's nested "AWTRunLoopMode" loop, waiting for the event
+dispatch thread, while the EDT waits for LWJGL's Display lock held by the thread blocked here: a
+three-way deadlock at Display.create(). It reproduced locally when an accessibility client
+queried the Frame (CAccessibility.invokeAndWait). Adding AWTRunLoopMode to the modes, as AWT
+does for its own blocking calls, lets the call run inside the nested loop.
+
+Applies to: all. AMETHYST_MAIN_THREAD_MODES is defined in patches/compat/lwjgl2_compat.h.
+
+--- a/src/native/macosx/org_lwjgl_opengl_MacOSXCanvasPeerInfo.m
++++ b/src/native/macosx/org_lwjgl_opengl_MacOSXCanvasPeerInfo.m
+@@ -85,3 +85,3 @@
+ 			
+-			[peer_info->glLayer performSelectorOnMainThread:@selector(createWindow:) withObject:peer_info->pixel_format waitUntilDone:YES];
++			[peer_info->glLayer performSelectorOnMainThread:@selector(createWindow:) withObject:peer_info->pixel_format waitUntilDone:YES modes:AMETHYST_MAIN_THREAD_MODES];
+ 			
+--- a/src/native/macosx/org_lwjgl_opengl_MacOSXContextImplementation.m
++++ b/src/native/macosx/org_lwjgl_opengl_MacOSXContextImplementation.m
+@@ -225,3 +225,3 @@
+ 		context_info->peer_info->isCALayer = false;
+-		[context_info->peer_info->glLayer performSelectorOnMainThread:@selector(removeLayer) withObject:nil waitUntilDone:YES];
++		[context_info->peer_info->glLayer performSelectorOnMainThread:@selector(removeLayer) withObject:nil waitUntilDone:YES modes:AMETHYST_MAIN_THREAD_MODES];
+ 		[context_info->peer_info->glLayer release];
+--- a/src/native/macosx/org_lwjgl_opengl_Display.m
++++ b/src/native/macosx/org_lwjgl_opengl_Display.m
+@@ -714,3 +714,3 @@
+ 	// create window on main thread
+-	[MacOSXKeyableWindow performSelectorOnMainThread:@selector(createWindow) withObject:nil waitUntilDone:YES];
++	[MacOSXKeyableWindow performSelectorOnMainThread:@selector(createWindow) withObject:nil waitUntilDone:YES modes:AMETHYST_MAIN_THREAD_MODES];
+ 	
+@@ -722,3 +722,3 @@
+ 	// destroy window on main thread
+-	[MacOSXKeyableWindow performSelectorOnMainThread:@selector(destroyWindow) withObject:nil waitUntilDone:YES];
++	[MacOSXKeyableWindow performSelectorOnMainThread:@selector(destroyWindow) withObject:nil waitUntilDone:YES modes:AMETHYST_MAIN_THREAD_MODES];
+ 	
+@@ -731,3 +731,3 @@
+ 		peer_info->isCALayer = false;
+-		[peer_info->glLayer performSelectorOnMainThread:@selector(removeLayer) withObject:nil waitUntilDone:YES];
++		[peer_info->glLayer performSelectorOnMainThread:@selector(removeLayer) withObject:nil waitUntilDone:YES modes:AMETHYST_MAIN_THREAD_MODES];
+ 		[peer_info->glLayer release];

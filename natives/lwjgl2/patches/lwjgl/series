@@ -1,0 +1,7 @@
+# LWJGL 2 patches, applied in this order with `patch -p1 -F 0` to the upstream tree of each
+# listed version. Format: <patch file> <LWJGL version>... (or "all"). Each patch explains itself
+# in its header. Removed-but-still-exported SDK declarations are handled by ../compat instead.
+hidpi-direct-call.patch  2.9.1-nightly-20131120 2.9.1 2.9.2-nightly-20140822
+mainthread-context.patch  all
+mainthread-awt-run-loop-mode.patch  all
+window-delayed-release.patch  all

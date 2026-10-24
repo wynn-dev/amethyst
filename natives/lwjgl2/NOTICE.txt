@@ -1,0 +1,20 @@
+Amethyst arm64 natives for LWJGL 2 era Minecraft (macOS 13+, Apple Silicon)
+
+These jars contain native libraries compiled by the Amethyst project from unmodified public
+upstream source, plus the small build patches kept in natives/lwjgl2/patches of
+https://github.com/wynn-dev/amethyst. The exact upstream commits are listed in
+natives/lwjgl2/build.sh and natives/lwjgl2/README.md.
+
+liblwjgl.dylib
+  Lightweight Java Game Library 2 (https://github.com/LWJGL/lwjgl).
+  BSD 3-clause licence: see LWJGL-LICENSE.txt.
+
+openal.dylib
+  OpenAL Soft (https://github.com/kcat/openal-soft), built as a shared library.
+  GNU Library General Public License version 2 or later: see OpenAL-Soft-COPYING.txt.
+  The complete corresponding source is the upstream tag named in build.sh/README.md plus the
+  patches in natives/lwjgl2/patches/openal-soft (if any); build.sh rebuilds it.
+
+libjinput-osx.jnilib
+  JInput (https://github.com/jinput/jinput), OS X plugin.
+  BSD-style licence: see JInput-LICENSE.txt.

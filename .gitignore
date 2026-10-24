@@ -11,3 +11,7 @@ coverage/
 *.tsbuildinfo
 .vite/
 .claude/worktrees/
+
+# natives/lwjgl2/build.sh scratch and output (published by .github/workflows/natives-lwjgl2.yml)
+natives/lwjgl2/build/
+natives/lwjgl2/dist/

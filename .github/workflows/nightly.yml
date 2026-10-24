@@ -90,26 +90,30 @@ jobs:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: |
+          # Apple's notarization/ticket services (CloudKit) occasionally drop connections; retry them.
+          retry() { for i in 1 2 3 4 5; do "$@" && return 0; echo "::warning::attempt $i failed: $*"; sleep $((i * 15)); done; return 1; }
           xcrun notarytool submit "$RELEASE_DIR/Amethyst-arm64.dmg" \
             --key "$APPLE_API_KEY" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER" \
             --wait --timeout 30m
-          xcrun stapler staple "$RELEASE_DIR/Amethyst-arm64.dmg"
+          retry xcrun stapler staple "$RELEASE_DIR/Amethyst-arm64.dmg"
 
       - name: Verify signature, notarization and Gatekeeper
         run: |
+          # Apple's notarization/ticket services (CloudKit) occasionally drop connections; retry them.
+          retry() { for i in 1 2 3 4 5; do "$@" && return 0; echo "::warning::attempt $i failed: $*"; sleep $((i * 15)); done; return 1; }
           APP="$RELEASE_DIR/mac-arm64/Amethyst.app"
           DMG="$RELEASE_DIR/Amethyst-arm64.dmg"
           codesign --verify --deep --strict --verbose=2 "$APP"
           codesign --display --entitlements - "$APP"
-          spctl -a -vv "$APP"
-          xcrun stapler validate "$APP"
-          xcrun stapler validate "$DMG"
-          spctl -a -t open --context context:primary-signature -vv "$DMG"
+          retry spctl -a -vv "$APP"
+          retry xcrun stapler validate "$APP"
+          retry xcrun stapler validate "$DMG"
+          retry spctl -a -t open --context context:primary-signature -vv "$DMG"
           # The zip is what the updater installs: make sure it holds the same signed app.
           mkdir -p "$RUNNER_TEMP/zipcheck"
           ditto -x -k "$RELEASE_DIR/Amethyst-arm64-mac.zip" "$RUNNER_TEMP/zipcheck"
           codesign --verify --deep --strict "$RUNNER_TEMP/zipcheck/Amethyst.app"
-          spctl -a -vv "$RUNNER_TEMP/zipcheck/Amethyst.app"
+          retry spctl -a -vv "$RUNNER_TEMP/zipcheck/Amethyst.app"
 
       - name: Smoke test the signed app
         env:

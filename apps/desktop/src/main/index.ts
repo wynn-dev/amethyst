@@ -1,8 +1,10 @@
 import { join } from 'node:path'
 import { app, BrowserWindow, shell } from 'electron'
-import { registerService, startRpcServer, trackWebContents } from './rpc/server'
+import { registerMainService, startMainRpc } from './rpc/server'
+import { RuntimeSupervisor } from './runtime'
 
 const isDev = !app.isPackaged
+const runtime = new RuntimeSupervisor()
 
 function createMainWindow(): BrowserWindow {
   const win = new BrowserWindow({
@@ -25,8 +27,19 @@ function createMainWindow(): BrowserWindow {
     },
   })
 
-  trackWebContents(win.webContents)
   win.once('ready-to-show', () => win.show())
+
+  // `AMETHYST_SMOKE=1`: verify both RPC paths end to end, print the result, and quit. Used by CI.
+  if (process.env.AMETHYST_SMOKE) {
+    win.webContents.once('did-finish-load', async () => {
+      const result = await win.webContents.executeJavaScript(
+        `Promise.all([window.amethyst.invoke('app', 'getInfo', []), window.amethyst.invoke('runtime', 'ping', [])])`,
+      )
+      console.log(`SMOKE ${JSON.stringify(result)}`)
+      runtime.stop()
+      app.exit(result.every((r: { ok: boolean }) => r.ok) ? 0 : 1)
+    })
+  }
 
   // Never let the renderer navigate away or open windows; hand external links to the OS.
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -44,7 +57,7 @@ function createMainWindow(): BrowserWindow {
 }
 
 app.whenReady().then(() => {
-  registerService('app', {
+  registerMainService('app', {
     async getInfo() {
       return {
         version: app.getVersion(),
@@ -54,8 +67,10 @@ app.whenReady().then(() => {
       }
     },
   })
-  startRpcServer()
+  startMainRpc()
+  // Window first, runtime in parallel: nothing on the paint path waits for background services.
   createMainWindow()
+  runtime.start()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow()

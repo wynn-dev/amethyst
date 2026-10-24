@@ -48,7 +48,7 @@ everything ← apps/desktop (main process only)
 - **ESM + TypeScript source.** Packages export `./src/index.ts` directly; there is no build step.
   electron-vite bundles them into the main process. Keep `exports` in `package.json` accurate.
 - **No Electron imports in `packages/*`.** Packages are pure Node (≥ 24) so they can be tested
-  with Vitest and reused in workers. Electron specifics live in `apps/desktop/src/main`.
+  with Vitest and reused in workers. Electron specifics live in `apps/desktop/src`.
 - **Never block the event loop.** No `*Sync` fs calls outside startup code. CPU-heavy work
   (hashing many files, unzipping large archives, LZMA) should be streamable and must be safe
   to run inside a `worker_threads` worker.
@@ -67,31 +67,69 @@ everything ← apps/desktop (main process only)
   in `src/__fixtures__/`. Tests that hit the network are wrapped in
   `describe.runIf(process.env.AMETHYST_NET_TESTS)` and are not run in CI by default.
 
-## Desktop app
+## Desktop app: process model
 
-- `src/main`: services (instances, resources, install, launch, accounts, java, settings,
-  telemetry, updater). Services are registered on the RPC server by name.
-- `src/preload`: a single sandboxed CommonJS preload exposing `window.amethyst` (see `shared/rpc.ts`).
-- `src/shared`: types shared by main and renderer: `services.ts` (RPC surface), `events.ts`
-  (push events). These are the only contract between processes.
-- `src/renderer`: React 19 + Tailwind v4 + Radix primitives. TanStack Router (lazy routes),
-  TanStack Query for RPC reads, Zustand for local UI state.
+Amethyst uses three tiers of processes, so the UI can never be blocked by background work.
+
+```
+renderer (React)  ──MessagePort──▶  runtime (utilityProcess)  ──▶  worker_threads
+      │                                   │                         (hashing, unzip, SQLite, LZMA)
+      └──ipc (window/OS only)──▶  main (Electron)  ◀──host calls──┘
+```
+
+- **`src/main`: the Electron main process.** It handles windows, menus, dock, tray, dialogs,
+  the updater, and supervising the runtime. Keep it tiny: no domain logic, no fs scanning, no
+  network beyond the updater. It serves `MainServices` over `ipcMain` and `HostServices` to the
+  runtime (`safeStorage`, `shell.trashItem`, and other Electron-only APIs).
+- **`src/runtime`: the runtime utility process.** It owns every domain service: instances,
+  installs, downloads, resources, accounts, launch, Java, marketplace, telemetry. Each service
+  is registered with `registerService(name, impl)` and pushes events with `emit()`. The main
+  process restarts it with backoff if it crashes; renderers get a fresh port automatically, and
+  in-flight calls fail with `ERUNTIME_RESTARTED`.
+- **Workers.** CPU-bound or blocking work (hashing many files, scanning folders, LZMA, the
+  SQLite connection) runs in `worker_threads` that the runtime owns. Pools must recover from
+  crashes and support cancellation.
+- **`src/preload`.** A single sandboxed CommonJS preload. It receives the runtime port and
+  exposes `window.amethyst` (see `shared/rpc.ts`). Calls are routed by service name: names in
+  `MAIN_SERVICES` go to main, everything else goes to the runtime.
+- **`src/shared`.** The contract shared between processes: `services.ts` (RPC surface),
+  `events.ts` (push events) and `rpc.ts` (transport). Nothing else crosses process boundaries.
+- **`src/renderer`.** React 19 + Tailwind v4 + Radix primitives. TanStack Router with lazy
+  routes, TanStack Query for RPC reads, Zustand for local UI state.
 
 ### IPC rules
 
-1. One `invoke` per user intent; no chatty polling. Reads are cached by TanStack Query.
-2. The main process pushes **events**, not full state. Large collections (mods, versions) are
-   fetched on demand and invalidated by small change events.
-3. Task progress is pushed as throttled snapshots (≤ 10/s per task tree).
+1. One call per user intent; no chatty polling. Reads are cached by TanStack Query.
+2. Push **small change events**, not full state. Large collections (mods, versions) are fetched
+   on demand, row-sized, and invalidated by change events. Coalesce events to at most one
+   batch per frame.
+3. Task progress is pushed as throttled snapshots (4–10 per second per task tree), never polled.
 4. Payloads must be structured-cloneable and small; never send file contents over IPC.
-   Images are served through the `amethyst-asset:` protocol.
+   Local images are served through the `amethyst-asset:` protocol, and CDN images are loaded
+   directly by the renderer.
+5. Every buffer is bounded: game log ring buffers, task history, pending event queues.
+
+### Performance budgets
+
+See [`docs/specs/performance.md`](specs/performance.md) for the full rules. The headline budgets:
+
+- Cold start to interactive ≤ 1000 ms, first paint ≤ 400 ms. Nothing on the paint path waits
+  on the network or the runtime.
+- Clicking Play to the Java process starting ≤ 500 ms when the version is already installed.
+  Launching never waits on optional scans.
+- Idle CPU < 0.5 %. No free-running timers; pause background work while the window is hidden.
+- Renderer entry ≤ 350 KB compressed JS. Every route and every heavy library (the 3D skin
+  viewer, markdown) is lazy-loaded.
+- Any list that can exceed 50 rows is virtualised.
+- Boot work in the runtime is limited to reading settings and the instance index and opening
+  the DB. Everything else is deferred until after first paint and is cancellable.
 
 ### Storage
 
 - App data root: `~/Library/Application Support/Amethyst`.
 - JSON documents (settings, instances) written atomically (write temp + rename).
-- Resource metadata index: `better-sqlite3` in WAL mode, accessed only from the main process
-  (or a dedicated worker).
+- Resource metadata index: `better-sqlite3` in WAL mode, owned by a worker thread in the runtime.
+  Writes are batched in transactions.
 - Secrets (refresh tokens) encrypted with Electron `safeStorage` (Keychain-backed).
 
 ## Releases

@@ -28,6 +28,14 @@ export default defineConfig({
     resolve: { alias: { '@shared': shared } },
     build: {
       externalizeDeps: { exclude: workspacePackages },
+      rollupOptions: {
+        input: {
+          // Electron main process: windows, menus, OS integration only.
+          index: resolve(import.meta.dirname, 'src/main/index.ts'),
+          // Runtime utility process: every domain service.
+          runtime: resolve(import.meta.dirname, 'src/runtime/index.ts'),
+        },
+      },
     },
   },
   preload: {

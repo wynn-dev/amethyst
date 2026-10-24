@@ -1,4 +1,5 @@
-/** Events pushed from the main process to the renderer. Each domain adds its events here. */
+/** Events pushed to the renderer, from either the runtime or main. Each domain adds its events here. */
 export interface Events {
-  'app:ready': { at: number }
+  'runtime:ready': { at: number }
+  'runtime:restarted': { at: number; reason: string }
 }

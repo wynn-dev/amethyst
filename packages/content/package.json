@@ -10,5 +10,11 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@amethyst/nbt": "workspace:*",
+    "@amethyst/task": "workspace:*",
+    "@amethyst/zip": "workspace:*",
+    "smol-toml": "^1.9.1"
   }
 }

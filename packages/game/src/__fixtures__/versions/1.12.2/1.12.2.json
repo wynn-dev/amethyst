@@ -1,0 +1,426 @@
+{
+ "assetIndex": {
+  "id": "1.12",
+  "sha1": "a21e1ded1a24ea1548dd8db0cf30b6acb02655a9",
+  "size": 143136,
+  "totalSize": 129843781,
+  "url": "https://piston-meta.mojang.com/v1/packages/a21e1ded1a24ea1548dd8db0cf30b6acb02655a9/1.12.json"
+ },
+ "assets": "1.12",
+ "complianceLevel": 0,
+ "downloads": {
+  "client": {
+   "sha1": "0f275bc1547d01fa5f56ba34bdc87d981ee12daf",
+   "size": 10180113,
+   "url": "https://piston-data.mojang.com/v1/objects/0f275bc1547d01fa5f56ba34bdc87d981ee12daf/client.jar"
+  }
+ },
+ "id": "1.12.2",
+ "javaVersion": {
+  "component": "jre-legacy",
+  "majorVersion": 8
+ },
+ "libraries": [
+  {
+   "downloads": {
+    "artifact": {
+     "path": "com/mojang/patchy/1.3.9/patchy-1.3.9.jar",
+     "sha1": "eb8bb7b66fa0e2152b1b40b3856e82f7619439ee",
+     "size": 23581,
+     "url": "https://libraries.minecraft.net/com/mojang/patchy/1.3.9/patchy-1.3.9.jar"
+    }
+   },
+   "name": "com.mojang:patchy:1.3.9"
+  },
+  {
+   "downloads": {
+    "artifact": {
+     "path": "oshi-project/oshi-core/1.1/oshi-core-1.1.jar",
+     "sha1": "9ddf7b048a8d701be231c0f4f95fd986198fd2d8",
+     "size": 30973,
+     "url": "https://libraries.minecraft.net/oshi-project/oshi-core/1.1/oshi-core-1.1.jar"
+    }
+   },
+   "name": "oshi-project:oshi-core:1.1"
+  },
+  {
+   "downloads": {
+    "artifact": {
+     "path": "net/java/dev/jna/jna/4.4.0/jna-4.4.0.jar",
+     "sha1": "cb208278274bf12ebdb56c61bd7407e6f774d65a",
+     "size": 1091208,
+     "url": "https://libraries.minecraft.net/net/java/dev/jna/jna/4.4.0/jna-4.4.0.jar"
+    }
+   },
+   "name": "net.java.dev.jna:jna:4.4.0"
+  },
+  {
+   "downloads": {
+    "artifact": {
+     "path": "net/java/dev/jna/platform/3.4.0/platform-3.4.0.jar",
+     "sha1": "e3f70017be8100d3d6923f50b3d2ee17714e9c13",
+     "size": 913436,
+     "url": "https://libraries.minecraft.net/net/java/dev/jna/platform/3.4.0/platform-3.4.0.jar"
+    }
+   },
+   "name": "net.java.dev.jna:platform:3.4.0"
+  },
+  {
+   "downloads": {
+    "artifact": {
+     "path": "com/ibm/icu/icu4j-core-mojang/51.2/icu4j-core-mojang-51.2.jar",
+     "sha1": "63d216a9311cca6be337c1e458e587f99d382b84",
+     "size": 1634692,
+     "url": "https://libraries.minecraft.net/com/ibm/icu/icu4j-core-mojang/51.2/icu4j-core-mojang-51.2.jar"
+    }
+   },
+   "name": "com.ibm.icu:icu4j-core-mojang:51.2"
+  },
+  {
+   "downloads": {
+    "artifact": {
+     "path": "net/sf/jopt-simple/jopt-simple/5.0.3/jopt-simple-5.0.3.jar",
+     "sha1": "cdd846cfc4e0f7eefafc02c0f5dce32b9303aa2a",
+     "size": 78175,
+     "url": "https://libraries.minecraft.net/net/sf/jopt-simple/jopt-simple/5.0.3/jopt-simple-5.0.3.jar"
+    }
+   },
+   "name": "net.sf.jopt-simple:jopt-simple:5.0.3"
+  },
+  {
+   "downloads": {
+    "artifact": {
+     "path": "com/paulscode/librarylwjglopenal/20100824/librarylwjglopenal-20100824.jar",
+     "sha1": "73e80d0794c39665aec3f62eee88ca91676674ef",
+     "size": 18981,
+     "url": "https://libraries.minecraft.net/com/paulscode/librarylwjglopenal/20100824/librarylwjglopenal-20100824.jar"
+    }
+   },
+   "name": "com.paulscode:librarylwjglopenal:20100824"
+  },
+  {
+   "downloads": {
+    "artifact": {
+     "path": "net/java/jinput/jinput/2.0.5/jinput-2.0.5.jar",
+     "sha1": "39c7796b469a600f72380316f6b1f11db6c2c7c4",
+     "size": 208338,
+     "url": "https://libraries.minecraft.net/net/java/jinput/jinput/2.0.5/jinput-2.0.5.jar"
+    }
+   },
+   "name": "net.java.jinput:jinput:2.0.5"
+  },
+  {
+   "downloads": {
+    "artifact": {
+     "path": "net/java/jutils/jutils/1.0.0/jutils-1.0.0.jar",
+     "sha1": "e12fe1fda814bd348c1579329c86943d2cd3c6a6",
+     "size": 7508,
+     "url": "https://libraries.minecraft.net/net/java/jutils/jutils/1.0.0/jutils-1.0.0.jar"
+    }
+   },
+   "name": "net.java.jutils:jutils:1.0.0"
+  },
+  {
+   "downloads": {
+    "artifact": {
+     "path": "org/apache/logging/log4j/log4j-api/2.8.1/log4j-api-2.8.1.jar",
+     "sha1": "e801d13612e22cad62a3f4f3fe7fdbe6334a8e72",
+     "size": 228859,
+     "url": "https://libraries.minecraft.net/org/apache/logging/log4j/log4j-api/2.8.1/log4j-api-2.8.1.jar"
+    }
+   },
+   "name": "org.apache.logging.log4j:log4j-api:2.8.1"
+  },
+  {
+   "downloads": {
+    "artifact": {
+     "path": "org/apache/logging/log4j/log4j-core/2.8.1/log4j-core-2.8.1.jar",
+     "sha1": "4ac28ff2f1ddf05dae3043a190451e8c46b73c31",
+     "size": 1402925,
+     "url": "https://libraries.minecraft.net/org/apache/logging/log4j/log4j-core/2.8.1/log4j-core-2.8.1.jar"
+    }
+   },
+   "name": "org.apache.logging.log4j:log4j-core:2.8.1"
+  },
+  {
+   "downloads": {
+    "artifact": {
+     "path": "org/lwjgl/lwjgl/lwjgl/2.9.4-nightly-20150209/lwjgl-2.9.4-nightly-20150209.jar",
+     "sha1": "697517568c68e78ae0b4544145af031c81082dfe",
+     "size": 1047168,
+     "url": "https://libraries.minecraft.net/org/lwjgl/lwjgl/lwjgl/2.9.4-nightly-20150209/lwjgl-2.9.4-nightly-20150209.jar"
+    }
+   },
+   "name": "org.lwjgl.lwjgl:lwjgl:2.9.4-nightly-20150209",
+   "rules": [
+    {
+     "action": "allow"
+    },
+    {
+     "action": "disallow",
+     "os": {
+      "name": "osx"
+     }
+    }
+   ]
+  },
+  {
+   "downloads": {
+    "artifact": {
+     "path": "org/lwjgl/lwjgl/lwjgl_util/2.9.4-nightly-20150209/lwjgl_util-2.9.4-nightly-20150209.jar",
+     "sha1": "d51a7c040a721d13efdfbd34f8b257b2df882ad0",
+     "size": 173887,
+     "url": "https://libraries.minecraft.net/org/lwjgl/lwjgl/lwjgl_util/2.9.4-nightly-20150209/lwjgl_util-2.9.4-nightly-20150209.jar"
+    }
+   },
+   "name": "org.lwjgl.lwjgl:lwjgl_util:2.9.4-nightly-20150209",
+   "rules": [
+    {
+     "action": "allow"
+    },
+    {
+     "action": "disallow",
+     "os": {
+      "name": "osx"
+     }
+    }
+   ]
+  },
+  {
+   "downloads": {
+    "artifact": {
+     "path": "org/lwjgl/lwjgl/lwjgl-platform/2.9.4-nightly-20150209/lwjgl-platform-2.9.4-nightly-20150209.jar",
+     "sha1": "b04f3ee8f5e43fa3b162981b50bb72fe1acabb33",
+     "size": 22,
+     "url": "https://libraries.minecraft.net/org/lwjgl/lwjgl/lwjgl-platform/2.9.4-nightly-20150209/lwjgl-platform-2.9.4-nightly-20150209.jar"
+    },
+    "classifiers": {
+     "natives-osx": {
+      "path": "org/lwjgl/lwjgl/lwjgl-platform/2.9.4-nightly-20150209/lwjgl-platform-2.9.4-nightly-20150209-natives-osx.jar",
+      "sha1": "bcab850f8f487c3f4c4dbabde778bb82bd1a40ed",
+      "size": 426822,
+      "url": "https://libraries.minecraft.net/org/lwjgl/lwjgl/lwjgl-platform/2.9.4-nightly-20150209/lwjgl-platform-2.9.4-nightly-20150209-natives-osx.jar"
+     }
+    }
+   },
+   "extract": {
+    "exclude": [
+     "META-INF/"
+    ]
+   },
+   "name": "org.lwjgl.lwjgl:lwjgl-platform:2.9.4-nightly-20150209",
+   "natives": {
+    "linux": "natives-linux",
+    "osx": "natives-osx",
+    "windows": "natives-windows"
+   },
+   "rules": [
+    {
+     "action": "allow"
+    },
+    {
+     "action": "disallow",
+     "os": {
+      "name": "osx"
+     }
+    }
+   ]
+  },
+  {
+   "downloads": {
+    "artifact": {
+     "path": "org/lwjgl/lwjgl/lwjgl/2.9.2-nightly-20140822/lwjgl-2.9.2-nightly-20140822.jar",
+     "sha1": "7707204c9ffa5d91662de95f0a224e2f721b22af",
+     "size": 1045632,
+     "url": "https://libraries.minecraft.net/org/lwjgl/lwjgl/lwjgl/2.9.2-nightly-20140822/lwjgl-2.9.2-nightly-20140822.jar"
+    }
+   },
+   "name": "org.lwjgl.lwjgl:lwjgl:2.9.2-nightly-20140822",
+   "rules": [
+    {
+     "action": "allow",
+     "os": {
+      "name": "osx"
+     }
+    }
+   ]
+  },
+  {
+   "downloads": {
+    "artifact": {
+     "path": "org/lwjgl/lwjgl/lwjgl_util/2.9.2-nightly-20140822/lwjgl_util-2.9.2-nightly-20140822.jar",
+     "sha1": "f0e612c840a7639c1f77f68d72a28dae2f0c8490",
+     "size": 173887,
+     "url": "https://libraries.minecraft.net/org/lwjgl/lwjgl/lwjgl_util/2.9.2-nightly-20140822/lwjgl_util-2.9.2-nightly-20140822.jar"
+    }
+   },
+   "name": "org.lwjgl.lwjgl:lwjgl_util:2.9.2-nightly-20140822",
+   "rules": [
+    {
+     "action": "allow",
+     "os": {
+      "name": "osx"
+     }
+    }
+   ]
+  },
+  {
+   "downloads": {
+    "classifiers": {
+     "natives-osx": {
+      "path": "org/lwjgl/lwjgl/lwjgl-platform/2.9.2-nightly-20140822/lwjgl-platform-2.9.2-nightly-20140822-natives-osx.jar",
+      "sha1": "79f5ce2fea02e77fe47a3c745219167a542121d7",
+      "size": 468116,
+      "url": "https://libraries.minecraft.net/org/lwjgl/lwjgl/lwjgl-platform/2.9.2-nightly-20140822/lwjgl-platform-2.9.2-nightly-20140822-natives-osx.jar"
+     }
+    }
+   },
+   "extract": {
+    "exclude": [
+     "META-INF/"
+    ]
+   },
+   "name": "org.lwjgl.lwjgl:lwjgl-platform:2.9.2-nightly-20140822",
+   "natives": {
+    "linux": "natives-linux",
+    "osx": "natives-osx",
+    "windows": "natives-windows"
+   },
+   "rules": [
+    {
+     "action": "allow",
+     "os": {
+      "name": "osx"
+     }
+    }
+   ]
+  },
+  {
+   "downloads": {
+    "classifiers": {
+     "natives-osx": {
+      "path": "net/java/jinput/jinput-platform/2.0.5/jinput-platform-2.0.5-natives-osx.jar",
+      "sha1": "53f9c919f34d2ca9de8c51fc4e1e8282029a9232",
+      "size": 12186,
+      "url": "https://libraries.minecraft.net/net/java/jinput/jinput-platform/2.0.5/jinput-platform-2.0.5-natives-osx.jar"
+     }
+    }
+   },
+   "extract": {
+    "exclude": [
+     "META-INF/"
+    ]
+   },
+   "name": "net.java.jinput:jinput-platform:2.0.5",
+   "natives": {
+    "linux": "natives-linux",
+    "osx": "natives-osx",
+    "windows": "natives-windows"
+   }
+  },
+  {
+   "downloads": {
+    "artifact": {
+     "path": "com/mojang/text2speech/1.10.3/text2speech-1.10.3.jar",
+     "sha1": "48fd510879dff266c3815947de66e3d4809f8668",
+     "size": 11055,
+     "url": "https://libraries.minecraft.net/com/mojang/text2speech/1.10.3/text2speech-1.10.3.jar"
+    }
+   },
+   "name": "com.mojang:text2speech:1.10.3"
+  },
+  {
+   "downloads": {
+    "artifact": {
+     "path": "com/mojang/text2speech/1.10.3/text2speech-1.10.3.jar",
+     "sha1": "48fd510879dff266c3815947de66e3d4809f8668",
+     "size": 11055,
+     "url": "https://libraries.minecraft.net/com/mojang/text2speech/1.10.3/text2speech-1.10.3.jar"
+    },
+    "classifiers": {}
+   },
+   "extract": {
+    "exclude": [
+     "META-INF/"
+    ]
+   },
+   "name": "com.mojang:text2speech:1.10.3",
+   "natives": {
+    "linux": "natives-linux",
+    "windows": "natives-windows"
+   }
+  },
+  {
+   "downloads": {
+    "artifact": {
+     "path": "ca/weblite/java-objc-bridge/1.0.0/java-objc-bridge-1.0.0.jar",
+     "sha1": "6ef160c3133a78de015830860197602ca1c855d3",
+     "size": 40502,
+     "url": "https://libraries.minecraft.net/ca/weblite/java-objc-bridge/1.0.0/java-objc-bridge-1.0.0.jar"
+    },
+    "classifiers": {
+     "natives-osx": {
+      "path": "ca/weblite/java-objc-bridge/1.0.0/java-objc-bridge-1.0.0-natives-osx.jar",
+      "sha1": "08befab4894d55875f33c3d300f4f71e6e828f64",
+      "size": 5629,
+      "url": "https://libraries.minecraft.net/ca/weblite/java-objc-bridge/1.0.0/java-objc-bridge-1.0.0-natives-osx.jar"
+     }
+    }
+   },
+   "extract": {
+    "exclude": [
+     "META-INF/"
+    ]
+   },
+   "name": "ca.weblite:java-objc-bridge:1.0.0",
+   "natives": {
+    "osx": "natives-osx"
+   },
+   "rules": [
+    {
+     "action": "allow",
+     "os": {
+      "name": "osx"
+     }
+    }
+   ]
+  },
+  {
+   "downloads": {
+    "artifact": {
+     "path": "ca/weblite/java-objc-bridge/1.0.0/java-objc-bridge-1.0.0.jar",
+     "sha1": "6ef160c3133a78de015830860197602ca1c855d3",
+     "size": 40502,
+     "url": "https://libraries.minecraft.net/ca/weblite/java-objc-bridge/1.0.0/java-objc-bridge-1.0.0.jar"
+    }
+   },
+   "name": "ca.weblite:java-objc-bridge:1.0.0",
+   "rules": [
+    {
+     "action": "allow",
+     "os": {
+      "name": "osx"
+     }
+    }
+   ]
+  }
+ ],
+ "logging": {
+  "client": {
+   "argument": "-Dlog4j.configurationFile=${path}",
+   "file": {
+    "id": "client-1.12.xml",
+    "sha1": "bd65e7d2e3c237be76cfbef4c2405033d7f91521",
+    "size": 888,
+    "url": "https://piston-data.mojang.com/v1/objects/bd65e7d2e3c237be76cfbef4c2405033d7f91521/client-1.12.xml"
+   },
+   "type": "log4j2-xml"
+  }
+ },
+ "mainClass": "net.minecraft.client.main.Main",
+ "minecraftArguments": "--username ${auth_player_name} --version ${version_name} --gameDir ${game_directory} --assetsDir ${assets_root} --assetIndex ${assets_index_name} --uuid ${auth_uuid} --accessToken ${auth_access_token} --userType ${user_type} --versionType ${version_type}",
+ "minimumLauncherVersion": 18,
+ "releaseTime": "2017-09-18T08:39:46+00:00",
+ "time": "2017-09-18T08:39:46+00:00",
+ "type": "release"
+}

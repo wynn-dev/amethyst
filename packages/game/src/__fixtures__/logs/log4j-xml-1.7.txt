@@ -1,0 +1,16 @@
+  <log4j:Event logger="net.minecraft.client.Minecraft" timestamp="1792869037534" level="INFO" thread="main">
+    <log4j:Message><![CDATA[Setting user: Steve]]></log4j:Message>
+  </log4j:Event>
+  <log4j:Event logger="ekk" timestamp="1792869037535" level="WARN" thread="Render thread">
+    <log4j:Message><![CDATA[Message with <xml> & "quotes" and ]]>]]&gt;<![CDATA[ inside]]></log4j:Message>
+  </log4j:Event>
+  <log4j:Event logger="net.minecraft.client.Minecraft" timestamp="1792869037535" level="ERROR" thread="main">
+    <log4j:Message><![CDATA[Something failed]]></log4j:Message>
+    <log4j:Throwable><![CDATA[java.lang.RuntimeException: boom
+	at LogDemo.main(LogDemo.java:11)
+]]></log4j:Throwable>
+  </log4j:Event>
+  <log4j:Event logger="net.minecraft.client.Minecraft" timestamp="1792869037536" level="INFO" thread="main">
+    <log4j:Message><![CDATA[LWJGL Version: 3.3.3+5]]></log4j:Message>
+  </log4j:Event>
+plain stdout line

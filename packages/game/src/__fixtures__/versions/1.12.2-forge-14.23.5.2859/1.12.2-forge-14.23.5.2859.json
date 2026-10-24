@@ -1,0 +1,100 @@
+{
+ "id": "1.12.2-forge-14.23.5.2859",
+ "time": "2021-12-11T14:47:07+00:00",
+ "releaseTime": "2021-12-11T14:47:07+00:00",
+ "type": "release",
+ "mainClass": "net.minecraft.launchwrapper.Launch",
+ "inheritsFrom": "1.12.2",
+ "logging": {},
+ "minecraftArguments": "--username ${auth_player_name} --version ${version_name} --gameDir ${game_directory} --assetsDir ${assets_root} --assetIndex ${assets_index_name} --uuid ${auth_uuid} --accessToken ${auth_access_token} --userType ${user_type} --tweakClass net.minecraftforge.fml.common.launcher.FMLTweaker --versionType Forge",
+ "libraries": [
+  {
+   "name": "net.minecraftforge:forge:1.12.2-14.23.5.2859",
+   "downloads": {
+    "artifact": {
+     "path": "net/minecraftforge/forge/1.12.2-14.23.5.2859/forge-1.12.2-14.23.5.2859.jar",
+     "url": "",
+     "sha1": "bfc07a510e23e5181b6a32fdcea9c9d9a1445a46",
+     "size": 4466108
+    }
+   }
+  },
+  {
+   "name": "org.ow2.asm:asm-debug-all:5.2",
+   "downloads": {
+    "artifact": {
+     "path": "org/ow2/asm/asm-debug-all/5.2/asm-debug-all-5.2.jar",
+     "url": "https://maven.minecraftforge.net/org/ow2/asm/asm-debug-all/5.2/asm-debug-all-5.2.jar",
+     "sha1": "3354e11e2b34215f06dab629ab88e06aca477c19",
+     "size": 387903
+    }
+   }
+  },
+  {
+   "name": "net.minecraft:launchwrapper:1.12",
+   "downloads": {
+    "artifact": {
+     "path": "net/minecraft/launchwrapper/1.12/launchwrapper-1.12.jar",
+     "url": "https://libraries.minecraft.net/net/minecraft/launchwrapper/1.12/launchwrapper-1.12.jar",
+     "sha1": "111e7bea9c968cdb3d06ef4632bf7ff0824d0f36",
+     "size": 32999
+    }
+   }
+  },
+  {
+   "name": "org.jline:jline:3.5.1",
+   "downloads": {
+    "artifact": {
+     "path": "org/jline/jline/3.5.1/jline-3.5.1.jar",
+     "url": "https://maven.minecraftforge.net/org/jline/jline/3.5.1/jline-3.5.1.jar",
+     "sha1": "51800e9d7a13608894a5a28eed0f5c7fa2f300fb",
+     "size": 614590
+    }
+   }
+  },
+  {
+   "name": "com.typesafe.akka:akka-actor_2.11:2.3.3",
+   "downloads": {
+    "artifact": {
+     "path": "com/typesafe/akka/akka-actor_2.11/2.3.3/akka-actor_2.11-2.3.3.jar",
+     "url": "https://maven.minecraftforge.net/com/typesafe/akka/akka-actor_2.11/2.3.3/akka-actor_2.11-2.3.3.jar",
+     "sha1": "ed62e9fc709ca0f2ff1a3220daa8b70a2870078e",
+     "size": 2514991
+    }
+   }
+  },
+  {
+   "name": "net.sf.jopt-simple:jopt-simple:5.0.3",
+   "downloads": {
+    "artifact": {
+     "path": "net/sf/jopt-simple/jopt-simple/5.0.3/jopt-simple-5.0.3.jar",
+     "url": "https://libraries.minecraft.net/net/sf/jopt-simple/jopt-simple/5.0.3/jopt-simple-5.0.3.jar",
+     "sha1": "cdd846cfc4e0f7eefafc02c0f5dce32b9303aa2a",
+     "size": 78175
+    }
+   }
+  },
+  {
+   "name": "org.apache.logging.log4j:log4j-api:2.15.0",
+   "downloads": {
+    "artifact": {
+     "path": "org/apache/logging/log4j/log4j-api/2.15.0/log4j-api-2.15.0.jar",
+     "url": "https://maven.minecraftforge.net/org/apache/logging/log4j/log4j-api/2.15.0/log4j-api-2.15.0.jar",
+     "sha1": "4a5aa7e55a29391c6f66e0b259d5189aa11e45d0",
+     "size": 301804
+    }
+   }
+  },
+  {
+   "name": "org.apache.logging.log4j:log4j-core:2.15.0",
+   "downloads": {
+    "artifact": {
+     "path": "org/apache/logging/log4j/log4j-core/2.15.0/log4j-core-2.15.0.jar",
+     "url": "https://maven.minecraftforge.net/org/apache/logging/log4j/log4j-core/2.15.0/log4j-core-2.15.0.jar",
+     "sha1": "ba55c13d7ac2fd44df9cc8074455719a33f375b9",
+     "size": 1789769
+    }
+   }
+  }
+ ]
+}

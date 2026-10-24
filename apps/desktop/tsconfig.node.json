@@ -3,5 +3,5 @@
   "compilerOptions": {
     "paths": { "@shared/*": ["./src/shared/*"] }
   },
-  "include": ["electron.vite.config.ts", "vitest.config.ts", "src/main", "src/runtime", "src/preload", "src/shared"]
+  "include": ["electron.vite.config.ts", "vitest.config.ts", "src/main", "src/runtime", "src/preload", "src/shared", "scripts/**/*.ts"]
 }

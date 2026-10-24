@@ -226,7 +226,10 @@ export interface InstallResult {
 export interface InstallLock {
   schemaVersion: 1
   version: string
-  /** When the install started (ms). Files not modified since are trusted by later diagnoses. */
+  /**
+   * When the install finished (ms). Files not modified since are trusted by later diagnoses
+   * (sizes only, no hashing), so it must not be earlier than the files this install wrote.
+   */
   timestamp: number
 }
 
@@ -283,7 +286,9 @@ export async function runInstall(plan: InstallPlan, options: RunInstallOptions):
   // Final libraries pass over the merged chain (picks up anything a loader layer added).
   const merged = await resolveInstalled(options.root, versionId, signal)
   if (versionId !== mc) await step(ctx, 'loader-libraries', 1, (c) => installLibraries(merged, { ...options, ctx: c }))
-  const lock: InstallLock = { schemaVersion: 1, version: versionId, timestamp: startedAt }
+  // The finish time, not the start: everything this install downloaded is older than it, so a
+  // pre-launch diagnose trusts those files by size instead of re-hashing thousands of assets.
+  const lock: InstallLock = { schemaVersion: 1, version: versionId, timestamp: Math.max(Date.now(), startedAt) }
   await writeJsonAtomic(join(options.root, 'versions', versionId, '.install-lock'), lock)
   const result: InstallResult = { versionId, minecraftVersion: mc, javaMajor: requiredJavaMajor(merged, mc) }
   if (loader) result.loader = format ? { kind: loader.kind, version: loader.version, format } : { kind: loader.kind, version: loader.version }

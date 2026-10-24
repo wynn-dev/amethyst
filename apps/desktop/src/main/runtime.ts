@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { app, ipcMain, MessageChannelMain, safeStorage, shell, utilityProcess, type UtilityProcess, type WebContents } from 'electron'
+import { app, BrowserWindow, ipcMain, MessageChannelMain, safeStorage, shell, utilityProcess, type UtilityProcess, type WebContents } from 'electron'
 import { CONNECT_CHANNEL, PORT_CHANNEL, ServiceRegistry, type RpcMessage } from '@shared/rpc'
 import type { HostServices, ReportedError } from '@shared/services'
 import { RUNTIME_ENV } from '@shared/paths'
@@ -7,6 +7,9 @@ import { closeAuthWindow, openAuthWindow } from './auth-window'
 import { emitMain } from './rpc/server'
 
 const SHUTDOWN_TIMEOUT_MS = 1_500
+
+/** Windows hidden while a game runs ("hide launcher while playing"); shown again afterwards. */
+const hiddenWindows = new Set<BrowserWindow>()
 
 const host: HostServices = {
   async encrypt(plain) {
@@ -32,6 +35,23 @@ const host: HostServices = {
     if (!/^https:\/\//i.test(url)) throw Object.assign(new Error('Only https: links can be opened'), { code: 'EINVALID_ARGUMENT' })
     await shell.openExternal(url)
   },
+  async setLauncherHidden(hidden) {
+    if (hidden) {
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (win.isDestroyed() || !win.isVisible()) continue
+        hiddenWindows.add(win)
+        win.hide()
+      }
+      return
+    }
+    showHiddenWindows()
+  },
+}
+
+/** Show the windows hidden for a running game (also when the user clicks the Dock icon). */
+export function showHiddenWindows(): void {
+  for (const win of hiddenWindows) if (!win.isDestroyed()) win.show()
+  hiddenWindows.clear()
 }
 
 /**

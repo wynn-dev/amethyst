@@ -16,19 +16,31 @@ Amethyst/
     .amethyst/instance.json  the instance's metadata (id, name, runtime, overrides, play time)
     icon.png|jpg|webp|gif|svg  the instance icon (content-sniffed, ≤ 8 MB)
     mods/ resourcepacks/ shaderpacks/ saves/ config/ options.txt …   owned by the game
-  minecraft/               shared versions/, libraries/, assets/ (installer, part 2)
-  runtimes/                Java runtimes downloaded by Amethyst (part 2)
+  minecraft/               shared versions/, libraries/, assets/ (the installer)
+    versions/<id>/.install-lock   written when an install finishes; files older than it are trusted by size
+    versions/<id>/<id>-natives-<arch>/   natives extracted per JVM architecture
+  runtimes/<name>/         Java runtimes installed by Amethyst (Mojang mac-os-arm64 or Azul Zulu)
+  java.json                user-added Java paths and hidden (removed) runtimes (+ .bak)
   store/sha1/<aa>/<sha1>   content-addressed blobs (read-only, 0444); store/tmp/ for ingests
   backups/<instance id>/<world folder>/<YYYY-MM-DD_HH-mm-ss>.zip (+ .json sidecar)
   rescued-worlds/<instance> <date>/<world>   worlds moved out of deleted instances
   theme-media/<sha1>.<ext> background images and videos
   skins/<uuid>-<hash>.png  launcher-only skins of offline accounts
   cache/icons/             icons extracted from mods, packs and worlds; mirrors of external instance icons
+  cache/meta/<list>.json   version lists (Mojang manifest, Fabric/Quilt/Forge/NeoForge), revalidated in the background
+  cache/java-probe.json    Java probe results keyed by binary (path, mtime, size): rescans spawn no JVM
+  cache/natives/           the LWJGL 2 arm64 natives manifest (from the natives-lwjgl2-v1 release)
+  cache/modpacks/          modpack archives downloaded from URLs and the marketplace
   cache/                   other disposable caches
 ```
 
 External instances live wherever the user keeps them; Amethyst writes only
 `<folder>/.amethyst/instance.json` there, and deleting such an instance only unregisters it.
+
+Modpack installs also keep their state in the instance: `.amethyst/modpack.lock.json` (the files the
+pack owns, for updates), `.amethyst/unresolved.json` (blocked CurseForge files still to download by
+hand), `.amethyst/backups/modpack-<ts>/` (files replaced or removed by an update, for rollback) and
+`.amethyst/staging/` (resumable downloads of an interrupted install).
 
 ## JSON documents
 

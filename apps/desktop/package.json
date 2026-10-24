@@ -15,7 +15,8 @@
     "dist": "node scripts/dist.mjs",
     "icon": "sh scripts/make-icon.sh",
     "typecheck": "tsc -p tsconfig.node.json && tsc -p tsconfig.web.json",
-    "size": "node scripts/bundle-size.mjs"
+    "size": "node scripts/bundle-size.mjs",
+    "e2e:launch": "tsx --tsconfig tsconfig.node.json scripts/e2e-launch.ts"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",
@@ -24,7 +25,11 @@
   "devDependencies": {
     "@amethyst/auth": "workspace:*",
     "@amethyst/content": "workspace:*",
+    "@amethyst/game": "workspace:*",
+    "@amethyst/installer": "workspace:*",
+    "@amethyst/java": "workspace:*",
     "@amethyst/marketplace": "workspace:*",
+    "@amethyst/modpack": "workspace:*",
     "@amethyst/nbt": "workspace:*",
     "@amethyst/net": "workspace:*",
     "@amethyst/task": "workspace:*",
@@ -50,6 +55,7 @@
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "tailwindcss": "^4.3.3",
+    "tsx": "^4.23.15",
     "vite": "^8.3.5",
     "zustand": "^5.0.16"
   }

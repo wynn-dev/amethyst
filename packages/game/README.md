@@ -62,8 +62,9 @@ The pinned replacements live in [`src/natives/table.ts`](src/natives/table.ts) (
 No arm64 LWJGL 2 natives exist upstream. A CI job in this repository builds them from source and
 publishes them on a `natives-lwjgl2-*` GitHub release. The app consumes an
 `Lwjgl2Arm64Source { baseUrl, artifacts: [{ name, version, url, sha256, size }] }` manifest
-(`DEFAULT_LWJGL2_ARM64_SOURCE` is an empty placeholder until the first release, so LWJGL 2
-versions report `ENATIVES_UNAVAILABLE` on arm64). Each jar holds **flat** arm64 (or universal)
+(`DEFAULT_LWJGL2_ARM64_SOURCE` pins the artifacts and sha256s of the `natives-lwjgl2-v1` release, so
+LWJGL 2 versions launch on arm64 without fetching the manifest; a manifest without the needed
+artifact reports `ENATIVES_UNAVAILABLE`). Each jar holds **flat** arm64 (or universal)
 libraries and is stored locally as
 `libraries/dev/wynn/amethyst/natives/<name>/<version>/<name>-<version>-natives-macos-arm64.jar`.
 

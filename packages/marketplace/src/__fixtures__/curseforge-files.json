@@ -1,0 +1,67 @@
+{
+  "data": [
+    {
+      "id": 4000012,
+      "gameId": 432,
+      "modId": 238222,
+      "isAvailable": true,
+      "displayName": "jei-1.20.1-15.2.0.27",
+      "fileName": "jei-1.20.1-forge-15.2.0.27.jar",
+      "releaseType": 1,
+      "fileStatus": 4,
+      "hashes": [
+        { "value": "ABCDEF0123456789ABCDEF0123456789ABCDEF01", "algo": 1 },
+        { "value": "d41d8cd98f00b204e9800998ecf8427e", "algo": 2 }
+      ],
+      "fileDate": "2023-08-01T00:00:00Z",
+      "fileLength": 1234567,
+      "downloadCount": 5,
+      "downloadUrl": null,
+      "gameVersions": ["1.20.1", "Forge", "NeoForge", "Client", "Server", "Java 17"],
+      "sortableGameVersions": [{ "gameVersionName": "Forge", "gameVersion": "", "gameVersionTypeId": 68441 }],
+      "dependencies": [
+        { "modId": 306612, "relationType": 3 },
+        { "modId": 1, "relationType": 4 },
+        { "modId": 2, "relationType": 6 },
+        { "modId": 3, "relationType": 5 }
+      ],
+      "fileFingerprint": 3456789012
+    },
+    {
+      "id": 4712345,
+      "gameId": 432,
+      "modId": 238222,
+      "isAvailable": true,
+      "displayName": "jei-1.20.1-15.2.0.30",
+      "fileName": "jei-1.20.1-forge-15.2.0.30.jar",
+      "releaseType": 2,
+      "fileStatus": 4,
+      "hashes": [{ "value": "0123456789abcdef0123456789abcdef01234567", "algo": 1 }],
+      "fileDate": "2023-09-01T00:00:00Z",
+      "fileLength": 1300000,
+      "downloadCount": 7,
+      "downloadUrl": "https://edge.forgecdn.net/files/4712/345/jei-1.20.1-forge-15.2.0.30.jar",
+      "gameVersions": ["1.20.1", "Forge"],
+      "dependencies": [],
+      "fileFingerprint": 123456789
+    },
+    {
+      "id": 4800000,
+      "gameId": 432,
+      "modId": 238222,
+      "isAvailable": true,
+      "displayName": "deleted",
+      "fileName": "jei-deleted.jar",
+      "releaseType": 1,
+      "fileStatus": 7,
+      "hashes": [],
+      "fileDate": "2024-01-01T00:00:00Z",
+      "fileLength": 1,
+      "downloadUrl": "https://edge.forgecdn.net/files/4800/0/jei-deleted.jar",
+      "gameVersions": ["1.20.1", "Forge"],
+      "dependencies": [],
+      "fileFingerprint": 1
+    }
+  ],
+  "pagination": { "index": 0, "pageSize": 50, "resultCount": 3, "totalCount": 3 }
+}

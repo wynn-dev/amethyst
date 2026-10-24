@@ -1,0 +1,64 @@
+[
+  {
+    "id": "oldVer01",
+    "project_id": "AANobbMI",
+    "name": "Sodium 0.4.10",
+    "version_number": "mc1.20.1-0.4.10",
+    "changelog": null,
+    "version_type": "release",
+    "featured": false,
+    "status": "listed",
+    "date_published": "2023-06-01T00:00:00Z",
+    "downloads": 10,
+    "game_versions": ["1.20.1"],
+    "loaders": ["fabric"],
+    "files": [
+      {
+        "url": "https://cdn.modrinth.com/data/AANobbMI/versions/oldVer01/sodium-0.4.10.jar",
+        "filename": "sodium-0.4.10.jar",
+        "primary": true,
+        "size": 100,
+        "hashes": { "sha1": "1111111111111111111111111111111111111111", "sha512": "aa" },
+        "file_type": null
+      }
+    ],
+    "dependencies": []
+  },
+  {
+    "id": "abcdEFGH",
+    "project_id": "AANobbMI",
+    "name": "Sodium 0.5.3",
+    "version_number": "mc1.20.1-0.5.3",
+    "changelog": "Fixes",
+    "version_type": "beta",
+    "featured": true,
+    "status": "listed",
+    "date_published": "2023-10-01T00:00:00Z",
+    "downloads": 20,
+    "game_versions": ["1.20.1"],
+    "loaders": ["fabric", "quilt"],
+    "files": [
+      {
+        "url": "https://cdn.modrinth.com/data/AANobbMI/versions/abcdEFGH/sodium-sources.jar",
+        "filename": "sodium-sources.jar",
+        "primary": false,
+        "size": 5,
+        "hashes": { "sha1": "2222222222222222222222222222222222222222" },
+        "file_type": "sources-jar"
+      },
+      {
+        "url": "https://cdn.modrinth.com/data/AANobbMI/versions/abcdEFGH/sodium-0.5.3.jar",
+        "filename": "sodium-0.5.3.jar",
+        "primary": true,
+        "size": 200,
+        "hashes": { "sha1": "3333333333333333333333333333333333333333", "sha512": "bb" },
+        "file_type": null
+      }
+    ],
+    "dependencies": [
+      { "project_id": "P7dR8mSH", "version_id": null, "file_name": null, "dependency_type": "required" },
+      { "project_id": "YL57xq9U", "version_id": "Iris0001", "file_name": null, "dependency_type": "optional" },
+      { "project_id": null, "version_id": null, "file_name": "lib.jar", "dependency_type": "embedded" }
+    ]
+  }
+]

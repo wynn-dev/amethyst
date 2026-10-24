@@ -1,5 +1,8 @@
 name: CI
 
+# Checks every PR without any secrets: no signing, no notarization, no build-time credentials
+# (features that need them degrade gracefully). Signed builds happen in nightly.yml.
+
 on:
   pull_request:
   push:
@@ -8,6 +11,9 @@ on:
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   check:
@@ -19,6 +25,13 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: pnpm
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+          key: electron-cache-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: electron-cache-${{ runner.os }}-
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
@@ -26,5 +39,14 @@ jobs:
       - run: pnpm build
       - name: Smoke test (renderer ↔ main ↔ runtime RPC)
         run: pnpm --filter @amethyst/desktop exec electron .
+        env:
+          AMETHYST_SMOKE: '1'
+      # Catches packaging regressions (missing externalized modules, asar layout) before merge.
+      - name: Package (unsigned)
+        run: pnpm dist
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Smoke test (packaged app)
+        run: apps/desktop/release/mac-arm64/Amethyst.app/Contents/MacOS/Amethyst
         env:
           AMETHYST_SMOKE: '1'

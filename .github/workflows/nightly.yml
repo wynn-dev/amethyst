@@ -1,0 +1,166 @@
+name: Nightly
+
+# Every push to main builds a signed, notarized arm64 app and replaces the rolling `nightly`
+# GitHub release, which is also the electron-updater feed (apps/desktop/electron-builder.yml).
+# This workflow only ever touches the `nightly` release and tag.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: nightly
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  nightly:
+    # A manual run from another branch must not publish over main's nightly.
+    if: github.ref == 'refs/heads/main'
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      RELEASE_DIR: apps/desktop/release
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # full history and tags, for "commits since the previous nightly"
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+          key: electron-cache-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: electron-cache-${{ runner.os }}-
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+
+      - name: Set version
+        run: |
+          # Monotonic semver prerelease: 0.1.0-nightly.9 < 0.1.0-nightly.10 (numeric identifiers).
+          VERSION="0.1.0-nightly.${GITHUB_RUN_NUMBER}"
+          node -e '
+            const fs = require("fs")
+            const file = "apps/desktop/package.json"
+            const pkg = JSON.parse(fs.readFileSync(file, "utf8"))
+            pkg.version = process.argv[1]
+            fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + "\n")
+          ' "$VERSION"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Write the App Store Connect API key
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          KEY_PATH="$RUNNER_TEMP/AuthKey_amethyst.p8"
+          printf '%s\n' "$APPLE_API_KEY_P8" > "$KEY_PATH"
+          chmod 600 "$KEY_PATH"
+          echo "APPLE_API_KEY=$KEY_PATH" >> "$GITHUB_ENV"
+
+      - name: Build, sign and notarize
+        env:
+          AMETHYST_MSA_CLIENT_ID: ${{ secrets.AMETHYST_MSA_CLIENT_ID }}
+          AMETHYST_CURSEFORGE_API_KEY: ${{ secrets.AMETHYST_CURSEFORGE_API_KEY }}
+          AMETHYST_POSTHOG_KEY: ${{ secrets.AMETHYST_POSTHOG_KEY }}
+          AMETHYST_POSTHOG_HOST: https://eu.i.posthog.com
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        # forceCodeSigning fails the build instead of silently producing an unsigned app.
+        # electron-builder notarizes the .app with notarytool and staples the ticket.
+        # buildVersion becomes CFBundleVersion (a plain monotonic integer).
+        working-directory: apps/desktop
+        run: node scripts/dist.mjs -c.forceCodeSigning=true -c.buildVersion="$GITHUB_RUN_NUMBER"
+
+      - name: Notarize and staple the dmg
+        env:
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          xcrun notarytool submit "$RELEASE_DIR/Amethyst-arm64.dmg" \
+            --key "$APPLE_API_KEY" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER" \
+            --wait --timeout 30m
+          xcrun stapler staple "$RELEASE_DIR/Amethyst-arm64.dmg"
+
+      - name: Verify signature, notarization and Gatekeeper
+        run: |
+          APP="$RELEASE_DIR/mac-arm64/Amethyst.app"
+          DMG="$RELEASE_DIR/Amethyst-arm64.dmg"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign --display --entitlements - "$APP"
+          spctl -a -vv "$APP"
+          xcrun stapler validate "$APP"
+          xcrun stapler validate "$DMG"
+          spctl -a -t open --context context:primary-signature -vv "$DMG"
+          # The zip is what the updater installs: make sure it holds the same signed app.
+          mkdir -p "$RUNNER_TEMP/zipcheck"
+          ditto -x -k "$RELEASE_DIR/Amethyst-arm64-mac.zip" "$RUNNER_TEMP/zipcheck"
+          codesign --verify --deep --strict "$RUNNER_TEMP/zipcheck/Amethyst.app"
+          spctl -a -vv "$RUNNER_TEMP/zipcheck/Amethyst.app"
+
+      - name: Smoke test the signed app
+        env:
+          AMETHYST_SMOKE: '1'
+        run: '"$RELEASE_DIR/mac-arm64/Amethyst.app/Contents/MacOS/Amethyst"'
+
+      - name: Write release notes
+        run: |
+          PREV="$(git rev-list -n 1 refs/tags/nightly 2>/dev/null || true)"
+          {
+            echo "Rolling nightly build of \`main\` at ${GITHUB_SHA::7}, version \`$VERSION\`."
+            echo
+            echo "**[Download Amethyst-arm64.dmg](https://github.com/$GITHUB_REPOSITORY/releases/download/nightly/Amethyst-arm64.dmg)** for macOS 13 or later on Apple Silicon. Installed copies update themselves."
+            echo
+            echo "## Changes since the previous nightly"
+            echo
+            if [ -n "$PREV" ] && git merge-base --is-ancestor "$PREV" HEAD; then
+              LOG="$(git log --no-merges --pretty='- %s (%h)' "$PREV..HEAD")"
+              echo "${LOG:-No new commits.}"
+            else
+              echo "The previous nightly could not be found; these are the latest 20 commits."
+              echo
+              git log --no-merges -n 20 --pretty='- %s (%h)'
+            fi
+          } > "$RUNNER_TEMP/notes.md"
+          cat "$RUNNER_TEMP/notes.md"
+
+      - name: Replace the nightly release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Hard-coded on purpose: this step must never touch any other release or tag
+          # (for example natives-lwjgl2-*).
+          TAG=nightly
+          cd "$RELEASE_DIR"
+          ASSETS=(Amethyst-arm64.dmg Amethyst-arm64-mac.zip latest-mac.yml *.blockmap)
+          ls -l "${ASSETS[@]}"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release delete "$TAG" --yes --cleanup-tag
+          fi
+          # The tag can outlive its release (e.g. an interrupted run).
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
+            git push origin ":refs/tags/$TAG"
+          fi
+
+          gh release create "$TAG" "${ASSETS[@]}" \
+            --target "$GITHUB_SHA" \
+            --prerelease \
+            --latest=false \
+            --title "Nightly $VERSION" \
+            --notes-file "$RUNNER_TEMP/notes.md"

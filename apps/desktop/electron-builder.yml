@@ -1,0 +1,72 @@
+# electron-builder configuration: macOS 13+ on Apple Silicon only (docs/specs/DECISIONS.md).
+#
+# Local, unsigned:  pnpm dist                (scripts/dist.mjs disables identity auto-discovery
+#                                             unless CSC_LINK / CSC_NAME is set)
+# CI, signed:       CSC_LINK + CSC_KEY_PASSWORD for the Developer ID Application certificate,
+#                   APPLE_API_KEY (path to the .p8), APPLE_API_KEY_ID, APPLE_API_ISSUER for
+#                   notarization. Notarization is skipped with a warning when those are absent.
+appId: dev.wynn.amethyst
+productName: Amethyst
+copyright: Copyright © 2026 wynn-dev. Amethyst is free software under the GPL-3.0. Not an official Minecraft product.
+
+# The packaged package.json is named `amethyst` (not `@amethyst/desktop`), which also names the
+# updater cache `~/Library/Caches/amethyst-updater`. The app name comes from productName.
+extraMetadata:
+  name: amethyst
+
+directories:
+  output: release
+  buildResources: build
+
+# Only the bundled output and package.json ship. Every workspace package and the renderer's
+# libraries are bundled by electron-vite (devDependencies); `dependencies` holds only what must
+# exist as real node_modules at run time (electron-updater).
+# electron-builder's defaults already drop READMEs, tests, examples and dotfiles from node_modules.
+files:
+  - out/**/*
+  - package.json
+  - '!**/*.map'
+  - '!**/*.{ts,tsx,mts,cts}'
+
+asar: true
+# Native modules must live outside the asar so dlopen can map them (e.g. better-sqlite3 later).
+asarUnpack:
+  - '**/*.node'
+
+# English only (DECISIONS.md): drop Electron's other locale packs.
+electronLanguages:
+  - en
+
+mac:
+  target:
+    - target: dmg
+      arch: arm64
+    - target: zip # required by electron-updater on macOS
+      arch: arm64
+  # Stable names so README links and the updater feed never change between nightlies.
+  artifactName: ${productName}-${arch}-mac.${ext}
+  icon: build/icon.icns
+  category: public.app-category.games
+  minimumSystemVersion: '13.0' # written to LSMinimumSystemVersion
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  notarize: true
+  extendInfo:
+    LSMinimumSystemVersion: '13.0'
+    NSRequiresAquaSystemAppearance: false
+
+dmg:
+  artifactName: ${productName}-${arch}.${ext}
+  # CI notarizes and staples the dmg after the build, which changes its bytes. The macOS updater
+  # only reads the zip, so the dmg gets no blockmap or latest-mac.yml entry that could go stale.
+  writeUpdateInfo: false
+  sign: true # skipped automatically when no identity is available
+
+# Feed for electron-updater (baked into the app as app-update.yml). The nightly workflow
+# replaces this release on every push to main.
+publish:
+  provider: generic
+  url: https://github.com/wynn-dev/amethyst/releases/download/nightly/
+  channel: latest

@@ -1,9 +1,11 @@
 import { join } from 'node:path'
 import { app, ipcMain, MessageChannelMain, safeStorage, shell, utilityProcess, type UtilityProcess, type WebContents } from 'electron'
 import { CONNECT_CHANNEL, PORT_CHANNEL, ServiceRegistry, type RpcMessage } from '@shared/rpc'
-import type { HostServices } from '@shared/services'
+import type { HostServices, ReportedError } from '@shared/services'
 import { RUNTIME_ENV } from '@shared/paths'
 import { emitMain } from './rpc/server'
+
+const SHUTDOWN_TIMEOUT_MS = 1_500
 
 const host: HostServices = {
   async encrypt(plain) {
@@ -32,6 +34,8 @@ export class RuntimeSupervisor {
   #stopping = false
   readonly #hostRegistry = new ServiceRegistry()
   readonly #clients = new Set<WebContents>()
+  /** Main-process errors waiting for the runtime to (re)start. Bounded. */
+  #pendingErrors: ReportedError[] = []
 
   constructor() {
     this.#hostRegistry.register('host', host)
@@ -40,12 +44,39 @@ export class RuntimeSupervisor {
   start(): void {
     ipcMain.on(CONNECT_CHANNEL, (event) => this.#connect(event.sender))
     this.#spawn()
-    app.on('before-quit', () => this.stop())
+    // Give the runtime a brief, bounded chance to flush (e.g. consented telemetry) before quitting.
+    app.on('before-quit', (event) => {
+      if (this.#stopping || !this.#child) return this.stop()
+      event.preventDefault()
+      void this.shutdown(SHUTDOWN_TIMEOUT_MS).then(() => app.quit())
+    })
   }
 
   stop(): void {
     this.#stopping = true
     this.#child?.kill()
+  }
+
+  /** Ask the runtime to finish up and exit; kill it if it takes longer than `timeoutMs`. */
+  async shutdown(timeoutMs: number): Promise<void> {
+    this.#stopping = true
+    const child = this.#child
+    if (!child) return
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, timeoutMs)
+      child.once('exit', () => {
+        clearTimeout(timer)
+        resolve()
+      })
+      child.postMessage({ t: 'shutdown' })
+    })
+    child.kill()
+  }
+
+  /** Forward a main-process error to the runtime's telemetry service, which applies consent. */
+  reportError(error: ReportedError): void {
+    if (this.#child && this.#ready) this.#child.postMessage({ t: 'error', source: 'main', error })
+    else if (this.#pendingErrors.length < 10) this.#pendingErrors.push(error)
   }
 
   #spawn(): void {
@@ -57,6 +88,7 @@ export class RuntimeSupervisor {
         [RUNTIME_ENV.userData]: app.getPath('userData'),
         [RUNTIME_ENV.logs]: app.getPath('logs'),
         [RUNTIME_ENV.version]: app.getVersion(),
+        [RUNTIME_ENV.osVersion]: process.getSystemVersion(),
       },
     })
     this.#child = child
@@ -70,6 +102,8 @@ export class RuntimeSupervisor {
 
     child.once('spawn', () => {
       this.#ready = true
+      for (const error of this.#pendingErrors) child.postMessage({ t: 'error', source: 'main', error })
+      this.#pendingErrors = []
       // Attach every window that asked to connect before the runtime was up (or before a restart).
       for (const contents of this.#clients) this.#connect(contents)
     })

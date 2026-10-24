@@ -15,6 +15,7 @@ const workspacePackages = [
   '@amethyst/nbt',
   '@amethyst/net',
   '@amethyst/task',
+  '@amethyst/telemetry',
   '@amethyst/zip',
 ]
 

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened-runtime entitlements for Amethyst and all of its helpers (main, renderer, GPU,
+  plugin and the runtime utility process). Keep this list minimal; every addition weakens the
+  hardened runtime and needs a reason here.
+
+  com.apple.security.cs.allow-jit
+    V8 (in every Electron process) and WebAssembly compile JavaScript to machine code at run
+    time. On Apple Silicon that needs MAP_JIT pages, which the hardened runtime only permits
+    with this entitlement. Without it every Electron process crashes at startup.
+
+  Deliberately NOT included:
+  - allow-unsigned-executable-memory: only needed by Electron < 12; MAP_JIT covers V8 today.
+  - disable-library-validation: every framework and helper in the bundle is signed with our
+    own Developer ID, and we load no third-party native modules. Java and Minecraft run as
+    separate processes with their own signatures, so they are unaffected by our hardened
+    runtime. Add this only if a future native module (e.g. a prebuilt .node signed by someone
+    else) requires it.
+  - allow-dyld-environment-variables, debugger, device/camera/audio access: not used.
+  - com.apple.security.network.client: only meaningful inside the App Sandbox, which a
+    Developer ID launcher that spawns Java does not use.
+-->
+<plist version="1.0">
+  <dict>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+  </dict>
+</plist>

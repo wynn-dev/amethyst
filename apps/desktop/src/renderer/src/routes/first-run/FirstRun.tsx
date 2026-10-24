@@ -1,13 +1,13 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { CheckCircle2, Coffee, Compass, Download, Plus, UserRound } from 'lucide-react'
 import { Badge, Button, Skeleton, Switch, cn } from '@/ui'
-import { FIRST_RUN_STEPS, useFirstRun, type FirstRunStep } from '@/data/firstRun'
-import { useSettings, useUpdateSettings } from '@/data/settings'
-import { useJavaRuntimes } from '@/data/misc'
+import { FIRST_RUN_STEPS, answerPrivacy, reconcileFirstRun, useFirstRun, type FirstRunStep } from '@/data/firstRun'
+import { useAppSettings, useSettings, useSettingsLoaded, useUpdateSettings } from '@/data/settings'
+import { useAccounts } from '@/data/accounts'
+import { useJavaRuntimes } from '@/data/java'
 import { CRASH_COPY, USAGE_COPY } from '@/data/privacy'
 import type { Account } from '@/data/types'
-import { notYetAvailable } from '@/app/commands'
 import { useUi } from '@/app/ui-store'
 import { PlayerHead } from '@/app/visuals'
 import { AmethystMark } from '@/routes/settings-window/AmethystMark'
@@ -36,9 +36,22 @@ export function FirstRun() {
     const next = FIRST_RUN_STEPS[index + delta]
     if (next) setStep(next)
   }
-  // The Account step is complete only after signing in (or "Skip for now").
-  const [account, setAccount] = useState<Account>()
+  // The Account step is complete only after signing in (or "Skip for now"). An existing account counts.
+  const { data: accounts } = useAccounts()
+  const [added, setAdded] = useState<Account>()
+  const account = added ?? accounts?.find((a) => a.active)
   const [signingIn, setSigningIn] = useState<AccountKind>()
+  // Privacy answers stay local until Continue: nothing is stored or sent before the step is completed.
+  const [consent, setConsent] = useState({ usage: false, crashes: false })
+  const [saving, setSaving] = useState(false)
+  const navigate = useNavigate()
+
+  // A data root that already answered first run (e.g. another window finished it) goes to the app.
+  const loaded = useSettingsLoaded()
+  const settings = useAppSettings()
+  useEffect(() => {
+    if (loaded && reconcileFirstRun(settings) === 'app') void navigate({ to: '/', replace: true })
+  }, [loaded, settings, navigate])
 
   let body: ReactNode
   let primary: ReactNode = (
@@ -67,7 +80,7 @@ export function FirstRun() {
               showKindPicker={false}
               onCancel={() => setSigningIn(undefined)}
               onDone={(a) => {
-                setAccount(a)
+                setAdded(a)
                 setSigningIn(undefined)
               }}
             >
@@ -93,7 +106,22 @@ export function FirstRun() {
       body = <JavaStep />
       break
     case 'privacy':
-      body = <PrivacyStep />
+      body = <PrivacyStep consent={consent} onChange={setConsent} />
+      primary = (
+        <Button
+          variant="primary"
+          size="lg"
+          disabled={saving}
+          onClick={async () => {
+            setSaving(true)
+            const ok = await answerPrivacy(consent)
+            setSaving(false)
+            if (ok) go(1)
+          }}
+        >
+          Continue
+        </Button>
+      )
       break
     case 'done':
       body = <DoneStep />
@@ -244,8 +272,6 @@ function AccountStep({ account, onSignIn, onSkip }: { account?: Account; onSignI
 }
 
 function JavaStep() {
-  const s = useSettings()
-  const update = useUpdateSettings()
   const { data: runtimes, isPending } = useJavaRuntimes()
   return (
     <>
@@ -270,37 +296,33 @@ function JavaStep() {
             <p className="px-3 py-3 text-body text-label-2">No Java runtimes yet. That’s fine.</p>
           ) : (
             <ul className="max-h-[132px] divide-y divide-separator overflow-y-auto">
-              {runtimes.map((r) => (
+              {runtimes.filter((r) => r.valid).map((r) => (
                 <li key={r.id} className="flex h-8 items-center gap-2 px-3 text-body">
                   <span className="tabular">Java {r.version}</span>
                   <span className="truncate text-label-2">{r.vendor}</span>
                   {r.arch === 'x86_64' && <Badge tone="warning">x86_64</Badge>}
+                  {r.source === 'managed' && <Badge>Managed</Badge>}
                 </li>
               ))}
             </ul>
           )}
         </div>
-        <label htmlFor="fr-auto-java" className="flex items-center justify-between rounded-lg bg-surface px-3 py-2.5 shadow-[inset_0_0_0_0.5px_var(--color-surface-border)]">
-          <span className="flex items-center gap-2 text-body">
-            <Download className="size-4 text-accent" /> Download Java automatically
-          </span>
-          <Switch id="fr-auto-java" checked={s.autoJava} onCheckedChange={(autoJava) => update({ autoJava })} />
-        </label>
+        <p className="flex items-center gap-2 rounded-lg bg-surface px-3 py-2.5 text-body shadow-[inset_0_0_0_0.5px_var(--color-surface-border)]">
+          <Download className="size-4 shrink-0 text-accent" /> Missing runtimes download automatically when you play. You can change this in Settings → Java.
+        </p>
       </div>
     </>
   )
 }
 
-function PrivacyStep() {
-  const s = useSettings()
-  const update = useUpdateSettings()
+function PrivacyStep({ consent, onChange }: { consent: { usage: boolean; crashes: boolean }; onChange: (c: { usage: boolean; crashes: boolean }) => void }) {
   const [details, setDetails] = useState(false)
   return (
     <>
       <StepHeader title="Help improve Amethyst" description="Both are off unless you turn them on. Continuing without changes means no." />
       <div className="divide-y divide-separator overflow-hidden rounded-lg bg-surface shadow-[inset_0_0_0_0.5px_var(--color-surface-border)]">
-        <PrivacyRow id="fr-usage" title="Share usage data" description={USAGE_COPY} checked={s.telemetry.usage} onChange={(usage) => update({ telemetry: { ...s.telemetry, usage } })} />
-        <PrivacyRow id="fr-crashes" title="Send crash reports" description={CRASH_COPY} checked={s.telemetry.crashes} onChange={(crashes) => update({ telemetry: { ...s.telemetry, crashes } })} />
+        <PrivacyRow id="fr-usage" title="Share usage data" description={USAGE_COPY} checked={consent.usage} onChange={(usage) => onChange({ ...consent, usage })} />
+        <PrivacyRow id="fr-crashes" title="Send crash reports" description={CRASH_COPY} checked={consent.crashes} onChange={(crashes) => onChange({ ...consent, crashes })} />
       </div>
       <p className="mt-3 text-center text-small text-label-2">
         You can change this any time in Settings → Privacy.{' '}
@@ -356,7 +378,7 @@ function DoneStep() {
           >
             Browse Modpacks
           </Button>
-          <Button size="lg" onClick={() => notYetAvailable('Import')}>
+          <Button size="lg" onClick={() => finish(() => useUi.getState().set({ newInstance: true, newInstanceSource: 'folder' }))}>
             Import…
           </Button>
         </div>

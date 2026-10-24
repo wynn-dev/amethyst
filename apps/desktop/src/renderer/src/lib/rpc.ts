@@ -6,6 +6,8 @@ export class RemoteError extends Error {
     name: string,
     message: string,
     readonly code?: string,
+    /** Structured details from the service (e.g. `major` for `EJAVA_REQUIRED`, a help `link`). */
+    readonly details?: Record<string, unknown>,
   ) {
     super(message)
     this.name = name
@@ -18,7 +20,7 @@ function service<K extends keyof Services>(name: K): Services[K] {
       if (typeof method !== 'string') return undefined
       return async (...args: unknown[]) => {
         const result = await window.amethyst.invoke(name, method, args)
-        if (!result.ok) throw new RemoteError(result.error.name, result.error.message, result.error.code)
+        if (!result.ok) throw new RemoteError(result.error.name, result.error.message, result.error.code, result.error.details)
         return result.value
       }
     },

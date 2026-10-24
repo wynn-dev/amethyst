@@ -533,6 +533,36 @@ export interface InstancesService {
   setIcon(id: string, icon: IconSource | null): Promise<InstanceDetail>
   /** Record that the user selected the instance (sorting by recency). */
   markOpened(id: string): Promise<void>
+  /** How the sidebar organises instances: pins and folders. Changes are announced as `library:changed`. */
+  getLayout(): Promise<LibraryLayout>
+  /** Pin or unpin an instance (pinned instances are listed first). */
+  setPinned(id: string, pinned: boolean): Promise<LibraryLayout>
+  /** Create a sidebar folder (1–64 characters; made unique). */
+  createFolder(name: string): Promise<LibraryFolder>
+  /** Rename a folder or persist its expanded state. Rejects with `ENOT_FOUND`. */
+  updateFolder(id: string, patch: { name?: string; expanded?: boolean }): Promise<LibraryLayout>
+  /** Remove a folder; its instances move back to the top level. */
+  deleteFolder(id: string): Promise<LibraryLayout>
+  /** Put an instance in a folder, or with `null` back at the top level. */
+  moveToFolder(id: string, folderId: string | null): Promise<LibraryLayout>
+}
+
+/** A sidebar folder of instances (named only; no colours). */
+export interface LibraryFolder {
+  id: string
+  name: string
+  /** Disclosure state, persisted. */
+  expanded: boolean
+}
+
+/** Sidebar organisation, stored launcher-wide in `library.json` (never inside instance folders). */
+export interface LibraryLayout {
+  /** In display order. */
+  folders: LibraryFolder[]
+  /** Pinned instance ids, in pin order. */
+  pinned: string[]
+  /** Instance id → folder id. Instances not listed are at the top level. */
+  folderOf: Record<string, string>
 }
 
 // =============================================================================================
@@ -1377,6 +1407,13 @@ export interface InstallService {
   install(instanceId: string): Promise<InstallOutcome>
   /** Check every file of the linked version (full hashes) and re-download or rebuild what is broken. */
   repair(instanceId: string): Promise<RepairOutcome>
+  /**
+   * "Change Version…": back up the instance's worlds first (`pre-version-change`, when
+   * `backups.automatic` is on), switch the instance to `runtime` (a loader key left out is
+   * removed), then install it. One call per user intent; progress arrives through `tasks:update`.
+   * Rejects with `EBUSY` while the instance runs or installs.
+   */
+  changeVersion(instanceId: string, runtime: Partial<InstanceRuntime> & { minecraft: string }): Promise<InstallOutcome & { backedUpWorlds: number }>
 }
 
 // =============================================================================================
@@ -1771,14 +1808,57 @@ export interface UpdaterService {
   quitAndInstall(): Promise<void>
 }
 
+/** Window chrome and Dock integration (main process). */
+export interface WindowService {
+  /** Follow the app's theme in native chrome and vibrancy (`nativeTheme.themeSource`). */
+  setThemeSource(theme: ThemeMode): Promise<void>
+  /** Dock progress bar in [0, 1]; `null` hides it. */
+  setDockProgress(fraction: number | null): Promise<void>
+  /** Dock badge (e.g. failed tasks); `''` clears it. */
+  setDockBadge(text: string): Promise<void>
+  /** Show and focus the main window (e.g. when the game crashed while the launcher was hidden). */
+  focusMain(): Promise<void>
+}
+
+/** Finder and browser integration (main process). Paths must be absolute. */
+export interface ShellService {
+  /** Reveal a file or folder in Finder. Rejects with `ENOT_FOUND` when it does not exist. */
+  showItemInFolder(path: string): Promise<void>
+  /** Open a folder in Finder (folders only; files are revealed instead). */
+  openFolder(path: string): Promise<void>
+  /** Open an `https:` URL in the default browser. Other schemes reject with `EINVALID_ARGUMENT`. */
+  openExternal(url: string): Promise<void>
+}
+
+/** Options for {@link DialogService.open}. */
+export interface OpenDialogOptions {
+  title?: string
+  /** Pick folders instead of files. */
+  directory?: boolean
+  multiple?: boolean
+  /** File type filters, e.g. `[{ name: 'Images', extensions: ['png', 'jpg'] }]`. */
+  filters?: { name: string; extensions: string[] }[]
+  /** Also allow choosing packages (`.app`, `.jdk` bundles) as folders. */
+  treatPackagesAsDirectories?: boolean
+}
+
+/** Native open panels, attached to the calling window (main process). */
+export interface DialogService {
+  /** The chosen absolute paths, or an empty array when cancelled. */
+  open(options: OpenDialogOptions): Promise<string[]>
+}
+
 /** Services in the Electron main process (window and OS integration only). */
 export interface MainServices {
   app: AppService
   updater: UpdaterService
+  window: WindowService
+  shell: ShellService
+  dialog: DialogService
 }
 
 /** Names routed to main by the preload; everything else goes to the runtime. */
-export const MAIN_SERVICES = ['app', 'updater'] as const satisfies readonly (keyof MainServices)[]
+export const MAIN_SERVICES = ['app', 'updater', 'window', 'shell', 'dialog'] as const satisfies readonly (keyof MainServices)[]
 
 /** Everything the renderer can call (`api.<service>.<method>()`). */
 export type Services = RuntimeServices & MainServices

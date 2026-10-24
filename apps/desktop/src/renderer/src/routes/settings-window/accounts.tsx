@@ -1,8 +1,7 @@
 import { lazy, Suspense, useState } from 'react'
 import { AlertTriangle, Minus, Plus, UserRound } from 'lucide-react'
 import { Alert, Banner, Button, EmptyState, Form, FormSection, Menu, Segmented, Skeleton, cn, toast } from '@/ui'
-import { useAccounts } from '@/data/misc'
-import { queryClient } from '@/data/query'
+import { accountActions, useAccounts } from '@/data/accounts'
 import { useSettings } from '@/data/settings'
 import type { Account } from '@/data/types'
 import { notYetAvailable } from '@/app/commands'
@@ -21,10 +20,6 @@ const OWNED_CAPES = [
   { id: 'vanilla', name: 'Vanilla', hue: 30 },
   { id: 'cherry', name: 'Cherry Blossom', hue: 330 },
 ]
-
-function setAccounts(fn: (list: Account[]) => Account[]) {
-  queryClient.setQueryData<Account[]>(['accounts'], (list) => (list ? fn(list) : list))
-}
 
 export function AccountsPane() {
   const { data: accounts, isPending, isError, error, refetch } = useAccounts()
@@ -94,17 +89,17 @@ export function AccountsPane() {
                   </span>
                   <span className="text-small text-label-2">{a.kind === 'microsoft' ? 'Microsoft' : 'Offline'}</span>
                 </div>
-                {a.status === 'expired' ? (
+                {a.status === 'needs-sign-in' ? (
                   <span className="flex items-center gap-2">
                     <span className="flex items-center gap-1 text-small text-orange">
                       <AlertTriangle className="size-3.5" /> Session expired
                     </span>
-                    <Button size="sm" onClick={() => setUi({ addAccount: true })}>
+                    <Button size="sm" onClick={() => setUi({ addAccount: true, reauth: a.id })}>
                       Sign In
                     </Button>
                   </span>
                 ) : (
-                  <span className="text-small text-label-2">Signed in</span>
+                  <span className="text-small text-label-2">{a.kind === 'offline' ? 'Ready' : 'Signed in'}</span>
                 )}
               </div>
             )
@@ -137,10 +132,7 @@ export function AccountsPane() {
             <Button
               size="sm"
               variant="borderless"
-              onClick={() => {
-                // TODO(wire): api.accounts.select(id)
-                setAccounts((l) => l.map((x) => ({ ...x, active: x.id === selected.id })))
-              }}
+              onClick={() => void accountActions.select(selected)}
             >
               Use This Account
             </Button>
@@ -154,14 +146,12 @@ export function AccountsPane() {
         open={!!removing}
         onOpenChange={(o) => !o && setRemoving(null)}
         title={`Remove “${removing ? displayName(removing.name, streamer) : ''}”?`}
-        message="You can add the account again later. Its saved skins stay in your library."
+        message={removing?.kind === 'microsoft' ? 'Its sign-in is deleted from this Mac. You can add the account again later.' : 'You can add it again later.'}
         confirmLabel="Remove"
         destructive
         onConfirm={() => {
           if (!removing) return
-          // TODO(wire): api.accounts.remove(id)
-          setAccounts((l) => l.filter((x) => x.id !== removing.id))
-          toast({ kind: 'success', title: `Removed ${displayName(removing.name, streamer)}` })
+          void accountActions.remove(removing, displayName(removing.name, streamer))
           setSelectedId(undefined)
         }}
       />

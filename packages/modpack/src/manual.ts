@@ -77,6 +77,8 @@ export interface WatchManualOptions {
   signal?: AbortSignal
   /** Also consider files already in the folder when watching starts (default false). */
   includeExisting?: boolean
+  /** Safety rescan interval for events the OS watcher drops (default 2000 ms). */
+  pollMs?: number
 }
 
 /** A running folder watcher. Iterate it to receive matches; it ends when every file matched or it is closed. */
@@ -117,6 +119,8 @@ export function watchForManualFiles(
   let failure: unknown
   let watcher: FSWatcher | undefined
   let chain: Promise<void> = Promise.resolve()
+  let rescanTimer: ReturnType<typeof setTimeout> | undefined
+  let poll: ReturnType<typeof setInterval> | undefined
   const controller = new AbortController()
   const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal
 
@@ -129,6 +133,8 @@ export function watchForManualFiles(
     if (closed) return
     closed = true
     watcher?.close()
+    clearTimeout(rescanTimer)
+    clearInterval(poll)
     controller.abort()
     notify()
   }
@@ -166,7 +172,18 @@ export function watchForManualFiles(
       })
   }
   const rescan = async () => {
+    if (closed) return
     for (const name of await readdir(root).catch(() => [] as string[])) enqueue(name)
+  }
+  // macOS FSEvents coalesces events and often reports only one name for a rename (or none), so
+  // filename events are a hint: every event also triggers a debounced rescan, and a slow poll
+  // catches anything the watcher missed entirely. Unchanged files cost one stat (see `known`).
+  const scheduleRescan = () => {
+    if (closed || rescanTimer) return
+    rescanTimer = setTimeout(() => {
+      rescanTimer = undefined
+      void rescan()
+    }, 150)
   }
 
   const ready = (async () => {
@@ -175,7 +192,7 @@ export function watchForManualFiles(
       watcher = fsWatch(root, { persistent: false }, (_event, filename) => {
         if (closed) return
         if (filename) enqueue(String(filename))
-        else void rescan()
+        scheduleRescan()
       })
       watcher.on('error', (e) => {
         failure ??= e
@@ -188,11 +205,16 @@ export function watchForManualFiles(
     }
     if (options.includeExisting) {
       await rescan()
-      return
+    } else {
+      for (const name of await readdir(root).catch(() => [] as string[])) {
+        const st = await stat(path.join(root, name)).catch(() => undefined)
+        if (st?.isFile() && !known.has(name)) known.set(name, stamp(st))
+      }
     }
-    for (const name of await readdir(root).catch(() => [] as string[])) {
-      const st = await stat(path.join(root, name)).catch(() => undefined)
-      if (st?.isFile() && !known.has(name)) known.set(name, stamp(st))
+    // Start polling only once the baseline is recorded, so existing files are never matched.
+    if (!closed) {
+      poll = setInterval(() => void rescan(), options.pollMs ?? 2_000)
+      poll.unref?.()
     }
   })()
 

@@ -69,6 +69,9 @@ This file is authoritative. Where another spec conflicts with it, this file wins
   - Amethyst **builds its own** arm64 natives (LWJGL 2.9.x, and jinput where needed) from public source in a CI workflow in this repo.
   - They are published on our own GitHub release (`natives-*` tag), with sha256 values pinned in the app.
   - No third-party native binaries are used.
+- Other native libraries on arm64:
+  - `java-objc-bridge` (the 1.12 narrator) is upgraded to the author's official 1.1 release from Maven Central, which already includes arm64. This counts as an upstream release, not a third-party rebuild.
+  - `twitch-platform` natives (1.7.3–1.8.9) are dropped. They are proprietary, x86_64-only, and the Twitch service is defunct.
 - Java runtimes:
   - Use Mojang's runtime manifest (`mac-os-arm64`) where Mojang ships a build.
   - Otherwise use **Azul Zulu** through the official Azul metadata API, verified with sha256. This covers Java 8, Java 16, and any component Mojang lacks for arm64.

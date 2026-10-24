@@ -1,0 +1,58 @@
+Amethyst: run NSOpenGLContext view operations on the main thread.
+
+Current macOS traps ("-[NSOpenGLContext setView:] must be called from the main thread") when
+-setView:, -update or -clearDrawable run on another thread. LWJGL 2 calls them from the thread
+that owns the Display (Minecraft's game thread), which on macOS is never the AppKit main thread.
+Each call now goes through amethyst_run_on_main() (patches/compat/lwjgl2_compat.h), which runs
+it synchronously on the main thread, the way LWJGL already creates its window
+(performSelectorOnMainThread:...waitUntilDone:YES). makeCurrentContext and flushBuffer stay on
+the calling thread: they are thread-safe and must run on the thread that renders.
+
+Applies to: all (the file is identical in every 2.9.x version built).
+
+--- a/src/native/macosx/org_lwjgl_opengl_MacOSXContextImplementation.m
++++ b/src/native/macosx/org_lwjgl_opengl_MacOSXContextImplementation.m
+@@ -132,7 +132,9 @@
+   (JNIEnv *env, jclass clazz, jobject context_handle) {
+ 	NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+ 	MacOSXContext *context_info = (MacOSXContext *)(*env)->GetDirectBufferAddress(env, context_handle);
+-	[context_info->context update];
++	amethyst_run_on_main(^{
++		[context_info->context update];
++	});
+ 	[pool release];
+ }
+ 
+@@ -140,7 +142,9 @@
+ (JNIEnv *env, jclass clazz, jobject context_handle) {
+ 	NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+ 	MacOSXContext *context_info = (MacOSXContext *)(*env)->GetDirectBufferAddress(env, context_handle);
+-	[context_info->context clearDrawable];
++	amethyst_run_on_main(^{
++		[context_info->context clearDrawable];
++	});
+ 	[pool release];
+ }
+ 
+@@ -163,7 +167,9 @@
+ 			peer_info->glLayer->setViewport = YES;
+ 		}
+ 		
+-		[context_info->context setView: peer_info->window_info->view];
++		amethyst_run_on_main(^{
++			[context_info->context setView: peer_info->window_info->view];
++		});
+ 	}
+ 	else {
+ 		[context_info->context setPixelBuffer:peer_info->pbuffer cubeMapFace:0 mipMapLevel:0 currentVirtualScreen:0];
+@@ -224,7 +230,9 @@
+         [context_info->context retain];
+ 	}
+ 	
+-	[context_info->context clearDrawable];
++	amethyst_run_on_main(^{
++		[context_info->context clearDrawable];
++	});
+ 	
+ 	if (context_info->peer_info->isWindowed) {
+         [context_info->peer_info->window_info->view setOpenGLContext:nil];

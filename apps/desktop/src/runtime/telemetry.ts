@@ -1,10 +1,11 @@
 /**
- * The minimal `telemetry` runtime service: consent persisted in `<userData>/telemetry.json`,
- * renderer events limited to an allow-list, and error reports from every process.
- * All gating (consent, schema, scrubbing) happens in `@amethyst/telemetry`; see docs/PRIVACY.md.
+ * The `telemetry` runtime service: renderer events limited to an allow-list, and error reports
+ * from every process. All gating (consent, schema, scrubbing) happens in `@amethyst/telemetry`;
+ * see docs/PRIVACY.md.
  *
- * TODO(settings): the settings service may take over persisting consent; keep this file's
- * format (`{ installId, consent, decidedAt }`) or migrate it.
+ * Consent lives in the settings (`privacy.usageData` / `privacy.crashReports`), which are the
+ * single source of truth; see {@link useConsentSource}. `<userData>/telemetry.json` only keeps
+ * the anonymous install id.
  */
 import { join } from 'node:path'
 import {
@@ -14,28 +15,42 @@ import {
   saveTelemetryState,
   type ExceptionContext,
   type Telemetry,
-  type TelemetryState,
 } from '@amethyst/telemetry'
+import type { TelemetryConsent } from '@shared/services'
 import { RUNTIME_ENV } from '@shared/paths'
 import type { ReportedError, TelemetryService } from '@shared/services'
 
 const stateFile = join(process.env[RUNTIME_ENV.userData] ?? process.cwd(), 'telemetry.json')
 
 let client: Telemetry | undefined
-let state: TelemetryState | undefined
 let appOpenedSent = false
-let saving: Promise<void> = Promise.resolve()
 /** Errors raised before the consent file has been read; replayed (and gated) once it is. Bounded. */
 const early: [unknown, ExceptionContext][] = []
 
-const ready: Promise<Telemetry> = loadTelemetryState(stateFile).then((loaded) => {
-  state = loaded
+/** Where consent is read from and written to (the settings store). */
+export interface ConsentSource {
+  load(): Promise<TelemetryConsent>
+  save(consent: TelemetryConsent): Promise<void>
+}
+
+let resolveSource!: (source: ConsentSource) => void
+const source = new Promise<ConsentSource>((resolve) => (resolveSource = resolve))
+
+/** Connect telemetry to the settings store. Nothing is captured before this is called. */
+export function useConsentSource(consentSource: ConsentSource): void {
+  resolveSource(consentSource)
+}
+
+const ready: Promise<Telemetry> = Promise.all([loadTelemetryState(stateFile), source]).then(async ([loaded, consentSource]) => {
+  const consent = await consentSource.load()
+  // Persist the install id (generated on first run) so it stays stable across launches.
+  await saveTelemetryState(stateFile, { installId: loaded.installId, consent: { usage: false, crashes: false } }).catch(() => {})
   client = createTelemetry({
     // Build-time credentials, inlined by electron-vite (envPrefix AMETHYST_) into the runtime bundle.
     apiKey: import.meta.env.AMETHYST_POSTHOG_KEY,
     host: import.meta.env.AMETHYST_POSTHOG_HOST || DEFAULT_HOST,
     installId: loaded.installId,
-    consent: loaded.consent,
+    consent,
     appInfo: {
       appVersion: process.env[RUNTIME_ENV.version] ?? '0.0.0',
       osVersion: process.env[RUNTIME_ENV.osVersion] ?? 'unknown',
@@ -67,6 +82,14 @@ export function redactFromReports(value: string): void {
   void ready.then((t) => t.addSensitive(value))
 }
 
+/** Apply consent changed in the settings (immediately; revoking drops anything still queued). */
+export async function applyConsent(consent: TelemetryConsent): Promise<TelemetryConsent> {
+  const t = await ready
+  t.setConsent(consent)
+  sendAppOpened(t)
+  return t.getConsent()
+}
+
 /** Send what is queued and stop, within `timeoutMs`. Never rejects. */
 export async function shutdownTelemetry(timeoutMs: number): Promise<void> {
   await client?.shutdown(timeoutMs)
@@ -86,15 +109,10 @@ export const telemetryService: TelemetryService = {
   },
 
   async setConsent(consent) {
-    const t = await ready
     const next = { usage: consent?.usage === true, crashes: consent?.crashes === true }
-    t.setConsent(next)
-    state = { ...state!, consent: next, decidedAt: Date.now() }
-    const snapshot = state
-    saving = saving.then(() => saveTelemetryState(stateFile, snapshot)).catch((e) => console.error('Could not save telemetry consent', e))
-    await saving
-    sendAppOpened(t)
-    return t.getConsent()
+    // Saving goes through the settings store, whose change event calls `applyConsent`.
+    await (await source).save(next)
+    return applyConsent(next)
   },
 
   async capture(event, props) {

@@ -29,6 +29,7 @@ packages/game         version JSON model, inheritance resolution, launch (args, 
 packages/installer    vanilla, Forge, NeoForge, Fabric, Quilt installers
 packages/java         JVM discovery on macOS + Mojang runtime download (mac-os-arm64)
 packages/modpack      .mrpack and CurseForge zip import/export
+packages/telemetry    consent-gated, scrubbed PostHog telemetry (see docs/PRIVACY.md)
 docs/specs            behavioural specs (source of truth for features)
 ```
 
@@ -136,3 +137,18 @@ See [`docs/specs/performance.md`](specs/performance.md) for the full rules. The 
 
 Every push to `main` builds a signed and notarized arm64 build and replaces the rolling
 `nightly` GitHub release. `electron-updater` reads that release's `latest-mac.yml`.
+
+- `.github/workflows/nightly.yml` stamps the version `0.1.0-nightly.<run_number>`, runs the checks,
+  signs (Developer ID, hardened runtime), notarizes and staples the app and the dmg, verifies them
+  with `codesign`/`spctl`, smoke-tests the signed app, then deletes and recreates the `nightly`
+  release and tag. It never touches any other release.
+- `.github/workflows/ci.yml` checks PRs without secrets, including an unsigned `pnpm dist` and a
+  smoke test of the packaged app.
+- Packaging config is `apps/desktop/electron-builder.yml`; entitlements and the icon live in
+  `apps/desktop/build/` (regenerate the icon with `pnpm --filter @amethyst/desktop icon`).
+- `pnpm dist` builds an unsigned dmg and zip locally in `apps/desktop/release/`.
+- Only modules that must exist at run time go in `apps/desktop` `dependencies` (they ship as
+  node_modules inside the asar); everything electron-vite bundles is a `devDependency`.
+
+Telemetry (`packages/telemetry`, served by the runtime's `telemetry` service) is described in
+[`docs/PRIVACY.md`](PRIVACY.md).

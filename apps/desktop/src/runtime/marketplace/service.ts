@@ -159,6 +159,11 @@ export class MarketplaceManager {
     return this.#warmed
   }
 
+  /** The API clients, for the modpack service. CurseForge is `undefined` when unavailable in this build. */
+  clients(): { modrinth: ModrinthClient; curseforge: CurseForgeClient | undefined } {
+    return { modrinth: this.#modrinth, curseforge: this.#curseforge.isAvailable() ? this.#curseforge : undefined }
+  }
+
   status(): MarketStatus {
     const curseforge = this.#curseforge.isAvailable()
     return { modrinth: true, curseforge, ...(curseforge ? {} : { curseforgeReason: this.#d.curseforgeApiKey ? 'forbidden' : 'no-key' }) }

@@ -23,6 +23,8 @@ export interface DataLayout {
   minecraft: string
   /** Java runtimes downloaded by Amethyst. */
   runtimes: string
+  /** User-added Java paths and hidden (removed) discovered runtimes. */
+  javaConfig: string
   /** Content-addressed blob store. */
   store: string
   /** World backups: `backups/<instance id>/<world>/<stamp>.zip`. */
@@ -37,6 +39,14 @@ export interface DataLayout {
   cache: string
   /** Icons extracted from mods, packs, worlds and external instances. */
   icons: string
+  /** Version-list metadata (Mojang manifest, Fabric/Quilt/Forge/NeoForge lists). */
+  metaCache: string
+  /** Java probe results keyed by binary (path, mtime, size). */
+  javaProbeCache: string
+  /** The LWJGL 2 arm64 natives manifest. */
+  nativesCache: string
+  /** Downloaded modpack archives (imports from URLs and the marketplace, update targets). */
+  modpackCache: string
 }
 
 export function dataLayout(root: string, logs?: string): DataLayout {
@@ -52,6 +62,7 @@ export function dataLayout(root: string, logs?: string): DataLayout {
     instances: path.join(r, 'instances'),
     minecraft: path.join(r, 'minecraft'),
     runtimes: path.join(r, 'runtimes'),
+    javaConfig: path.join(r, 'java.json'),
     store: path.join(r, 'store'),
     backups: path.join(r, 'backups'),
     rescuedWorlds: path.join(r, 'rescued-worlds'),
@@ -59,6 +70,10 @@ export function dataLayout(root: string, logs?: string): DataLayout {
     skins: path.join(r, 'skins'),
     cache: path.join(r, 'cache'),
     icons: path.join(r, 'cache', 'icons'),
+    metaCache: path.join(r, 'cache', 'meta'),
+    javaProbeCache: path.join(r, 'cache', 'java-probe.json'),
+    nativesCache: path.join(r, 'cache', 'natives'),
+    modpackCache: path.join(r, 'cache', 'modpacks'),
   }
 }
 

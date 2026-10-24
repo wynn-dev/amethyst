@@ -342,6 +342,14 @@ export type InstanceState =
   /** The folder exists but `.amethyst/instance.json` is unreadable. Offer {@link InstancesService.repair}. */
   | 'broken'
 
+/**
+ * What the launcher is doing with an instance right now (in-memory, never persisted):
+ * `installing` (its game version is being installed or repaired), `launching` (the launch
+ * pipeline runs), `running` (the game process is alive). While it is not `idle` the instance
+ * cannot be renamed or deleted (`EBUSY`).
+ */
+export type InstanceActivity = 'idle' | 'installing' | 'launching' | 'running'
+
 /** One row of the instance list. */
 export interface InstanceSummary {
   /** Stable id; survives renames and folder moves. */
@@ -350,6 +358,8 @@ export interface InstanceSummary {
   name: string
   /** Whether the instance can be used; see {@link InstanceState}. */
   state: InstanceState
+  /** Live activity; changes are announced through `instances:changed` (`updated`). */
+  activity: InstanceActivity
   /** `amethyst-asset://` URL of the icon, or `null` for the default (pick it by `loader`). */
   iconUrl: string | null
   /** Minecraft version, `''` if unknown (broken/missing instances). */
@@ -1123,6 +1133,587 @@ export interface TasksService {
 }
 
 // =============================================================================================
+// Game versions (Minecraft and loader version lists, installed versions)
+// =============================================================================================
+
+/** Minecraft version kinds, as published in Mojang's manifest. */
+export type MinecraftVersionType = 'release' | 'snapshot' | 'old_beta' | 'old_alpha'
+
+/** One Minecraft version from the manifest. */
+export interface MinecraftVersionRow {
+  /** e.g. `1.21.1`, `24w14a`, `26.1`. */
+  id: string
+  type: MinecraftVersionType
+  /** ISO date. */
+  releaseTime: string
+  /** A complete install exists in the shared `minecraft/versions` folder. */
+  installed: boolean
+}
+
+/** Metadata freshness, shown as "stale since …" when a refresh failed. */
+export interface ListFreshness {
+  /** When the list was last confirmed by its server (epoch ms), 0 when unknown. */
+  fetchedAt: number
+  /** True when the cached copy is older than the refresh interval (a background refresh runs; `versions:changed` follows). */
+  stale: boolean
+}
+
+/** Filter for {@link VersionsService.listMinecraft}. */
+export interface MinecraftVersionQuery {
+  /** Version types to include. `old` means `old_beta` and `old_alpha`. Default `['release']`. */
+  types?: ('release' | 'snapshot' | 'old')[]
+}
+
+export interface MinecraftVersionList extends ListFreshness {
+  /** Newest first (manifest order). */
+  items: MinecraftVersionRow[]
+  latest: { release: string; snapshot: string }
+}
+
+/** One loader build for a Minecraft version. */
+export interface LoaderVersionRow {
+  /** The loader's own version (`0.16.5`, `47.3.0`, `21.1.65`), as stored in {@link InstanceRuntime}. */
+  version: string
+  /** Fabric/Quilt stable flag; Forge/NeoForge builds are stable unless they are pre-releases. */
+  stable: boolean
+  /** Forge "recommended" promotion. */
+  recommended: boolean
+  /** The newest build for this Minecraft version. */
+  latest: boolean
+}
+
+export interface LoaderVersionList extends ListFreshness {
+  /** Newest first. Empty when the loader does not support the Minecraft version. */
+  items: LoaderVersionRow[]
+}
+
+/** A version folder in the shared `minecraft/versions`. */
+export interface InstalledVersionRow {
+  /** Folder name and version id, e.g. `1.20.1-forge-47.3.0` or `fabric-loader-0.16.5-1.21.1`. */
+  id: string
+  /** The Minecraft version at the root of its `inheritsFrom` chain (`''` when unreadable). */
+  minecraft: string
+  /** The loader layer, if any. */
+  loader: { kind: LoaderKind; version: string } | null
+  /** The parent version id (`inheritsFrom`), or `null`. */
+  inheritsFrom: string | null
+  /** An install finished (`.install-lock` exists). */
+  complete: boolean
+  /** Instances whose `versionId` is this version (or inherits from it). Such versions cannot be deleted. */
+  usedBy: string[]
+  /** Other installed versions that inherit from this one. */
+  children: string[]
+  /** Size of the version folder itself (JSON, jar, natives); shared libraries and assets are not counted. */
+  sizeBytes: number
+}
+
+/** Minecraft and loader version lists and the installed versions (runtime). */
+export interface VersionsService {
+  /**
+   * Minecraft versions from Mojang's manifest. Served from the on-disk cache (`cache/meta/`) when
+   * there is one, even a stale one; a stale list is refreshed in the background and
+   * `versions:changed` follows. Only the very first call (no cache yet) waits for the network.
+   * Rejects with the network error then.
+   */
+  listMinecraft(query?: MinecraftVersionQuery): Promise<MinecraftVersionList>
+  /** Builds of `loader` for `minecraft`, newest first. Same caching as {@link listMinecraft}. */
+  listLoaders(loader: LoaderKind, minecraft: string): Promise<LoaderVersionList>
+  /** Revalidate every cached list now (a "Refresh" button). Emits `versions:changed`. */
+  refresh(): Promise<void>
+  /** Version folders in the shared `minecraft/versions`, sorted by id. */
+  listInstalled(): Promise<InstalledVersionRow[]>
+  /**
+   * Delete an installed version folder. Rejects with `EBUSY` when an instance uses it, another
+   * installed version inherits from it, or an install or game is running. Shared libraries and
+   * assets are kept. Emits `versions:changed` (`installed`).
+   */
+  deleteInstalled(id: string): Promise<void>
+}
+
+// =============================================================================================
+// Java
+// =============================================================================================
+
+/** One Java runtime known to Amethyst. */
+export interface JavaRow {
+  /** Absolute `bin/java` path (the identity passed back to {@link JavaService.removePath}). */
+  path: string
+  /** The JDK/JRE home. */
+  javaHome: string
+  /** As reported, e.g. `1.8.0_412`, `21.0.5`. `''` when unknown. */
+  version: string
+  /** 8, 17, 21… 0 when unknown. */
+  majorVersion: number
+  /** The JVM's real architecture. `x64` runs under Rosetta 2. */
+  arch: 'arm64' | 'x64' | 'unknown'
+  /** `IMPLEMENTOR`, e.g. `Azul Systems, Inc.`, or `null`. */
+  vendor: string | null
+  /** Where it was found (`managed`, `java_home`, `homebrew`, `sdkman`, `user`, …). */
+  source: string
+  /** Installed by Amethyst under `runtimes/`. */
+  managed: boolean
+  /** Added by the user with {@link JavaService.addPath}. */
+  userAdded: boolean
+  /** Usable: exists, executable, version and arch known. */
+  valid: boolean
+  /** Why it is not usable: `missing`, `not-executable`, `bad-cpu-type`, `timeout`, `unparseable`, `spawn-failed`. */
+  invalidReason: string | null
+}
+
+/** Why a Java was (or was not) picked; see `@amethyst/java` `SelectReason`. */
+export type JavaChoiceReason = 'pinned' | 'preferred' | 'exact-major' | 'compatible-major' | 'rosetta-only' | 'no-valid-java' | 'no-match'
+
+/** The Java an instance would launch with right now. */
+export interface JavaRecommendation {
+  /** The Java major the instance's version needs. */
+  major: number
+  /** The effective policy (`game.java.policy`, or `pinned` when the instance overrides `javaPath`). */
+  policy: GameSettings['java']['policy'] | 'pinned'
+  /** The selected runtime, or `null` when none matches. */
+  java: JavaRow | null
+  reason: JavaChoiceReason
+  /** One sentence for the UI. */
+  message: string
+  /** The selected runtime runs under Rosetta 2. */
+  rosetta: boolean
+  /** The instance pins a Java that is missing or invalid; auto-selection was used instead. */
+  pinnedUnavailable: boolean
+  /** No suitable runtime is installed: launching installs a managed one (Mojang/Zulu) for `major`. */
+  willInstall: boolean
+}
+
+/** Java discovery, managed runtimes and per-instance selection (runtime). */
+export interface JavaService {
+  /**
+   * Every known runtime from the persisted probe cache (never spawns a JVM). Discovery runs
+   * lazily once after startup and on {@link rescan}; `java:changed` announces new results.
+   */
+  list(): Promise<JavaRow[]>
+  /** Rediscover now (cheap: unchanged JDKs are not re-probed). Resolves with the new list. */
+  rescan(): Promise<JavaRow[]>
+  /**
+   * Add a runtime by path (a `bin/java`, a JDK home or a `.jdk` bundle). It is probed right away;
+   * rejects with `EJAVA_INVALID` (`details.reason`) when it cannot be used.
+   */
+  addPath(path: string): Promise<JavaRow>
+  /** Forget a user-added path, or hide a discovered runtime so rescans do not bring it back. */
+  removePath(path: string): Promise<void>
+  /**
+   * Install an Amethyst-managed arm64 runtime for a Java major (Mojang's `mac-os-arm64` build
+   * when one exists, else Azul Zulu), as a `java.install` task. Resolves with the new runtime.
+   */
+  installRuntime(major: number): Promise<JavaRow>
+  /** Which Java `instanceId` would launch with, and why (honours `game.java.*` and the instance's `javaPath`). */
+  recommend(instanceId: string): Promise<JavaRecommendation>
+}
+
+// =============================================================================================
+// Installing an instance's game version
+// =============================================================================================
+
+/** What installing an instance's runtime involves. */
+export interface InstallPlanView {
+  /** The version id the install produces (Forge ids are final only after the install). */
+  versionId: string
+  minecraft: string
+  loader: { kind: LoaderKind; version: string } | null
+  /** Ordered steps with their download sizes when known. */
+  steps: { id: string; bytes: number | null; files: number | null; needsJava: boolean }[]
+  /** Sum of the known step sizes (an upper bound: valid files are skipped). */
+  totalBytes: number
+  /** Java major needed to launch (and to run Forge/NeoForge processors). */
+  javaMajor: number
+  /** Forge/NeoForge processors will run (a Java of `javaMajor` is selected or installed first). */
+  needsJava: boolean
+}
+
+/** Install state of an instance's game version. */
+export interface InstallStatus {
+  /** The linked version id (`versionId` of the instance), `''` when none. */
+  versionId: string
+  /** The linked version is installed completely (its `.install-lock` exists). Shows "Play" vs "Install". */
+  installed: boolean
+  /** An install or repair of this instance is running. */
+  installing: boolean
+}
+
+/** What {@link InstallService.install} did. */
+export interface InstallOutcome {
+  /** The installed version id, now linked to the instance. */
+  versionId: string
+  durationMs: number
+  /** Bytes downloaded. */
+  bytes: number
+}
+
+/** What {@link InstallService.repair} found and fixed. */
+export interface RepairOutcome {
+  versionId: string
+  /** Problems found before repairing. */
+  found: number
+  /** Files re-downloaded. */
+  repaired: number
+  /** Problems left (e.g. natives with no arm64 build). */
+  remaining: { name: string; problem: string; message: string | null }[]
+  /** Forge/NeoForge processors were re-run. */
+  reranProcessors: boolean
+}
+
+/**
+ * Installs the game version of an instance (Minecraft plus its loader) into the shared
+ * `minecraft/` folder (runtime). Installs and repairs run as tasks (`install.run`,
+ * `install.repair`) with byte-weighted progress; one install per instance at a time (a second
+ * call joins the running one). While one runs, the instance cannot be renamed or deleted.
+ */
+export interface InstallService {
+  /** Plan without writing anything (metadata only). Rejects with `EINSTALL_NOT_FOUND` for unknown versions. */
+  plan(instanceId: string): Promise<InstallPlanView>
+  /** Whether the instance's version is installed. Cheap (a few `stat`s). */
+  status(instanceId: string): Promise<InstallStatus>
+  /**
+   * Install (or re-verify) the instance's runtime and link the resulting version id to it.
+   * Forge/NeoForge processors run with a Java of the right major, installed when missing.
+   */
+  install(instanceId: string): Promise<InstallOutcome>
+  /** Check every file of the linked version (full hashes) and re-download or rebuild what is broken. */
+  repair(instanceId: string): Promise<RepairOutcome>
+}
+
+// =============================================================================================
+// Launching the game
+// =============================================================================================
+
+/** Where to go once the game starts. Versions without quick play only support `multiplayer`. */
+export type QuickPlayTarget = { type: 'multiplayer'; host: string; port?: number } | { type: 'singleplayer'; world: string } | { type: 'realms'; realm: string }
+
+/** Options for {@link LaunchService.launch}. */
+export interface LaunchOptions {
+  /** Join this server (shorthand for a `multiplayer` quick play). Wins over the instance's auto-join server. */
+  server?: { host: string; port?: number }
+  /** Quick play target (1.20+; older versions get `--server` for multiplayer, other targets are ignored). */
+  quickPlay?: QuickPlayTarget
+  /** Launch with this account instead of the selected one. */
+  accountId?: string
+}
+
+/** Pipeline steps reported by `launch:state` while preparing. */
+export type LaunchStep =
+  /** Reading the instance and its version. */
+  | 'resolve'
+  /** Installing the game version (first launch, or after a runtime change). */
+  | 'install'
+  /** Choosing (and if needed installing) Java. */
+  | 'java'
+  /** Planning natives for the JVM's architecture (and fetching the LWJGL 2 arm64 natives manifest). */
+  | 'natives'
+  /** Checking files (sizes; hashes only for recent or suspect files). */
+  | 'verify'
+  /** Re-downloading missing or broken files (a visible `launch.repair` task). */
+  | 'repair'
+  /** Refreshing the account session. */
+  | 'account'
+  /** Running the user's pre-launch command. */
+  | 'prelaunch'
+  /** Extracting natives and building the command line. */
+  | 'build'
+  /** Starting the Java process. */
+  | 'spawn'
+
+/** The state of a launch, pushed as `launch:state`. */
+export type LaunchState =
+  | { state: 'preparing'; step: LaunchStep }
+  /** The process runs. Sent again with `ready: true` once the game window is up. */
+  | { state: 'running'; pid: number; startedAt: number; ready: boolean }
+  | {
+      state: 'exited'
+      /** Exit code, or `null` when killed by a signal. */
+      code: number | null
+      signal: string | null
+      /** Crashed (abnormal exit, crash report or JVM crash log). False when the user stopped it. */
+      crashed: boolean
+      /** Stopped through {@link LaunchService.kill}. */
+      killed: boolean
+      /** The crash report (or JVM `hs_err` log) of this run; open it with {@link LaunchService.openCrashReport}. */
+      crashReportPath: string | null
+      durationMs: number
+      /** Native library load failure seen in the output (wrong architecture or missing library). */
+      nativeLoadError: 'architecture' | 'unsatisfied-link' | null
+    }
+  /**
+   * The launch failed before the game started. Typed codes the UI turns into prompts:
+   * `EJAVA_REQUIRED` (`details.major`: install that Java), `ENATIVES_UNAVAILABLE` (no arm64
+   * natives for this version yet), `EACCOUNT_REQUIRED`, `ESIGN_IN_REQUIRED`, `EPRELAUNCH_FAILED`,
+   * `EINSTALL_*`, `EVERSION_*`, `ELAUNCH_*`, `ECANCELLED`.
+   */
+  | { state: 'failed'; code: string; message: string }
+
+/** What {@link LaunchService.launch} resolves with once the process runs. */
+export interface LaunchStarted {
+  /** Identifies this run in `launch:state` / `launch:log`. */
+  launchId: string
+  pid: number
+  startedAt: number
+  /** Time from the call to the process starting. */
+  clickToSpawnMs: number
+}
+
+/** A game that is preparing or running. */
+export interface RunningGame {
+  instanceId: string
+  launchId: string
+  /** `preparing` until the process starts. */
+  phase: 'preparing' | 'running'
+  /** The current step while preparing. */
+  step: LaunchStep | null
+  /** 0 while preparing. */
+  pid: number
+  startedAt: number
+  ready: boolean
+}
+
+/** One line of game output. */
+export interface GameLogLine {
+  /** Increasing per run; page with {@link LaunchService.getLog} `since`. */
+  seq: number
+  /** Epoch ms. */
+  time: number
+  level: 'TRACE' | 'DEBUG' | 'INFO' | 'WARN' | 'ERROR' | 'FATAL'
+  stream: 'stdout' | 'stderr'
+  thread: string | null
+  logger: string | null
+  /** The message (at most 8 KB), with any stack trace appended on following lines. */
+  text: string
+}
+
+/** A page of the game log. */
+export interface GameLogPage {
+  /** The run the lines belong to (`null` when the instance never ran this session). */
+  launchId: string | null
+  /** At most `limit` lines after `since`, oldest first. */
+  lines: GameLogLine[]
+  /** Pass as `since` to get the following lines. */
+  nextSeq: number
+  /** Lines older than the buffer (the last 5,000 lines are kept per instance). */
+  dropped: number
+  running: boolean
+}
+
+/** A crash report's text (bounded). */
+export interface CrashReport {
+  path: string
+  /** `crash-report` (Minecraft) or `jvm` (`hs_err_pid*.log`). */
+  kind: 'crash-report' | 'jvm'
+  /** The first 512 KB. */
+  text: string
+  truncated: boolean
+}
+
+/**
+ * Launching and watching the game (runtime). One game per instance at a time. Progress and the
+ * outcome are pushed as `launch:state`; output as `launch:log` while a log view is subscribed.
+ */
+export interface LaunchService {
+  /**
+   * Run the launch pipeline (see {@link LaunchStep}) and start the game. Resolves once the process
+   * runs; rejects with the same typed error that `launch:state` `failed` carries. Never prompts:
+   * missing pieces become typed errors (e.g. `EJAVA_REQUIRED` with `details.major`).
+   * Rejects with `EBUSY` when the instance is already running, launching or installing.
+   */
+  launch(instanceId: string, options?: LaunchOptions): Promise<LaunchStarted>
+  /** Stop the game (SIGTERM to its process group, SIGKILL after 10 s, or at once with `force`), or cancel a launch that is still preparing. */
+  kill(instanceId: string, options?: { force?: boolean }): Promise<void>
+  /** Games preparing or running. */
+  listRunning(): Promise<RunningGame[]>
+  /** Page through the last run's output (kept after exit until the next launch of the instance). */
+  getLog(instanceId: string, options?: { since?: number; limit?: number }): Promise<GameLogPage>
+  /** Start pushing `launch:log` for this instance (reference-counted; call when the log view mounts). */
+  subscribeLog(instanceId: string): Promise<void>
+  /** Release one {@link subscribeLog} reference. */
+  unsubscribeLog(instanceId: string): Promise<void>
+  /** The crash report (or JVM crash log) of the instance's last run. Rejects with `ENOT_FOUND`. */
+  openCrashReport(instanceId: string): Promise<CrashReport>
+}
+
+// =============================================================================================
+// Modpacks
+// =============================================================================================
+
+/** A pack file to import: a local `.mrpack`/CurseForge zip, or an `https:` URL to one. */
+export type ModpackSource = { path: string } | { url: string }
+
+/** What opening a pack shows before anything is created. */
+export interface ModpackPreview {
+  format: 'modrinth' | 'curseforge'
+  name: string
+  /** The pack's own version string. */
+  version: string
+  author: string | null
+  summary: string | null
+  minecraft: string
+  loader: { kind: LoaderKind; version: string } | null
+  /** Files listed by the manifest. */
+  fileCount: number
+  /** Files in the override folders. */
+  overrideCount: number
+  /** Non-fatal problems (unsafe paths dropped, unknown keys…). */
+  warnings: string[]
+  /** An instance that already follows this pack (same upstream project, else same name): offer "Update" instead. */
+  existingInstanceId: string | null
+}
+
+/** A CurseForge file the author does not allow launchers to download. */
+export interface ModpackManualFile {
+  /** Project name. */
+  name: string
+  fileName: string
+  /** The download page (open it in the browser). */
+  websiteUrl: string
+  /** Where it goes in the instance. */
+  path: string
+  size: number
+  projectId: number
+  fileId: number
+}
+
+/** Input for {@link ModpackService.import}. */
+export interface ModpackImportInput {
+  source: ModpackSource
+  /** Instance name; default the pack name (made unique). */
+  name?: string
+  /** Optional files to install (paths); default each file's default selection. */
+  selectedOptional?: string[]
+  /** Resume an incomplete import into this instance instead of creating a new one. */
+  instanceId?: string
+}
+
+/** What an import did. */
+export interface ModpackImportResult {
+  /** The instance; also the id for {@link ModpackService.watchManualDownloads} / {@link ModpackService.provideManualFile}. */
+  instanceId: string
+  /** Files placed in the instance. */
+  installed: number
+  /** Files the manifest lists that were skipped (server-only, unsafe paths…). */
+  skipped: number
+  /** Blocked CurseForge files still missing: show the "Missing files" dialog. */
+  manual: ModpackManualFile[]
+  /** The game version could not be installed (the files are in place; "Install" replaces "Play"). */
+  runtimeError: { code: string; message: string } | null
+}
+
+/** An available modpack update. */
+export interface ModpackUpdateInfo {
+  instanceId: string
+  platform: MarketPlatform
+  projectId: string
+  /** The installed pack version (Modrinth version id, CurseForge file id). */
+  currentVersionId: string
+  /** The newest version, newer than the installed one. */
+  latest: { versionId: string; name: string; versionNumber: string; publishedAt: string; gameVersions: string[] }
+}
+
+/** One change of an update plan. */
+export interface ModpackChangeRow {
+  path: string
+  action: 'add' | 'update' | 'remove' | 'conflict'
+  /** Conflicts: the user changed the file (`modified-*`), or a file the pack never owned is in the way. */
+  conflict: 'modified-replaced' | 'modified-removed' | 'unmanaged-replaced' | null
+}
+
+/** An update preview. Changes not excluded on apply are performed. */
+export interface ModpackUpdatePlanView {
+  /** Pass to {@link ModpackService.applyUpdate} (valid for 30 minutes). */
+  planId: string
+  instanceId: string
+  target: { versionId: string; name: string }
+  changes: ModpackChangeRow[]
+  /** Files left as they are. */
+  unchanged: number
+  /** Blocked files of the new version that will need a manual download. */
+  manual: ModpackManualFile[]
+  /** `Minecraft 1.20.1 → 1.20.4` style runtime change, or `null`. */
+  runtime: { from: { minecraft: string; loader: { kind: LoaderKind; version: string } | null } | null; to: { minecraft: string; loader: { kind: LoaderKind; version: string } | null } } | null
+}
+
+/** What applying an update did. */
+export interface ModpackUpdateResult {
+  /** Pass to {@link ModpackService.rollback} to restore the previous version. */
+  backupId: string
+  added: number
+  updated: number
+  removed: number
+  manual: ModpackManualFile[]
+  runtimeError: { code: string; message: string } | null
+}
+
+/** Input for {@link ModpackService.export}. */
+export interface ModpackExportInput {
+  format: 'mrpack' | 'curseforge'
+  /** Absolute output file path (from a save dialog). */
+  output: string
+  /** Default the instance name. */
+  name?: string
+  /** Default `1.0.0`. */
+  version?: string
+  /** Relative paths (files or folders) to include; default mods, resource packs, shader packs, config and options.txt. */
+  include?: string[]
+  /** Prefix (`dir/`) or exact excludes; default logs, crash reports, screenshots and servers.dat. */
+  exclude?: string[]
+}
+
+/** What an export wrote. */
+export interface ModpackExportResult {
+  path: string
+  /** Files written as download links. */
+  linked: number
+  /** Files embedded in the archive. */
+  embedded: number
+  warnings: string[]
+}
+
+/** Modpack import, update and export (runtime). Long operations run as tasks. */
+export interface ModpackService {
+  /** Open a pack for the preview dialog. Nothing is created (URLs are downloaded to the cache). */
+  preview(source: ModpackSource): Promise<ModpackPreview>
+  /**
+   * Import a pack as one `modpack.import` task: read → resolve the files (CurseForge ids through
+   * the API) → create the instance → install its game version and the files (in parallel).
+   * Blocked CurseForge files come back in `manual`. If the file install fails or is cancelled the
+   * instance stays (call again with `instanceId` to resume).
+   */
+  import(input: ModpackImportInput): Promise<ModpackImportResult>
+  /** Download a modpack version from Modrinth/CurseForge and import it (records `upstream`). */
+  installFromMarket(input: { platform: MarketPlatform; projectId: string; versionId: string; name?: string }): Promise<ModpackImportResult>
+  /**
+   * Watch `~/Downloads` for the instance's missing manual files (macOS asks the user for access
+   * the first time). Matches are verified by hash, placed in the instance, and announced as
+   * `modpack:manual`. Stops by itself when nothing is missing, on {@link stopWatchingManualDownloads}, or after 30 minutes.
+   */
+  watchManualDownloads(instanceId: string): Promise<ModpackManualFile[]>
+  stopWatchingManualDownloads(instanceId: string): Promise<void>
+  /**
+   * A file the user dropped or picked: matched by hash against the missing files of `instanceId`
+   * (or of every instance with missing files) and placed. Resolves with what is still missing.
+   */
+  provideManualFile(path: string, instanceId?: string): Promise<{ matched: boolean; instanceId: string | null; manual: ModpackManualFile[] }>
+  /** The instance's missing manual files (from `.amethyst/unresolved.json`). */
+  listManualFiles(instanceId: string): Promise<ModpackManualFile[]>
+  /** Check the instance's upstream pack for a newer version (`null`: up to date or no upstream). */
+  checkUpdate(instanceId: string): Promise<ModpackUpdateInfo | null>
+  /** Download `versionId` of the instance's pack and diff it against the instance (a `modpack.plan-update` task). */
+  planUpdate(instanceId: string, versionId: string): Promise<ModpackUpdatePlanView>
+  /**
+   * Apply a plan (a `modpack.update` task): stage everything, back up replaced and removed files,
+   * commit, update the instance's runtime and upstream, then install the game version. `exclude`
+   * lists change paths to leave alone. Worlds are backed up first when automatic backups are on.
+   */
+  applyUpdate(planId: string, options?: { exclude?: string[] }): Promise<ModpackUpdateResult>
+  /** Restore the files (and lock) from before the update `backupId`. */
+  rollback(instanceId: string, backupId: string): Promise<void>
+  /** Write the instance as a `.mrpack` or CurseForge zip (a `modpack.export` task). */
+  export(instanceId: string, input: ModpackExportInput): Promise<ModpackExportResult>
+}
+
+// =============================================================================================
 // Registries
 // =============================================================================================
 
@@ -1136,6 +1727,11 @@ export interface RuntimeServices {
   accounts: AccountsService
   tasks: TasksService
   telemetry: TelemetryService
+  versions: VersionsService
+  java: JavaService
+  install: InstallService
+  launch: LaunchService
+  modpacks: ModpackService
 }
 
 /** An error from another process, reduced to structured-cloneable fields. */
@@ -1207,4 +1803,9 @@ export interface HostServices {
   closeAuthWindow(): Promise<void>
   /** Open an `https:` URL in the default browser. Other schemes are rejected. */
   openExternal(url: string): Promise<void>
+  /**
+   * Hide every launcher window while a game runs ("hide launcher while playing"), or show them
+   * again. The launch service calls it; main keeps the app in the Dock so it can be reopened.
+   */
+  setLauncherHidden(hidden: boolean): Promise<void>
 }

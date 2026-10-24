@@ -1,4 +1,4 @@
-import type { DeepPatch, ResourceKind, Settings, TaskView, UpdaterState } from './services'
+import type { DeepPatch, GameLogLine, LaunchState, ModpackManualFile, ResourceKind, Settings, TaskView, UpdaterState } from './services'
 
 /**
  * Events pushed to the renderer, from either the runtime or main. Payloads are small: ids and
@@ -46,4 +46,28 @@ export interface Events {
    * changed since the previous batch; `removed` lists dismissed or evicted task ids.
    */
   'tasks:update': { tasks: TaskView[]; removed: string[] }
+
+  /**
+   * Version lists changed: `minecraft` and loader lists after a (background) metadata refresh,
+   * `installed` after an install or a deletion. Refetch the named lists.
+   */
+  'versions:changed': { lists: ('minecraft' | 'fabric' | 'quilt' | 'forge' | 'neoforge' | 'installed')[] }
+
+  /** The Java list changed (a scan finished, a runtime was installed, added or removed), or a scan started. */
+  'java:changed': { scanning: boolean }
+
+  /** Launch progress and outcome of one run (see `LaunchState`). */
+  'launch:state': { instanceId: string; launchId: string } & LaunchState
+  /**
+   * New game output, only while a log view is subscribed (`launch.subscribeLog`). At most one
+   * batch per instance every 100 ms and 500 lines per batch; when lines were skipped, `gap` is
+   * true and the view should page them in with `launch.getLog`.
+   */
+  'launch:log': { instanceId: string; launchId: string; lines: GameLogLine[]; gap: boolean }
+
+  /**
+   * Manual (blocked CurseForge) downloads of an instance: a file was matched and placed, or
+   * watching stopped. `manual` is what is still missing; `watching` false means the watcher ended.
+   */
+  'modpack:manual': { instanceId: string; matched: string[]; manual: ModpackManualFile[]; watching: boolean }
 }

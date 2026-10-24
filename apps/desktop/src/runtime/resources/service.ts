@@ -36,7 +36,7 @@ import {
   type ScanCacheRecord,
   type WorkerScanOptions,
 } from '@amethyst/content'
-import { mapLimit } from '@amethyst/task'
+import { mapLimit, type TaskContext } from '@amethyst/task'
 import type { BackupRow, BulkResult, HostServices, ResourceDetail, ResourceKind, ResourcePage, ResourceQuery, ResourceRow, ResourcesService, ResourceSource, Settings } from '@shared/services'
 import type { Emit } from '../context'
 import type { DbClient } from '../db/client'
@@ -703,6 +703,32 @@ export class ResourceManager {
     const n = keep === undefined ? this.#d.settings.value.backups.keep : Math.trunc(keep)
     if (!Number.isFinite(n) || n < 0 || n > 1000) throw invalid('keep must be between 0 and 1000')
     return (await pruneBackups(this.#backupsDir(instanceId), { keep: n })).map((b) => `${b.world}/${b.id}`)
+  }
+
+  /**
+   * Automatic backups before a version or modpack change (when `backups.automatic` is on): every
+   * world of the instance is zipped, then old automatic backups are pruned. Failures are logged,
+   * never thrown, so a damaged world cannot block an update. Returns how many worlds were saved.
+   */
+  async autoBackupWorlds(instanceId: string, reason: 'pre-version-change' | 'pre-modpack-update', ctx?: TaskContext): Promise<number> {
+    if (!this.#d.settings.value.backups.automatic) return 0
+    const { col } = await this.#scanned(instanceId, 'saves')
+    const dir = this.#backupsDir(instanceId)
+    let saved = 0
+    for (const item of col.items.values()) {
+      const save = item.save
+      if (!save) continue
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one world at a time keeps the disk calm
+        const info = await backupWorld(save.path, dir, { ...(ctx ? { ctx } : {}), reason })
+        // oxlint-disable-next-line no-await-in-loop
+        await pruneBackups(dir, { keep: this.#d.settings.value.backups.keep, world: info.world }).catch(() => undefined)
+        saved++
+      } catch (e) {
+        log.warn(`cannot back up ${save.folderName} before the ${reason === 'pre-modpack-update' ? 'modpack update' : 'version change'}`, e)
+      }
+    }
+    return saved
   }
 
   // -------------------------------------------------------------------------------------------

@@ -96,6 +96,10 @@ describe('runInstall (vanilla)', () => {
     expect(server.hits(`/assets/${mini.objects[0]?.slice(0, 2)}/${mini.objects[0]}`)).toBe(1)
     const lock = JSON.parse(await readFile(join(root, 'versions', mini.id, '.install-lock'), 'utf8'))
     expect(lock).toMatchObject({ schemaVersion: 1, version: mini.id })
+    // The lock is not older than anything the install wrote, so later diagnoses trust those files.
+    const written = [join(root, 'versions', mini.id, `${mini.id}.jar`), ...mini.objects.map((h) => join(root, 'assets', 'objects', h.slice(0, 2), h))]
+    const newest = Math.max(...(await Promise.all(written.map(async (p) => (await stat(p)).mtimeMs))))
+    expect(lock.timestamp).toBeGreaterThanOrEqual(Math.floor(newest))
 
     // The result satisfies @amethyst/game's diagnose.
     const resolved = await resolveVersion(join(root, 'versions'), mini.id)

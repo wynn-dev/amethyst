@@ -23,6 +23,7 @@ import type {
   IconSource,
   ImportCandidate,
   ImportInstanceInput,
+  InstanceActivity,
   InstanceDetail,
   InstancePatch,
   InstanceRuntime,
@@ -181,6 +182,8 @@ export class InstanceManager {
   readonly #locks = new KeyedMutex()
   readonly #hooks: InstanceHooks[] = []
   readonly #registry: JsonDocument<RegistryDoc>
+  /** Live activity per instance (installs, launches); absent means `idle`. */
+  readonly #activity = new Map<string, Exclude<InstanceActivity, 'idle'>>()
 
   constructor(deps: InstanceManagerDeps) {
     this.#layout = deps.layout
@@ -297,6 +300,7 @@ export class InstanceManager {
       id: e.id,
       name: e.config.name,
       state: e.state,
+      activity: this.#activity.get(e.id) ?? 'idle',
       iconUrl: e.iconUrl,
       minecraft: e.config.runtime.minecraft,
       loader: loaderOf(e.config.runtime),
@@ -504,8 +508,10 @@ export class InstanceManager {
 
   async delete(id: string, options: DeleteInstanceOptions = {}): Promise<DeleteInstanceResult> {
     const entry = this.#entry(id)
+    // A running game or an install writing into the folder is never interrupted by a delete.
+    if (this.#isBusy(id)) throw new AppError('EBUSY', 'Stop the game or wait for the install to finish before deleting this instance')
     const lock = this.#locks.get(id)
-    // Delete wins: reject queued work and stop running tasks before taking the lock.
+    // Delete wins over other work: reject queued work and stop running tasks before taking the lock.
     lock.rejectWaiting(new AppError('ECANCELLED', 'The instance is being deleted'))
     await Promise.allSettled([...this.#tasks.cancelForInstance(id), this.#release(id, entry.dir)])
     return lock.run(async () => {
@@ -514,6 +520,7 @@ export class InstanceManager {
       if (e.external) {
         await this.#registry.set({ external: this.#registry.value.external.filter((r) => r.id !== id) })
         this.#entries.delete(id)
+        this.#activity.delete(id)
         this.#changed({ removed: [id] })
         return { trashed: false, rescuedWorlds: [] }
       }
@@ -528,6 +535,7 @@ export class InstanceManager {
         }
       }
       this.#entries.delete(id)
+      this.#activity.delete(id)
       await Promise.allSettled(this.#hooks.map((h) => h.removed?.(id, e.dir)))
       this.#changed({ removed: [id] })
       return { trashed: true, rescuedWorlds }
@@ -759,6 +767,25 @@ export class InstanceManager {
       entry.iconUrl = null
       return { ...entry.config, icon: rel }
     })
+  }
+
+  /**
+   * Set the live activity shown in the instance rows (install and launch services). Emits
+   * `instances:changed` when it changes. Busy-ness for rename/delete is decided by the
+   * `isBusy` hooks, not by this value.
+   */
+  setActivity(id: string, activity: InstanceActivity): void {
+    if (!this.#entries.has(id)) return
+    const previous = this.#activity.get(id) ?? 'idle'
+    if (previous === activity) return
+    if (activity === 'idle') this.#activity.delete(id)
+    else this.#activity.set(id, activity)
+    this.#changed({ updated: [id] })
+  }
+
+  /** The live activity of an instance (`idle` when unknown). */
+  activityOf(id: string): InstanceActivity {
+    return this.#activity.get(id) ?? 'idle'
   }
 
   async markOpened(id: string): Promise<void> {

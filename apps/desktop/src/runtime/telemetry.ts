@@ -13,6 +13,8 @@ import {
   DEFAULT_HOST,
   loadTelemetryState,
   saveTelemetryState,
+  type EventArgs,
+  type EventName,
   type ExceptionContext,
   type Telemetry,
 } from '@amethyst/telemetry'
@@ -72,6 +74,21 @@ function sendAppOpened(t: Telemetry): void {
 export function reportError(error: unknown, context: ExceptionContext): void {
   if (client) client.captureException(error, context)
   else if (early.length < 10) early.push([error, context])
+}
+
+/**
+ * Capture a typed runtime event (install, launch, modpack usage and performance timings). Gated
+ * by consent and validated against the schema inside `@amethyst/telemetry`; never throws.
+ */
+export function capture<E extends EventName>(event: E, ...args: EventArgs<E>): void {
+  void ready.then((t) => t.capture(event, ...args)).catch(() => {})
+}
+
+/** Typed telemetry hooks handed to the domain services (fakes in tests). */
+export interface TelemetryHooks {
+  capture: typeof capture
+  redact: (value: string) => void
+  reportError: (error: unknown, context: ExceptionContext) => void
 }
 
 /**

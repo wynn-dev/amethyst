@@ -6,7 +6,7 @@ import { ASSET_SCHEME } from '@shared/paths'
 import type { ReportedError } from '@shared/services'
 import { serveAssetRequest } from './asset-protocol'
 import { registerMainService, startMainRpc } from './rpc/server'
-import { RuntimeSupervisor } from './runtime'
+import { RuntimeSupervisor, showHiddenWindows } from './runtime'
 import { Updater } from './updater'
 
 const isDev = !app.isPackaged
@@ -70,15 +70,35 @@ function createMainWindow(): BrowserWindow {
         ['settings', 'get'],
         ['instances', 'list'],
         ['accounts', 'list'],
+        ['java', 'list'],
+        ['launch', 'listRunning'],
       ]
+      // Needs the network on a fresh data root: an offline failure is fine, an exception is not.
+      const networkCalls: [string, string][] = [['versions', 'listMinecraft']]
       const result: { ok: boolean; value?: unknown; error?: unknown }[] = await win.webContents.executeJavaScript(
         `Promise.all(${JSON.stringify(calls)}.map(([s, m]) => window.amethyst.invoke(s, m, [])))`,
       )
+      const networkResult: { ok: boolean; value?: unknown; error?: { code?: string; message?: string } }[] = await win.webContents.executeJavaScript(
+        `Promise.all(${JSON.stringify(networkCalls)}.map(([s, m]) => window.amethyst.invoke(s, m, [])))`,
+      )
+      // A rejection must be a structured RPC error (e.g. EHTTP offline), never a crash or a hang.
+      const networkOk = networkResult.every((r) => r.ok || typeof r.error?.message === 'string')
       const updaterModule = await import('electron-updater').then(
         () => ({ ok: true }),
         (e: Error) => ({ ok: false, error: { name: e.name, message: e.message } }),
       )
-      const summary = { ...Object.fromEntries(calls.map(([s, m], i) => [`${s}.${m}`, result[i]])), 'electron-updater': updaterModule }
+      const summary = {
+        ...Object.fromEntries(calls.map(([s, m], i) => [`${s}.${m}`, result[i]])),
+        // Keep the output small: the version count, not the list.
+        ...Object.fromEntries(
+          networkCalls.map(([s, m], i) => {
+            const r = networkResult[i]
+            const items = (r?.value as { items?: unknown[] } | undefined)?.items
+            return [`${s}.${m}`, r?.ok ? { ok: true, value: { versions: items?.length ?? 0 } } : r]
+          }),
+        ),
+        'electron-updater': updaterModule,
+      }
       process.stdout.write(`SMOKE ${JSON.stringify(summary)}\n`)
       const value = (name: string) => (summary as Record<string, { value?: unknown } | undefined>)[name]?.value
       const ping = value('runtime.ping') as { index?: { ok?: boolean } } | undefined
@@ -87,7 +107,10 @@ function createMainWindow(): BrowserWindow {
         updaterModule.ok &&
         ping?.index?.ok === true &&
         Array.isArray(value('instances.list')) &&
-        Array.isArray(value('accounts.list'))
+        Array.isArray(value('accounts.list')) &&
+        Array.isArray(value('java.list')) &&
+        Array.isArray(value('launch.listRunning')) &&
+        networkOk
       runtime.stop()
       app.exit(ok ? 0 : 1)
     })
@@ -134,6 +157,7 @@ app.whenReady().then(() => {
   updater.start()
 
   app.on('activate', () => {
+    showHiddenWindows()
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow()
   })
 })

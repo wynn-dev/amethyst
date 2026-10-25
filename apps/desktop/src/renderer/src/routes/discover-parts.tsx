@@ -7,7 +7,7 @@ import { BlockIcon } from '@/app/visuals'
 import { useInstanceRows, runtimeLabel, type RuntimeInstanceRow } from '@/data/instance-info'
 import { KIND_FOR_TYPE, bestVersion, installProject, projectKey, useFavourites, useInstallState, type InstallTarget } from '@/data/market'
 import { installModpackFromMarket } from '@/data/modpacks'
-import { useRunningTask } from '@/data/tasks-live'
+import { useRunningTask } from '@/data/tasks'
 import { api } from '@/lib/rpc'
 import { reportError } from '@/lib/error-text'
 

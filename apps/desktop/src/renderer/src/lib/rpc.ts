@@ -6,7 +6,7 @@ export class RemoteError extends Error {
     name: string,
     message: string,
     readonly code?: string,
-    /** Structured details from the service (e.g. a help `link`, the failing `platform`). */
+    /** Structured details from the service (e.g. `major` for `EJAVA_REQUIRED`, a help `link`). */
     readonly details?: Record<string, unknown>,
   ) {
     super(message)

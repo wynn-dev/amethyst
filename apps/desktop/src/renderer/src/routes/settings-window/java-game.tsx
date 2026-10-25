@@ -1,25 +1,34 @@
-import { AlertTriangle, ChevronDown, Ellipsis, Plus, RefreshCw, X } from 'lucide-react'
-import { Badge, Button, Checkbox, Form, FormSection, IconButton, Menu, SkeletonRows, Stepper, Switch, TextField, cn, toast } from '@/ui'
-import { useJavaRuntimes } from '@/data/misc'
-import { useSettings, useUpdateSettings } from '@/data/settings'
+import { AlertTriangle, ChevronDown, Ellipsis, RefreshCw } from 'lucide-react'
+import type { GameSettings } from '@shared/services'
+import { Badge, Button, Checkbox, Form, FormSection, IconButton, Menu, Select, SkeletonRows, Spinner, Stepper, Switch, cn } from '@/ui'
+import { api } from '@/lib/rpc'
+import { toastError } from '@/lib/error-messages'
+import { formatArgs, parseArgs } from '@/lib/args'
+import { javaActions, useJavaRuntimes, useJavaScanning } from '@/data/java'
+import { patchSettings, useAppSettings, useSystemInfo } from '@/data/settings'
 import type { JavaRuntime } from '@/data/types'
 import { QueryError } from '@/app/RouteStates'
-import { notYetAvailable } from '@/app/commands'
+import { CommitField, EnvTable } from '@/routes/settings-fields'
 import { SettingRow, useRowHighlight } from './context'
 
-function download(major: number) {
-  // TODO(wire): api.java.download(major) — Mojang runtime where available, else Azul Zulu (java.md).
-  toast({ kind: 'info', title: `Downloading Java ${major}`, message: 'Progress is shown in Activity.' })
-}
-
 const SOURCE_LABEL: Record<JavaRuntime['source'], string> = { managed: 'Managed', system: 'System', added: 'Added' }
+
+const INVALID: Record<string, string> = {
+  missing: 'Missing',
+  'not-executable': 'Not executable',
+  'bad-cpu-type': 'Wrong processor',
+  timeout: 'Didn’t respond',
+  unparseable: 'Unknown version',
+  'spawn-failed': 'Can’t run',
+}
 
 /** Settings → Java (B7.4). */
 export function JavaPane() {
   const { data: runtimes, isPending, isError, error, refetch } = useJavaRuntimes()
-  const s = useSettings()
-  const update = useUpdateSettings()
+  const scanning = useJavaScanning()
+  const s = useAppSettings()
   const highlighted = useRowHighlight('runtimes')
+  const policy = s.game.java.policy
 
   return (
     <Form className="max-w-[720px]">
@@ -27,16 +36,13 @@ export function JavaPane() {
         title="Installed Runtimes"
         action={
           <div className="flex items-center gap-1">
-            <IconButton
-              label="Refresh"
-              size="sm"
-              onClick={() => {
-                // TODO(wire): api.java.refresh() — re-scans the system.
-                refetch()
-              }}
-            >
+            {scanning && <Spinner size={12} label="Scanning" />}
+            <IconButton label="Scan Again" size="sm" disabled={scanning} onClick={() => void javaActions.rescan()}>
               <RefreshCw />
             </IconButton>
+            <Button size="sm" onClick={() => void javaActions.addFromDisk()}>
+              Add…
+            </Button>
             <Menu
               align="end"
               trigger={
@@ -44,11 +50,11 @@ export function JavaPane() {
                   Download Java… <ChevronDown className="!size-3" />
                 </Button>
               }
-              items={[8, 17, 21, 25].map((major) => ({ label: `Java ${major}`, onSelect: () => download(major) }))}
+              items={[8, 17, 21, 25].map((major) => ({ label: `Java ${major}`, onSelect: () => void javaActions.install(major) }))}
             />
           </div>
         }
-        footer="Managed runtimes were downloaded by Amethyst and can be removed. Others can be forgotten; their files stay where they are."
+        footer="Managed runtimes were downloaded by Amethyst (Mojang’s builds, or Azul Zulu where Mojang has none). Forgetting a runtime hides it from Amethyst; its files stay where they are."
       >
         <div id="row-runtimes" className={cn('transition-colors duration-500', highlighted && 'bg-accent-soft')}>
           {isError ? (
@@ -63,7 +69,7 @@ export function JavaPane() {
                 <tr className="border-b border-separator text-small text-label-2">
                   <th className="w-[96px] px-2.5 py-1.5 font-medium">Version</th>
                   <th className="w-[140px] px-2 py-1.5 font-medium">Vendor</th>
-                  <th className="w-[84px] px-2 py-1.5 font-medium">Arch</th>
+                  <th className="w-[96px] px-2 py-1.5 font-medium">Arch</th>
                   <th className="px-2 py-1.5 font-medium">Path</th>
                   <th className="w-[76px] px-2 py-1.5 font-medium">Source</th>
                   <th className="w-[36px] px-1 py-1.5">
@@ -73,16 +79,20 @@ export function JavaPane() {
               </thead>
               <tbody>
                 {runtimes.map((r, i) => (
-                  <tr key={r.id} className={cn('h-8', i % 2 === 1 && 'bg-row-alt')}>
+                  <tr key={r.id} className={cn('h-8', i % 2 === 1 && 'bg-row-alt', !r.valid && 'text-label-3')}>
                     <td className="px-2.5 tabular">{r.version}</td>
                     <td className="truncate px-2 text-label-2">{r.vendor}</td>
                     <td className="px-2">
-                      {r.arch === 'x86_64' ? (
+                      {!r.valid ? (
+                        <Badge tone="error" title={r.invalidReason}>
+                          {INVALID[r.invalidReason ?? ''] ?? 'Unusable'}
+                        </Badge>
+                      ) : r.arch === 'x86_64' ? (
                         <Badge tone="warning" title="Runs under Rosetta">
                           <AlertTriangle /> x86_64
                         </Badge>
                       ) : (
-                        <span className="text-label-2">arm64</span>
+                        <span className="text-label-2">{r.arch}</span>
                       )}
                     </td>
                     <td className="selectable truncate px-2 font-mono text-small text-label-2" title={r.path}>
@@ -98,11 +108,10 @@ export function JavaPane() {
                           </IconButton>
                         }
                         items={[
-                          { label: 'Show in Finder', onSelect: () => notYetAvailable('Show in Finder') },
+                          { label: 'Show in Finder', onSelect: () => void api.shell.showItemInFolder(r.home || r.path).catch((e: unknown) => toastError(e, 'Couldn’t show it in Finder')) },
+                          { label: 'Use for Every Instance', disabled: !r.valid, onSelect: () => void patchSettings({ game: { java: { policy: 'custom', path: r.path } } }) },
                           { kind: 'separator' },
-                          r.source === 'managed'
-                            ? { label: 'Move to Trash…', destructive: true, onSelect: () => notYetAvailable('Removing runtimes') }
-                            : { label: 'Forget', onSelect: () => notYetAvailable('Forgetting runtimes') },
+                          { label: r.source === 'added' ? 'Remove' : 'Forget', onSelect: () => void javaActions.remove(r) },
                         ]}
                       />
                     </td>
@@ -114,123 +123,126 @@ export function JavaPane() {
         </div>
       </FormSection>
 
-      <FormSection>
-        <SettingRow row="auto-java" label="Automatically download required Java" description="Each Minecraft version gets the Java it needs, natively on Apple silicon." htmlFor="set-auto-java">
-          <Switch id="set-auto-java" checked={s.autoJava} onCheckedChange={(autoJava) => update({ autoJava })} />
+      <FormSection footer="Instances can still choose their own runtime in their Settings tab.">
+        <SettingRow row="java-policy" label="Java selection" description={POLICY_TEXT[policy]}>
+          <Select<GameSettings['java']['policy']>
+            aria-label="Java selection"
+            value={policy}
+            onValueChange={(p) => void patchSettings({ game: { java: { policy: p } } })}
+            options={[
+              { value: 'auto', label: 'Automatic (recommended)' },
+              { value: 'prefer-installed', label: 'Prefer installed Java' },
+              { value: 'custom', label: 'Always use one runtime' },
+            ]}
+          />
         </SettingRow>
+        {policy === 'custom' && (
+          <SettingRow row="java-path" label="Runtime" stacked>
+            <Select
+              aria-label="Runtime for every instance"
+              value={s.game.java.path || ''}
+              onValueChange={(path) => void patchSettings({ game: { java: { path } } })}
+              className="w-full"
+              options={(runtimes ?? []).filter((r) => r.valid).map((r) => ({ value: r.path, label: `Java ${r.version} · ${r.vendor} · ${r.arch}` }))}
+            />
+          </SettingRow>
+        )}
       </FormSection>
     </Form>
   )
 }
 
+const POLICY_TEXT: Record<GameSettings['java']['policy'], string> = {
+  auto: 'Each Minecraft version gets the Java it needs, downloaded natively for Apple silicon when missing.',
+  'prefer-installed': 'Uses a compatible arm64 JDK already on this Mac first, otherwise downloads one.',
+  custom: 'Uses the runtime below when it’s compatible, otherwise picks automatically.',
+}
+
 /** Settings → Game Defaults (B7.5): what every instance inherits. */
 export function GamePane() {
-  const s = useSettings()
-  const update = useUpdateSettings()
-  const { memory, resolution } = s
-  const memError = !memory.auto && memory.minMb > memory.maxMb ? 'Minimum memory can’t be more than maximum.' : undefined
+  const g = useAppSettings().game
+  const system = useSystemInfo()
+  const ram = system.data?.totalMemoryMB ?? 65536
+  const set = (patch: Parameters<typeof patchSettings>[0]['game']) => void patchSettings({ game: patch })
+  const memError = g.memory.mode === 'manual' && g.memory.minMB > 0 && g.memory.maxMB > 0 && g.memory.minMB > g.memory.maxMB ? 'Minimum memory can’t be more than maximum.' : undefined
 
   return (
     <Form>
-      <FormSection title="Memory" footer={memError ? <span className="text-red">{memError}</span> : 'Automatic picks a size based on the instance and this Mac’s memory.'}>
-        <SettingRow row="memory" label="Automatic" htmlFor="set-mem-auto">
-          <Switch id="set-mem-auto" checked={memory.auto} onCheckedChange={(auto) => update({ memory: { ...memory, auto } })} />
+      <FormSection title="Memory" footer={memError ? <span className="text-red">{memError}</span> : 'Automatic picks a size from the number of mods and this Mac’s memory.'}>
+        <SettingRow row="memory" label="Mode">
+          <Select<GameSettings['memory']['mode']>
+            aria-label="Memory mode"
+            value={g.memory.mode}
+            onValueChange={(mode) => set({ memory: mode === 'manual' ? { mode, minMB: g.memory.minMB, maxMB: g.memory.maxMB || 4096 } : { mode } })}
+            options={[
+              { value: 'unassigned', label: 'Let Java decide' },
+              { value: 'auto', label: 'Automatic' },
+              { value: 'manual', label: 'Manual' },
+            ]}
+          />
         </SettingRow>
-        {!memory.auto && (
+        {g.memory.mode === 'manual' && (
           <>
-            <SettingRow row="memory-min" label="Minimum">
-              <Stepper aria-label="Minimum memory" unit="MB" value={memory.minMb} min={512} max={65536} step={256} onValueChange={(minMb) => update({ memory: { ...memory, minMb } })} />
+            <SettingRow row="memory-min" label="Minimum" description="0 leaves it to Java.">
+              <Stepper aria-label="Minimum memory" unit="MB" value={g.memory.minMB} min={0} max={ram} step={256} onValueChange={(minMB) => set({ memory: { minMB } })} />
             </SettingRow>
-            <SettingRow row="memory-max" label="Maximum">
-              <Stepper aria-label="Maximum memory" unit="MB" value={memory.maxMb} min={512} max={65536} step={256} onValueChange={(maxMb) => update({ memory: { ...memory, maxMb } })} />
+            <SettingRow row="memory-max" label="Maximum" description={`This Mac has ${Math.round(ram / 1024)} GB.`}>
+              <Stepper aria-label="Maximum memory" unit="MB" value={g.memory.maxMB} min={512} max={ram} step={256} onValueChange={(maxMB) => set({ memory: { maxMB } })} />
             </SettingRow>
           </>
         )}
       </FormSection>
 
-      <FormSection title="Window">
+      <FormSection title="Window" footer="0 × 0 uses the game’s default size.">
         <SettingRow row="resolution" label="Resolution">
           <div className="flex items-center gap-1.5">
-            <Stepper
-              aria-label="Width"
-              value={resolution.width}
-              min={320}
-              max={7680}
-              step={2}
-              disabled={resolution.fullscreen}
-              onValueChange={(width) => update({ resolution: { ...resolution, width } })}
-              width={60}
-            />
+            <Stepper aria-label="Width" value={g.resolution.width} min={0} max={7680} step={2} disabled={g.resolution.fullscreen} onValueChange={(width) => set({ resolution: { width } })} width={60} />
             <span className="text-label-2">×</span>
-            <Stepper
-              aria-label="Height"
-              value={resolution.height}
-              min={240}
-              max={4320}
-              step={2}
-              disabled={resolution.fullscreen}
-              onValueChange={(height) => update({ resolution: { ...resolution, height } })}
-              width={60}
-            />
+            <Stepper aria-label="Height" value={g.resolution.height} min={0} max={4320} step={2} disabled={g.resolution.fullscreen} onValueChange={(height) => set({ resolution: { height } })} width={60} />
           </div>
         </SettingRow>
         <SettingRow row="fullscreen" label="Fullscreen">
-          <Checkbox aria-label="Fullscreen" checked={resolution.fullscreen} onCheckedChange={(fullscreen) => update({ resolution: { ...resolution, fullscreen } })} />
+          <Checkbox aria-label="Fullscreen" checked={g.resolution.fullscreen} onCheckedChange={(fullscreen) => set({ resolution: { fullscreen } })} />
         </SettingRow>
       </FormSection>
 
-      <FormSection title="Arguments" footer="Instances inherit these unless they override them in their own Settings tab.">
+      <FormSection title="Arguments" footer="Passed exactly as written; quote values that contain spaces. Instances inherit these unless they override them.">
         <SettingRow row="jvm-args" label="JVM arguments" stacked>
-          <TextField aria-label="JVM arguments" monospace placeholder="-XX:+UseG1GC" value={s.jvmArgs} onChange={(e) => update({ jvmArgs: e.target.value })} />
+          <CommitField aria-label="JVM arguments" monospace placeholder="-XX:+UseG1GC" value={formatArgs(g.jvmArgs)} onCommit={(v) => set({ jvmArgs: parseArgs(v) })} className="w-full" />
         </SettingRow>
         <SettingRow row="game-args" label="Game arguments" stacked>
-          <TextField aria-label="Game arguments" monospace placeholder="--quickPlaySingleplayer World" value={s.gameArgs} onChange={(e) => update({ gameArgs: e.target.value })} />
+          <CommitField aria-label="Game arguments" monospace value={formatArgs(g.gameArgs)} onCommit={(v) => set({ gameArgs: parseArgs(v) })} className="w-full" />
         </SettingRow>
-        <SettingRow row="wrapper" label="Wrapper command" description="Runs before Java, e.g. a profiler." stacked>
-          <TextField aria-label="Wrapper command" monospace placeholder="/usr/bin/time" value={s.wrapper} onChange={(e) => update({ wrapper: e.target.value })} />
+        <SettingRow row="wrapper" label="Wrapper command" description="Runs before Java, e.g. /usr/bin/caffeinate -i." stacked>
+          <CommitField aria-label="Wrapper command" monospace placeholder="/usr/bin/caffeinate -i" value={g.wrapperCommand} onCommit={(wrapperCommand) => set({ wrapperCommand })} className="w-full" />
+        </SettingRow>
+        <SettingRow row="prelaunch" label="Pre-launch command" description="Runs in the instance folder and must finish before the game starts." stacked>
+          <CommitField aria-label="Pre-launch command" monospace value={g.preLaunchCommand} onCommit={(preLaunchCommand) => set({ preLaunchCommand })} className="w-full" />
         </SettingRow>
       </FormSection>
 
-      <FormSection
-        title="Environment Variables"
-        action={
-          <Button size="sm" icon={<Plus />} onClick={() => update({ env: [...s.env, { key: '', value: '' }] })}>
-            Add
-          </Button>
-        }
-      >
-        <div id="row-env">
-          {s.env.length === 0 ? (
-            <p className="px-2.5 py-3 text-small text-label-2">No variables. Instances inherit the launcher’s environment.</p>
-          ) : (
-            s.env.map((v, i) => (
-              // Rows have no identity beyond their position; keys are stable while editing.
-              // eslint-disable-next-line react/no-array-index-key
-              <div key={i} className="flex items-center gap-2 border-b border-separator px-2.5 py-1.5 last:border-0">
-                <TextField
-                  aria-label={`Variable ${i + 1} name`}
-                  monospace
-                  placeholder="NAME"
-                  value={v.key}
-                  onChange={(e) => update({ env: s.env.map((x, j) => (j === i ? { ...x, key: e.target.value } : x)) })}
-                  className="w-[180px]"
-                />
-                <span className="text-label-3">=</span>
-                <TextField
-                  aria-label={`Variable ${i + 1} value`}
-                  monospace
-                  placeholder="value"
-                  value={v.value}
-                  onChange={(e) => update({ env: s.env.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)) })}
-                  className="flex-1"
-                />
-                <IconButton label={`Remove ${v.key || 'variable'}`} size="sm" onClick={() => update({ env: s.env.filter((_, j) => j !== i) })}>
-                  <X />
-                </IconButton>
-              </div>
-            ))
-          )}
+      <FormSection title="Environment Variables">
+        <div id="row-env" className="px-2.5 py-2">
+          <EnvTable value={g.env} onChange={(env) => set({ env })} />
         </div>
+      </FormSection>
+
+      <FormSection title="Apple Silicon" footer="Amethyst never needs Rosetta: old versions get native arm64 libraries built from public source.">
+        <SettingRow row="natives" label="Replace native libraries with arm64 builds">
+          <Select<GameSettings['replaceArm64Natives']>
+            aria-label="Replace native libraries"
+            value={g.replaceArm64Natives}
+            onValueChange={(replaceArm64Natives) => set({ replaceArm64Natives })}
+            options={[
+              { value: 'legacy-only', label: 'Older versions only (recommended)' },
+              { value: 'all', label: 'All versions' },
+              { value: 'off', label: 'Off (needs an x86_64 Java)' },
+            ]}
+          />
+        </SettingRow>
+        <SettingRow row="hide-launcher-game" label="Hide launcher while playing" htmlFor="set-hide-game">
+          <Switch id="set-hide-game" checked={g.hideLauncherWhileRunning} onCheckedChange={(hideLauncherWhileRunning) => set({ hideLauncherWhileRunning })} />
+        </SettingRow>
       </FormSection>
     </Form>
   )

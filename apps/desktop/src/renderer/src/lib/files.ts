@@ -31,7 +31,7 @@ export const isZipPath = (p: string) => /\.zip$/i.test(p)
 
 export async function pickFiles(kind: ResourceKind | 'modpack', options: { multiple?: boolean; title?: string } = {}): Promise<string[]> {
   try {
-    return await api.dialog.openFiles({ filters: FILTERS[kind], multiple: options.multiple ?? kind !== 'modpack', ...(options.title ? { title: options.title } : {}) })
+    return await api.dialog.open({ filters: FILTERS[kind], multiple: options.multiple ?? kind !== 'modpack', ...(options.title ? { title: options.title } : {}) })
   } catch (e) {
     reportError('Couldn’t open the file picker', e)
     return []
@@ -40,7 +40,7 @@ export async function pickFiles(kind: ResourceKind | 'modpack', options: { multi
 
 export async function pickFolder(title: string): Promise<string | undefined> {
   try {
-    return (await api.dialog.openFiles({ directories: true, title }))[0]
+    return (await api.dialog.open({ directory: true, title }))[0]
   } catch (e) {
     reportError('Couldn’t open the folder picker', e)
     return undefined

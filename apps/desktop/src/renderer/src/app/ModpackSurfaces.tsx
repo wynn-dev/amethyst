@@ -1,6 +1,5 @@
 import { lazy, Suspense, useEffect } from 'react'
 import { useModpackUi, openModpackImport } from '@/data/modpacks'
-import '@/data/instance-info'
 import { dragHasFiles, droppedPaths, isModpackPath, isZipPath } from '@/lib/files'
 import { toast } from '@/ui/toast-store'
 

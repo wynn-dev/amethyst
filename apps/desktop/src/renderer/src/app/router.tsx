@@ -129,6 +129,14 @@ const welcomeRoute = createRoute({
   component: lazyRouteComponent(() => import('@/routes/first-run/FirstRun'), 'FirstRun'),
 })
 
+// Dev only: the skin viewer test page used by the screenshot mode. Compiled out of production.
+const devSkinsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: 'dev/skins',
+  validateSearch: (s: Record<string, unknown>): { view?: string } => ({ view: typeof s.view === 'string' ? s.view : undefined }),
+  component: import.meta.env.DEV ? lazyRouteComponent(() => import('@/routes/dev/SkinGallery'), 'SkinGallery') : () => null,
+})
+
 const routeTree = rootRoute.addChildren([
   shellRoute.addChildren([
     homeRoute,
@@ -137,6 +145,7 @@ const routeTree = rootRoute.addChildren([
   ]),
   settingsRoute.addChildren([settingsIndexRoute, settingsPaneRoute]),
   welcomeRoute,
+  devSkinsRoute,
 ])
 
 export const router = createRouter({

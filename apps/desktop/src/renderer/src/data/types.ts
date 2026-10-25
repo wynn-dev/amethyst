@@ -1,17 +1,18 @@
 /**
- * The data shapes the renderer expects from the runtime services. These are renderer-side view
- * models: when the services contract in `shared/services.ts` lands, each hook in this folder maps
- * the service result onto these types (or these types are replaced by the shared ones).
+ * Renderer-side view models. Each domain hook in this folder maps the service results from
+ * `shared/services.ts` onto these shapes in one place (e.g. `data/instances.ts`).
  */
+import type { InstanceOverrides, InstanceRuntime, LaunchStep } from '@shared/services'
 
 export type LoaderKind = 'vanilla' | 'fabric' | 'quilt' | 'forge' | 'neoforge'
 export type Source = 'modrinth' | 'curseforge' | 'local'
 
 export type InstanceState =
   | { kind: 'idle' }
-  | { kind: 'installing'; progress: number; taskId: string }
-  | { kind: 'launching' }
-  | { kind: 'running'; pid: number; since: number }
+  /** Progress comes from the instance's install task (`useInstanceTask`), so rows re-render alone. */
+  | { kind: 'installing'; progress?: number; taskId?: string }
+  | { kind: 'launching'; step?: LaunchStep }
+  | { kind: 'running'; pid: number; since: number; ready?: boolean }
   | { kind: 'problem'; message: string }
 
 export interface InstanceSummary {
@@ -29,6 +30,8 @@ export interface InstanceSummary {
   lastPlayedAt?: number
   playTimeMs: number
   createdAt: number
+  /** The folder lives outside the data root (imported in place). */
+  external?: boolean
   /** Set when the instance came from a modpack. */
   upstream?: { source: Exclude<Source, 'local'>; projectId: string; projectName: string; version: string; latestVersion?: string }
 }
@@ -41,18 +44,23 @@ export interface InstanceFolder {
 
 export interface InstanceDetail extends InstanceSummary {
   path: string
+  /** Free text (the instance description; also the modpack summary on export). */
   notes: string
-  diskBytes: number
-  counts: { modsEnabled: number; modsTotal: number; resourcePacks: number; shaders: number; worlds: number }
-  issues: InstanceIssue[]
-  screenshots: { id: string; takenAt: number; hue: number }[]
+  author: string
+  homepageUrl: string
+  runtime: InstanceRuntime
+  /** Linked installed version id, `''` when none. */
+  versionId: string
+  /** Per-instance launch overrides; absent keys inherit the global game settings. */
+  overrides: InstanceOverrides
 }
 
 export interface InstanceIssue {
   id: string
   severity: 'warning' | 'error'
   title: string
-  action?: { label: string; command: string }
+  description?: string
+  action?: { label: string; run: () => void }
 }
 
 export interface ModFile {
@@ -125,7 +133,9 @@ export interface LogFile {
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
 
 export interface LogLine {
-  /** Sequence number within the file. */
+  /** Unique row key (`<seq>` or `<seq>.<continuation line>`). */
+  id: string
+  /** Sequence number within the run. */
   n: number
   time: string
   level: LogLevel
@@ -145,10 +155,14 @@ export interface Account {
   kind: 'microsoft' | 'offline'
   name: string
   uuid: string
-  status: 'ok' | 'expired'
+  status: 'ok' | 'expired' | 'needs-sign-in'
   active: boolean
-  /** Hue for the generated head avatar until skins are wired. */
+  /** Hue for the generated head avatar (used when there is no skin). */
   hue: number
+  /** Xbox gamerpic (`https:`), when known. */
+  avatarUrl?: string
+  /** Active skin texture URL (`https:` or `amethyst-asset:`), when not the default. */
+  skinUrl?: string
 }
 
 export type TaskState = 'running' | 'paused' | 'queued' | 'succeeded' | 'failed' | 'cancelled'
@@ -158,7 +172,11 @@ export interface TaskSnapshot {
   title: string
   /** Current step, e.g. "Downloading libraries". */
   subtitle?: string
-  kind: 'install' | 'download' | 'modpack' | 'java' | 'update' | 'export' | 'verify'
+  kind: 'install' | 'download' | 'modpack' | 'java' | 'update' | 'export' | 'verify' | 'copy' | 'backup'
+  /** Stable machine name from the runtime, e.g. `install.run`. */
+  name?: string
+  /** Show a Cancel button. */
+  cancellable?: boolean
   state: TaskState
   /** 0–1, undefined when indeterminate. */
   progress?: number
@@ -167,7 +185,7 @@ export interface TaskSnapshot {
   etaMs?: number
   startedAt: number
   finishedAt?: number
-  error?: { message: string; details: string }
+  error?: { message: string; details: string; code?: string }
   children: { id: string; title: string; state: TaskState; progress?: number }[]
   instanceId?: string
 }
@@ -213,19 +231,25 @@ export interface ProjectVersion {
 }
 
 export interface JavaRuntime {
+  /** The `bin/java` path (the runtime's identity). */
   id: string
   version: string
   major: number
   vendor: string
-  arch: 'arm64' | 'x86_64'
+  arch: 'arm64' | 'x86_64' | 'unknown'
   path: string
+  /** The JDK/JRE home (for Show in Finder). */
+  home: string
   source: 'managed' | 'system' | 'added'
+  valid: boolean
+  invalidReason?: string
 }
 
 export interface GameVersion {
   id: string
   type: 'release' | 'snapshot' | 'old_beta' | 'old_alpha'
   releasedAt: number
+  installed?: boolean
 }
 
 export interface LoaderVersion {

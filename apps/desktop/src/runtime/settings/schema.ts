@@ -45,7 +45,7 @@ const SPEC: Spec<Settings> = {
       overlay: bool(true),
     },
     blur: { card: int(20, 0, 30), sidebar: int(4, 0, 30) },
-    vibrancy: bool(false),
+    vibrancy: bool(true),
   },
   game: {
     java: {

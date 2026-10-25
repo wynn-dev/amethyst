@@ -8,11 +8,23 @@ interface UiState {
   shortcuts: boolean
   activity: boolean
   newInstance: boolean
+  /** Source the New Instance sheet opens on. */
+  newInstanceSource: 'custom' | 'folder'
   addAccount: boolean
   /** Instance pending a "Move to Trash" confirmation. */
   trash: Target | null
   /** Instance pending a "Duplicate…" sheet. */
   duplicate: Target | null
+  /** Instance pending a "Rename" sheet. */
+  rename: Target | null
+  /** Sidebar folder pending a rename. */
+  renameFolder: Target | null
+  /** "New Folder" sheet; `move` is an instance to put into the new folder. */
+  newFolder: { move?: Target } | null
+  /** Instance pending a "Change Version…" sheet. */
+  changeVersion: Target | null
+  /** Account to sign in to again (opens Add Account in Microsoft mode for it). */
+  reauth: string | null
   sidebarCollapsed: boolean
   sidebarWidth: number
   inspector: boolean
@@ -28,9 +40,15 @@ export const useUi = create<UiState>()(
       shortcuts: false,
       activity: false,
       newInstance: false,
+      newInstanceSource: 'custom',
       addAccount: false,
       trash: null,
       duplicate: null,
+      rename: null,
+      newFolder: null,
+      renameFolder: null,
+      reauth: null,
+      changeVersion: null,
       sidebarCollapsed: false,
       sidebarWidth: 220,
       inspector: true,

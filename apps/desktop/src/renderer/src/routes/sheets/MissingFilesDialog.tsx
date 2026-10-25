@@ -105,7 +105,7 @@ export default function MissingFilesDialog() {
               className="mt-1"
               icon={<FolderSearch />}
               onClick={async () => {
-                const paths = await api.dialog.openFiles({ multiple: true, title: 'Choose the downloaded files' }).catch((e: unknown) => {
+                const paths = await api.dialog.open({ multiple: true, title: 'Choose the downloaded files' }).catch((e: unknown) => {
                   reportError('Couldn’t open the file picker', e)
                   return [] as string[]
                 })

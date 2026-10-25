@@ -86,6 +86,8 @@ describe('serveAssetRequest', () => {
       expect(full.status).toBe(200)
       expect(full.headers.get('content-type')).toBe('image/png')
       expect(full.headers.get('cache-control')).toContain('immutable')
+      // CORS-readable, so skins can be uploaded to WebGL by the 3D viewer.
+      expect(full.headers.get('access-control-allow-origin')).toBe('*')
       expect(await full.text()).toBe('0123456789')
 
       const part = await serveAssetRequest(root, assetUrl('cache/icons/a.png'), 'bytes=2-4')

@@ -7,7 +7,7 @@ import { formatDate } from '@/app/visuals'
 import { loaderLabel, useInstanceInfo } from '@/data/instance-info'
 import { useMarketVersions } from '@/data/market'
 import { reportUpdateResult, useModpackUi, useModpackUpdateCheck } from '@/data/modpacks'
-import { useRunningTask } from '@/data/tasks-live'
+import { useRunningTask } from '@/data/tasks'
 import { api } from '@/lib/rpc'
 import { errorMessage, reportError } from '@/lib/error-text'
 

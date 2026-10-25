@@ -140,6 +140,7 @@ const dateFmt = new Intl.DateTimeFormat('en', { dateStyle: 'medium' })
 export const formatDate = (ts: number) => dateFmt.format(ts)
 
 export function formatDuration(ms: number): string {
+  if (ms > 0 && ms < 60_000) return 'less than a minute'
   const h = Math.floor(ms / 3_600_000)
   const m = Math.round((ms % 3_600_000) / 60_000)
   if (h === 0) return `${m} min`

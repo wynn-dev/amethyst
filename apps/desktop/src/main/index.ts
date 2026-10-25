@@ -1,12 +1,13 @@
-import { mkdirSync, mkdtempSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { app, BrowserWindow, protocol } from 'electron'
 import { ASSET_SCHEME } from '@shared/paths'
 import type { ReportedError } from '@shared/services'
 import { serveAssetRequest } from './asset-protocol'
+import { dialogService, shellService, windowService } from './os-services'
+import { prepareE2eDataRoot, runE2eUi } from './e2e-ui'
 import { installAppMenu } from './menu'
-import { registerOsServices } from './os-services'
 import { registerMainService, startMainRpc } from './rpc/server'
 import { RuntimeSupervisor, showHiddenWindows } from './runtime'
 import { Updater } from './updater'
@@ -34,7 +35,7 @@ process.on('unhandledRejection', (reason) => {
 })
 
 // Local images and videos (icons, backgrounds, skins) are served from the data root only; see asset-path.ts.
-protocol.registerSchemesAsPrivileged([{ scheme: ASSET_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }])
+protocol.registerSchemesAsPrivileged([{ scheme: ASSET_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true } }])
 
 let mainWindow: BrowserWindow | undefined
 
@@ -42,13 +43,14 @@ let mainWindow: BrowserWindow | undefined
 const screenshotDir = isDev ? process.env.AMETHYST_SCREENSHOT : undefined
 if (screenshotDir) app.setPath('userData', join(screenshotDir, '.profile'))
 
-// `AMETHYST_E2E_UI=content` (dev only): drive the content and Discover UI end to end (e2e-content.ts).
-const e2eUi = isDev ? process.env.AMETHYST_E2E_UI : undefined
-const e2eRoot = e2eUi === 'content' ? process.env.AMETHYST_E2E_ROOT || mkdtempSync(join(tmpdir(), 'amethyst-e2e-content-')) : undefined
-if (e2eRoot) {
-  mkdirSync(e2eRoot, { recursive: true })
-  app.setPath('userData', e2eRoot)
-}
+// `AMETHYST_E2E_UI=core:<dir>` or `content:<dir>` (dev only): drive the real UI end to end in a
+// temporary data root, writing screenshots to <dir> (see CONTRIBUTING.md). A bare `<dir>` means `core`.
+const e2eSpec = isDev ? process.env.AMETHYST_E2E_UI : undefined
+const e2eMatch = e2eSpec ? /^(core|content):(.+)$/.exec(e2eSpec) : null
+const e2eDriver = e2eSpec ? (e2eMatch?.[1] ?? 'core') : undefined
+const e2eDir = e2eSpec ? (e2eMatch?.[2] ?? e2eSpec) : undefined
+const e2eRoot = e2eDir ? prepareE2eDataRoot() : undefined
+if (e2eRoot) app.setPath('userData', e2eRoot)
 
 function createMainWindow(): BrowserWindow {
   const win = new BrowserWindow({
@@ -86,6 +88,7 @@ function createMainWindow(): BrowserWindow {
         ['telemetry', 'getConsent'],
         ['settings', 'get'],
         ['instances', 'list'],
+        ['instances', 'getLayout'],
         ['accounts', 'list'],
         ['java', 'list'],
         ['launch', 'listRunning'],
@@ -137,6 +140,16 @@ function createMainWindow(): BrowserWindow {
   // route the app's own `#/settings/…` URLs to the Settings window.
   guardNavigation(win.webContents)
 
+  if (e2eDir && e2eDriver === 'core') {
+    runE2eUi(win, e2eDir, (ok) => {
+      runtime.stop()
+      app.exit(ok ? 0 : 1)
+    }).catch((e) => {
+      console.error('e2e UI run failed', e)
+      app.exit(1)
+    })
+  }
+
   if (screenshotDir) {
     runScreenshots(win, screenshotDir, () => {
       runtime.stop()
@@ -147,9 +160,9 @@ function createMainWindow(): BrowserWindow {
     })
   }
 
-  if (e2eRoot) {
+  if (e2eDir && e2eRoot && e2eDriver === 'content') {
     void import('./e2e-content').then(({ runContentE2E }) =>
-      runContentE2E(win, e2eRoot, (ok) => {
+      runContentE2E(win, e2eRoot, e2eDir, (ok) => {
         runtime.stop()
         app.exit(ok ? 0 : 1)
       }),
@@ -188,7 +201,9 @@ app.whenReady().then(() => {
       }
     },
   })
-  registerOsServices()
+  registerMainService('window', windowService(() => mainWindow))
+  registerMainService('shell', shellService)
+  registerMainService('dialog', dialogService())
   startMainRpc()
   installAppMenu(() => mainWindow ?? createMainWindow())
   // Window first, runtime in parallel: nothing on the paint path waits for background services.

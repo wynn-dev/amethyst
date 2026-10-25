@@ -1,12 +1,12 @@
 /* oxlint-disable no-await-in-loop, no-console -- a sequential, dev-only UI driver */
 /**
- * Dev-only end-to-end UI run of the content and Discover areas (`AMETHYST_E2E_UI=content`).
+ * Dev-only end-to-end UI run of the content and Discover areas (`AMETHYST_E2E_UI=content:<screenshot dir>`).
  *
  *   pnpm --filter @amethyst/desktop build
- *   AMETHYST_E2E_UI=content electron apps/desktop        (unset ELECTRON_RUN_AS_NODE first)
+ *   AMETHYST_E2E_UI=content:/tmp/shots pnpm --filter @amethyst/desktop exec electron .   (unset ELECTRON_RUN_AS_NODE first)
  *
- * It uses a throwaway data root (or `AMETHYST_E2E_ROOT`) and drives the real renderer with real
- * mouse and keyboard events against the real runtime and network:
+ * It uses a throwaway data root (seeded from `AMETHYST_E2E_CACHE`, see e2e-ui.ts) and drives the
+ * real renderer with real mouse and keyboard events against the real runtime and network:
  *
  *   1. create a Fabric 1.21.1 instance through the runtime API
  *   2. search Discover for "sodium", install it, and find it in the Mods tab
@@ -15,7 +15,7 @@
  *   5. import a generated Fabric 1.21.1 .mrpack (Lithium plus an override) via preview → import
  *   6. export the instance as an .mrpack
  *
- * Every step is captured in light and dark into `AMETHYST_E2E_OUT` (default `<root>/screenshots`).
+ * Every step is captured in light and dark into the given screenshot folder.
  * Native panels are answered through `queueDialogAnswer`. Prints `E2E PASS` or `E2E FAIL …`.
  */
 import { createHash } from 'node:crypto'
@@ -29,8 +29,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 class Step extends Error {}
 
-export async function runContentE2E(win: BrowserWindow, root: string, onDone: (ok: boolean) => void): Promise<void> {
-  const out = process.env.AMETHYST_E2E_OUT || join(root, 'screenshots')
+export async function runContentE2E(win: BrowserWindow, root: string, out: string, onDone: (ok: boolean) => void): Promise<void> {
   const work = join(root, 'e2e-files')
   await mkdir(out, { recursive: true })
   await mkdir(work, { recursive: true })
@@ -104,8 +103,7 @@ export async function runContentE2E(win: BrowserWindow, root: string, onDone: (o
     await waitFor(`the “${placeholder}” field`, finder)
     await clickAt(await js(`__e2e.rect(${finder})`), placeholder)
     await js(`(() => { const e = ${finder}; e.focus(); e.select(); return true })()`)
-    c.sendInputEvent({ type: 'keyDown', keyCode: 'Backspace' })
-    c.sendInputEvent({ type: 'keyUp', keyCode: 'Backspace' })
+    // The selection is replaced by the inserted text (a synthetic Backspace could land after it).
     await c.insertText(text)
     await sleep(300)
   }
@@ -137,6 +135,8 @@ export async function runContentE2E(win: BrowserWindow, root: string, onDone: (o
     // 0. A completed first run, and the runtime up.
     step = 'boot'
     if (!c.getURL() || c.isLoading()) await new Promise<void>((r) => c.once('did-finish-load', () => r()))
+    // First run is done when consent was answered (both off) in the runtime and mirrored locally.
+    await invoke('telemetry', 'setConsent', { usage: false, crashes: false })
     await js(`localStorage.setItem('amethyst:first-run', JSON.stringify({ state: { completed: true, step: 'done' }, version: 1 })); true`)
     const loaded = new Promise<void>((r) => c.once('did-finish-load', () => r()))
     c.reload()

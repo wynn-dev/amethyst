@@ -1,124 +1,185 @@
-import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { useMemo } from 'react'
+import { useMutation, useQuery } from '@tanstack/react-query'
+import type { Settings as AppSettings, SettingsPatch, ThemeMode } from '@shared/services'
+import { api } from '@/lib/rpc'
+import { toastError } from '@/lib/error-messages'
+import { queryClient } from './query'
 
-export type Appearance = 'system' | 'light' | 'dark'
+export type { AppSettings, SettingsPatch }
 
-export interface Settings {
-  appearance: Appearance
-  /** `amethyst` (default) or a swatch hex colour. */
-  accent: string
-  translucentSidebar: boolean
-  sidebarIconSize: 'small' | 'medium' | 'large'
-  background: { kind: 'none' | 'image' | 'video'; url?: string; fit: 'fill' | 'fit'; dim: number; blur: number; volume: number }
-  onLaunch: 'keep' | 'hide' | 'quit'
-  openLogOnLaunch: boolean
-  checkBeforeLaunch: boolean
-  dataPath: string
-  streamerMode: boolean
-  autoJava: boolean
-  memory: { auto: boolean; minMb: number; maxMb: number }
-  resolution: { width: number; height: number; fullscreen: boolean }
-  jvmArgs: string
-  gameArgs: string
-  wrapper: string
-  env: { key: string; value: string }[]
-  proxy: { mode: 'system' | 'none' | 'manual'; host: string; port: number }
-  maxDownloads: number
-  telemetry: { usage: boolean; crashes: boolean }
-  updates: { auto: boolean; channel: 'stable' | 'beta' }
-  developerMode: boolean
-}
-
-export const defaultSettings: Settings = {
-  appearance: 'system',
-  accent: 'amethyst',
-  translucentSidebar: true,
-  sidebarIconSize: 'medium',
-  background: { kind: 'none', fit: 'fill', dim: 30, blur: 12, volume: 0 },
-  onLaunch: 'keep',
-  openLogOnLaunch: false,
-  checkBeforeLaunch: true,
-  dataPath: '~/Library/Application Support/Amethyst',
-  streamerMode: false,
-  autoJava: true,
-  memory: { auto: true, minMb: 1024, maxMb: 4096 },
-  resolution: { width: 854, height: 480, fullscreen: false },
-  jvmArgs: '',
-  gameArgs: '',
-  wrapper: '',
-  env: [],
-  proxy: { mode: 'system', host: '', port: 8080 },
-  maxDownloads: 16,
-  // Safe by default: nothing is sent until the user opts in (DECISIONS.md, ui.md B10).
-  telemetry: { usage: false, crashes: false },
-  updates: { auto: true, channel: 'stable' },
-  developerMode: false,
-}
-
-export const ACCENTS: { id: string; label: string; color: string }[] = [
-  { id: 'amethyst', label: 'Amethyst', color: '#8b55d6' },
-  { id: '#007aff', label: 'Blue', color: '#007aff' },
-  { id: '#af52de', label: 'Purple', color: '#af52de' },
-  { id: '#ff2d55', label: 'Pink', color: '#ff2d55' },
-  { id: '#ff3b30', label: 'Red', color: '#ff3b30' },
-  { id: '#ff9500', label: 'Orange', color: '#ff9500' },
-  { id: '#e5b000', label: 'Yellow', color: '#e5b000' },
-  { id: '#28a745', label: 'Green', color: '#28a745' },
-  { id: '#8e8e93', label: 'Graphite', color: '#8e8e93' },
-]
-
-interface SettingsStore {
-  settings: Settings
-  update: (patch: Partial<Settings>) => void
-  reset: () => void
-}
-
-const KEY = 'amethyst:settings'
+export const settingsKey = ['settings'] as const
 
 /**
- * Global settings, stored locally for now.
- * TODO(wire): replace with api.settings.get() → Settings, api.settings.update(patch: Partial<Settings>), and
- * subscribe('settings:changed', patch) so both windows stay in sync. Appearance should also set
- * `nativeTheme.themeSource` in main so the vibrancy material matches.
+ * Defaults mirrored from the runtime's settings schema. Only used as a placeholder for the very
+ * first paint of a fresh install (afterwards the last known settings are cached locally), so the
+ * UI never waits on the runtime to render.
  */
-export const useSettingsStore = create<SettingsStore>()(
-  persist(
-    (set) => ({
-      settings: defaultSettings,
-      update: (patch) => set((s) => ({ settings: { ...s.settings, ...patch } })),
-      reset: () => set({ settings: defaultSettings }),
-    }),
-    {
-      name: KEY,
-      version: 1,
-      merge: (persisted, current) => ({
-        ...current,
-        settings: { ...defaultSettings, ...(persisted as Partial<SettingsStore> | undefined)?.settings },
-      }),
-    },
-  ),
-)
+export const DEFAULT_APP_SETTINGS: AppSettings = {
+  general: { developerMode: false, streamerMode: false, commandPaletteShortcut: '' },
+  appearance: {
+    theme: 'system',
+    accentColor: '#9b5de5',
+    background: { kind: 'none', file: null, fit: 'cover', blur: 0, overlay: true },
+    blur: { card: 20, sidebar: 4 },
+    vibrancy: true,
+  },
+  game: {
+    java: { policy: 'auto', path: '' },
+    memory: { mode: 'unassigned', minMB: 0, maxMB: 0 },
+    jvmArgs: [],
+    gameArgs: [],
+    env: {},
+    wrapperCommand: '',
+    preLaunchCommand: '',
+    resolution: { width: 0, height: 0, fullscreen: false },
+    skipVerification: false,
+    hideLauncherWhileRunning: true,
+    openLogOnStart: false,
+    replaceArm64Natives: 'legacy-only',
+  },
+  network: { proxyEnabled: false, proxyUrl: '', maxConnectionsPerHost: 16, maxApiConnections: 8 },
+  updates: { autoDownload: false, installOnQuit: false, includePrereleases: false },
+  privacy: { usageData: false, crashReports: false, prompted: false },
+  backups: { automatic: true, keep: 5 },
+}
 
-// The Settings window and the main window share localStorage; follow the other window's writes.
-if (typeof window !== 'undefined') {
-  window.addEventListener('storage', (e) => {
-    if (e.key === KEY) useSettingsStore.persist.rehydrate()
+const SNAPSHOT_KEY = 'amethyst:settings-snapshot'
+
+function readSnapshot(): AppSettings | undefined {
+  try {
+    const raw = localStorage.getItem(SNAPSHOT_KEY)
+    return raw ? (JSON.parse(raw) as AppSettings) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function writeSnapshot(s: AppSettings) {
+  try {
+    localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(s))
+  } catch {
+    // Storage full or unavailable: the snapshot is only a first-paint optimisation.
+  }
+}
+
+/** Deep-merge a settings patch (a `null` leaf is left to the runtime, which resets it). */
+function applyPatch<T>(base: T, patch: unknown): T {
+  if (patch === undefined) return base
+  if (patch === null || typeof patch !== 'object' || Array.isArray(patch) || typeof base !== 'object' || base === null || Array.isArray(base)) {
+    return (patch === null ? base : patch) as T
+  }
+  const out = { ...(base as Record<string, unknown>) }
+  for (const [k, v] of Object.entries(patch as Record<string, unknown>)) out[k] = applyPatch(out[k], v)
+  return out as T
+}
+
+/** Fetch the real settings. Keeps the local first-paint snapshot fresh. */
+async function fetchSettings(): Promise<AppSettings> {
+  const s = await api.settings.get()
+  writeSnapshot(s)
+  return s
+}
+
+export const settingsQuery = { queryKey: settingsKey, queryFn: fetchSettings }
+
+/** The launcher settings from the runtime (`api.settings.get`), refreshed by `settings:changed`. */
+export function useAppSettings(): AppSettings {
+  const { data } = useQuery({ ...settingsQuery, placeholderData: () => readSnapshot() ?? DEFAULT_APP_SETTINGS })
+  return data ?? DEFAULT_APP_SETTINGS
+}
+
+/** True once the real settings arrived (not the placeholder). */
+export function useSettingsLoaded(): boolean {
+  const q = useQuery({ ...settingsQuery })
+  return q.isSuccess && !q.isPlaceholderData
+}
+
+/** Apply a settings patch: optimistic, persisted by the runtime, rolled back with a toast on error. */
+export async function patchSettings(patch: SettingsPatch): Promise<AppSettings | undefined> {
+  const before = queryClient.getQueryData<AppSettings>(settingsKey)
+  if (before) queryClient.setQueryData<AppSettings>(settingsKey, applyPatch(before, patch))
+  let next: AppSettings
+  try {
+    next = await api.settings.patch(patch)
+  } catch (e) {
+    if (before) queryClient.setQueryData(settingsKey, before)
+    toastError(e, 'Couldn’t save the setting')
+    return undefined
+  }
+  queryClient.setQueryData(settingsKey, next)
+  writeSnapshot(next)
+  return next
+}
+
+export function usePatchSettings() {
+  return patchSettings
+}
+
+/** Reset every setting to its default (accounts and instances are kept). */
+export function useResetSettings() {
+  return useMutation({
+    mutationFn: () => api.settings.reset(),
+    onSuccess: (s) => {
+      queryClient.setQueryData(settingsKey, s)
+      writeSnapshot(s)
+    },
+    onError: (e) => toastError(e, 'Couldn’t reset settings'),
   })
 }
 
+/** Where things live on disk. */
+export function useDataPaths() {
+  return useQuery({ queryKey: ['settings', 'paths'], queryFn: () => api.settings.getPaths() })
+}
+
+/** RAM and CPU facts for the memory controls. */
+export function useSystemInfo() {
+  return useQuery({ queryKey: ['settings', 'system'], queryFn: () => api.settings.getSystemInfo() })
+}
+
+/* ------------------------------------------------------------------------------------------ */
+/* A small view of the settings for UI code that only needs a few fields                       */
+/* ------------------------------------------------------------------------------------------ */
+
+export type Appearance = ThemeMode
+
+/**
+ * A flat view of the settings used across the UI. Everything here is backed by the runtime
+ * settings; the full appearance group (accent, background, vibrancy) is in `data/appearance.ts`.
+ */
+export interface Settings {
+  appearance: Appearance
+  /** `#rrggbb` accent colour. */
+  accent: string
+  streamerMode: boolean
+  developerMode: boolean
+}
+
+export function toViewSettings(s: AppSettings): Settings {
+  return {
+    appearance: s.appearance.theme,
+    accent: s.appearance.accentColor.toLowerCase(),
+    streamerMode: s.general.streamerMode,
+    developerMode: s.general.developerMode,
+  }
+}
+
+/** The flat settings view (always defined; placeholder until the runtime answers). */
 export function useSettings(): Settings {
-  return useSettingsStore((s) => s.settings)
+  const s = useAppSettings()
+  return useMemo(() => toViewSettings(s), [s])
+}
+
+/** Update view fields through `api.settings.patch`. */
+export function updateViewSettings(patch: Partial<Settings>): void {
+  const p: SettingsPatch = {}
+  if (patch.appearance) p.appearance = { ...p.appearance, theme: patch.appearance }
+  if (patch.accent) p.appearance = { ...p.appearance, accentColor: patch.accent }
+  if (patch.streamerMode !== undefined) p.general = { ...p.general, streamerMode: patch.streamerMode }
+  if (patch.developerMode !== undefined) p.general = { ...p.general, developerMode: patch.developerMode }
+  if (Object.keys(p).length) void patchSettings(p)
 }
 
 export function useUpdateSettings() {
-  return useSettingsStore((s) => s.update)
-}
-
-/** Applies appearance and accent to the document. Call once per window. */
-export function applyAppearance(settings: Pick<Settings, 'appearance' | 'accent'>) {
-  const root = document.documentElement
-  if (settings.appearance === 'system') delete root.dataset.appearance
-  else root.dataset.appearance = settings.appearance
-  if (settings.accent === 'amethyst') root.style.removeProperty('--accent')
-  else root.style.setProperty('--accent', settings.accent)
+  return updateViewSettings
 }

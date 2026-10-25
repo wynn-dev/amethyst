@@ -47,7 +47,8 @@ export default function ShadersTab() {
   const navigate = useNavigate()
   useWatchInstance(id)
   const info = useInstanceInfo(id)
-  const loader = info.data?.loader?.kind ?? null
+  const inst = info.data ?? undefined
+  const loader = inst?.loader?.kind ?? null
   const [query, setQuery] = useState('')
   const list = usePagedResources(id, 'shaderpacks', query.trim() ? { search: query.trim() } : {})
   const active = useResourceAll(id, 'shaderpacks', { enabled: true })
@@ -257,13 +258,13 @@ export default function ShadersTab() {
         width={460}
         footer={<Button onClick={() => setGate(null)}>Cancel</Button>}
       >
-        {compatible.length && info.data ? (
+        {compatible.length && inst ? (
           <ul className="flex flex-col divide-y divide-separator rounded-lg bg-surface shadow-[inset_0_0_0_0.5px_var(--color-surface-border)]">
             {compatible.map((s) => (
               <ShaderLoaderRow
                 key={s.name}
                 loader={s}
-                target={{ id, name: info.data.name, minecraft: info.data.minecraft, loader: info.data.loader }}
+                target={{ id, name: inst.name, minecraft: inst.minecraft, loader: inst.loader }}
                 onInstalled={async () => {
                   const pack = gate
                   setGate(null)

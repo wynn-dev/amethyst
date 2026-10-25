@@ -11,6 +11,8 @@ export interface DataLayout {
   settings: string
   /** Instance registry: external (imported in place) instances. */
   registry: string
+  /** Sidebar organisation: pins and folders. */
+  library: string
   /** Account records (no secrets). */
   accounts: string
   /** One encrypted blob per account. */
@@ -56,6 +58,7 @@ export function dataLayout(root: string, logs?: string): DataLayout {
     logs: logs ?? path.join(r, 'logs'),
     settings: path.join(r, 'settings.json'),
     registry: path.join(r, 'instances.json'),
+    library: path.join(r, 'library.json'),
     accounts: path.join(r, 'accounts.json'),
     secrets: path.join(r, 'secrets'),
     database: path.join(r, 'index.sqlite'),

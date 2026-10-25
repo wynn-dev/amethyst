@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { Link, useRouterState } from '@tanstack/react-router'
-import { AlertTriangle, Compass, Folder, House, PanelLeft, Plus } from 'lucide-react'
+import { AlertTriangle, ArrowUpCircle, Compass, Folder, House, PanelLeft, Plus } from 'lucide-react'
 import type { InstanceTab } from '@shared/menu'
 import {
   ContextMenu,
@@ -17,10 +17,12 @@ import {
   cn,
   type MenuEntry,
 } from '@/ui'
-import { useInstanceActions, useInstanceFolders, useInstances, useUpdateFolder, useUpdateInstance, versionLabel } from '@/data/instances'
+import { chooseInstanceIcon, libraryActions, useInstanceActions, useInstanceFolders, useInstances, versionLabel } from '@/data/instances'
+import { useInstanceTask } from '@/data/tasks'
+import { updaterActions, useUpdaterState } from '@/data/updater'
 import type { InstanceFolder, InstanceSummary } from '@/data/types'
-import { useSettings } from '@/data/settings'
-import { notYetAvailable, openInstance } from './commands'
+import { useAppearance } from '@/data/appearance'
+import { openInstance } from './commands'
 import { openModpackExport } from '@/data/modpacks'
 import { SIDEBAR_MAX, SIDEBAR_MIN, useUi } from './ui-store'
 import { BlockIcon } from './visuals'
@@ -40,11 +42,10 @@ const VIRTUALISE_AT = 50
 export function AppSidebar() {
   const { data: instances = [], isPending, isError, refetch } = useInstances()
   const { data: folders = [] } = useInstanceFolders()
-  const updateFolder = useUpdateFolder()
   const filter = useUi((s) => s.sidebarFilter)
   const setUi = useUi((s) => s.set)
   const width = useUi((s) => s.sidebarWidth)
-  const translucent = useSettings().translucentSidebar
+  const translucent = useAppearance().vibrancy
   const [pinnedOpen, setPinnedOpen] = useState(true)
   const [instancesOpen, setInstancesOpen] = useState(true)
   const pathname = useRouterState({ select: (s) => s.location.pathname })
@@ -110,13 +111,23 @@ export function AppSidebar() {
       }
       case 'folder':
         return (
-          <SourceListDisclosure
-            label={row.folder.name}
-            icon={<Folder className="size-4" />}
-            count={row.count}
-            open={row.folder.expanded}
-            onOpenChange={(expanded) => updateFolder.mutate({ id: row.folder.id, patch: { expanded } })}
-          />
+          <ContextMenu
+            items={[
+              { label: 'Rename Folder…', onSelect: () => setUi({ renameFolder: { id: row.folder.id, name: row.folder.name } }) },
+              { kind: 'separator' },
+              { label: 'Remove Folder', destructive: true, onSelect: () => void libraryActions.deleteFolder(row.folder.id, row.folder.name) },
+            ]}
+          >
+            <div>
+              <SourceListDisclosure
+                label={row.folder.name}
+                icon={<Folder className="size-4" />}
+                count={row.count}
+                open={row.folder.expanded}
+                onOpenChange={(expanded) => void libraryActions.setFolderExpanded(row.folder.id, expanded)}
+              />
+            </div>
+          </ContextMenu>
         )
       case 'instance':
         return <InstanceRow inst={row.inst} indent={row.indent} selected={row.inst.id === selectedId} folders={folders} />
@@ -177,6 +188,7 @@ export function AppSidebar() {
           label="Filter instances"
           className="mb-2"
         />
+        <RestartToUpdate />
         <AccountChip />
       </div>
 
@@ -191,33 +203,36 @@ function SidebarRowFrame({ row, children }: { row: Row; children: ReactNode }) {
 
 function InstanceRow({ inst, indent, selected, folders }: { inst: InstanceSummary; indent: number; selected: boolean; folders: InstanceFolder[] }) {
   const actions = useInstanceActions()
-  const update = useUpdateInstance()
   const setUi = useUi((s) => s.set)
   const tab = useRouterState({ select: (s) => (s.location.pathname.split('/')[3] as InstanceTab | undefined) ?? 'overview' })
+  const progress = useInstanceTask(inst.id)
   const running = inst.state.kind === 'running'
+  const target = { id: inst.id, name: inst.name }
 
   const menu: MenuEntry[] = [
-    running ? { label: 'Stop', shortcut: 'mod+period', onSelect: () => actions.stop(inst) } : { label: 'Play', shortcut: 'mod+enter', onSelect: () => actions.launch(inst) },
+    running
+      ? { label: 'Stop', shortcut: 'mod+period', onSelect: () => actions.stop(inst) }
+      : { label: 'Play', shortcut: 'mod+enter', disabled: inst.state.kind !== 'idle', onSelect: () => actions.launch(inst) },
     { kind: 'separator' },
-    { label: 'Show in Finder', onSelect: () => notYetAvailable('Show in Finder') },
-    { label: 'Duplicate…', onSelect: () => setUi({ duplicate: { id: inst.id, name: inst.name } }) },
-    { label: 'Rename', onSelect: () => notYetAvailable('Rename') },
-    { label: 'Change Icon…', onSelect: () => notYetAvailable('Change Icon') },
+    { label: 'Show in Finder', onSelect: () => void actions.revealInFinder(inst) },
+    { label: 'Duplicate…', onSelect: () => setUi({ duplicate: target }) },
+    { label: 'Rename…', onSelect: () => setUi({ rename: target }) },
+    { label: 'Change Icon…', onSelect: () => void chooseInstanceIcon(inst) },
     { kind: 'separator' },
-    { label: inst.pinned ? 'Unpin' : 'Pin', onSelect: () => update.mutate({ id: inst.id, patch: { pinned: !inst.pinned } }) },
+    { label: inst.pinned ? 'Unpin' : 'Pin', onSelect: () => void libraryActions.togglePin(inst) },
     {
       kind: 'sub',
       label: 'Move to Folder',
       items: [
-        ...folders.map<MenuEntry>((f) => ({ kind: 'check', label: f.name, checked: inst.folderId === f.id, onCheckedChange: () => update.mutate({ id: inst.id, patch: { folderId: f.id } }) })),
-        { kind: 'check', label: 'None', checked: !inst.folderId, onCheckedChange: () => update.mutate({ id: inst.id, patch: { folderId: undefined } }) },
+        ...folders.map<MenuEntry>((f) => ({ kind: 'check', label: f.name, checked: inst.folderId === f.id, onCheckedChange: () => void libraryActions.moveToFolder(inst, f.id) })),
+        { kind: 'check', label: 'None', checked: !inst.folderId, onCheckedChange: () => void libraryActions.moveToFolder(inst, null) },
         { kind: 'separator' },
-        { label: 'New Folder…', onSelect: () => notYetAvailable('New Folder') },
+        { label: 'New Folder…', onSelect: () => setUi({ newFolder: { move: target } }) },
       ],
     },
     { label: 'Export Modpack…', onSelect: () => openModpackExport(inst.id, inst.name) },
     { kind: 'separator' },
-    { label: 'Move to Trash…', destructive: true, onSelect: () => setUi({ trash: { id: inst.id, name: inst.name } }) },
+    { label: inst.external ? 'Remove from Amethyst…' : 'Move to Trash…', destructive: true, onSelect: () => setUi({ trash: target }) },
   ]
 
   return (
@@ -231,7 +246,7 @@ function InstanceRow({ inst, indent, selected, folders }: { inst: InstanceSummar
           label={inst.name}
           secondary={versionLabel(inst)}
           trailing={<InstanceStateIndicator inst={inst} />}
-          progress={inst.state.kind === 'installing' ? inst.state.progress : undefined}
+          progress={inst.state.kind === 'installing' ? (progress ?? 0) : undefined}
           render={(p) => (
             <Link
               to={`/instances/$instanceId/${tab}`}
@@ -257,9 +272,10 @@ function InstanceRow({ inst, indent, selected, folders }: { inst: InstanceSummar
 }
 
 export function InstanceStateIndicator({ inst }: { inst: InstanceSummary }) {
+  const progress = useInstanceTask(inst.state.kind === 'installing' ? inst.id : undefined)
   switch (inst.state.kind) {
     case 'installing':
-      return <ProgressRing value={inst.state.progress} size={14} label={`Installing, ${Math.round(inst.state.progress * 100)}%`} />
+      return <ProgressRing value={progress} size={14} label={progress === undefined ? 'Installing' : `Installing, ${Math.round(progress * 100)}%`} />
     case 'launching':
       return <Spinner size={14} label="Launching" />
     case 'running':
@@ -273,6 +289,22 @@ export function InstanceStateIndicator({ inst }: { inst: InstanceSummary }) {
     default:
       return null
   }
+}
+
+/** "Restart to Update" pill above the account chip once an update is downloaded (B14). Never a bare badge. */
+function RestartToUpdate() {
+  const state = useUpdaterState()
+  if (state.status !== 'ready') return null
+  return (
+    <button
+      type="button"
+      onClick={() => void updaterActions.restart()}
+      title={`Amethyst ${state.version} is ready`}
+      className="mb-1.5 flex h-7 w-full items-center justify-center gap-1.5 rounded-full bg-accent text-callout font-medium text-on-accent shadow-control hover:bg-accent-hover"
+    >
+      <ArrowUpCircle className="size-3.5" /> Restart to Update
+    </button>
+  )
 }
 
 const clamp = (w: number) => Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, w))

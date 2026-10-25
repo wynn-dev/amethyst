@@ -1,13 +1,12 @@
 import { useState } from 'react'
 import { AlertTriangle, Check, ChevronsUpDown, Plus, UserRound } from 'lucide-react'
 import { Popover, cn } from '@/ui'
-import { useAccounts } from '@/data/misc'
-import { queryClient } from '@/data/query'
+import { accountActions, useAccounts } from '@/data/accounts'
 import type { Account } from '@/data/types'
 import { useSettings } from '@/data/settings'
 import { openSettings } from './commands'
 import { useUi } from './ui-store'
-import { PlayerHead } from './visuals'
+import { SkinHead } from './skin/SkinHead'
 
 /** Streamer mode masks usernames everywhere. */
 export function displayName(name: string, streamer: boolean) {
@@ -21,11 +20,11 @@ export function AccountChip() {
   const setUi = useUi((s) => s.set)
   const [open, setOpen] = useState(false)
   const active = accounts.find((a) => a.active)
-  const expired = active?.status === 'expired'
+  // `expired` is refreshed silently before launch; only `needs-sign-in` needs the user.
+  const expired = active?.status === 'needs-sign-in'
 
   const switchTo = (a: Account) => {
-    // TODO(wire): api.accounts.select(id)
-    queryClient.setQueryData<Account[]>(['accounts'], (list) => list?.map((x) => ({ ...x, active: x.id === a.id })))
+    if (!a.active) void accountActions.select(a)
     setOpen(false)
   }
 
@@ -45,7 +44,7 @@ export function AccountChip() {
         >
           {active ? (
             <span className="relative">
-              <PlayerHead hue={active.hue} size={24} />
+              <SkinHead skin={active.skinUrl} hue={active.hue} size={24} />
               {expired && <span className="absolute -top-1 -right-1 size-2.5 rounded-full bg-yellow ring-2 ring-[var(--color-window-2)]" />}
             </span>
           ) : (
@@ -74,14 +73,14 @@ export function AccountChip() {
             className="flex h-9 w-full items-center gap-2 rounded-md px-1.5 text-left hover:bg-accent hover:text-on-accent focus-visible:bg-accent focus-visible:text-on-accent focus-visible:outline-none [&:hover_.sub]:text-on-accent/75"
           >
             <span className="flex w-3.5 justify-center">{a.active && <Check className="size-3.5" strokeWidth={2.5} />}</span>
-            <PlayerHead hue={a.hue} size={20} />
+            <SkinHead skin={a.skinUrl} hue={a.hue} size={20} />
             <span className="flex min-w-0 flex-1 flex-col">
               <span className="truncate text-body">{displayName(a.name, streamer)}</span>
-              <span className={cn('sub truncate text-small', a.status === 'expired' ? 'text-orange' : 'text-label-2')}>
-                {a.status === 'expired' ? 'Session expired' : a.kind === 'microsoft' ? 'Microsoft' : 'Offline'}
+              <span className={cn('sub truncate text-small', a.status === 'needs-sign-in' ? 'text-orange' : 'text-label-2')}>
+                {a.status === 'needs-sign-in' ? 'Session expired' : a.kind === 'microsoft' ? 'Microsoft' : 'Offline'}
               </span>
             </span>
-            {a.status === 'expired' && <AlertTriangle className="size-3.5 text-orange" />}
+            {a.status === 'needs-sign-in' && <AlertTriangle className="size-3.5 text-orange" />}
           </button>
         ))}
         {expired && (
@@ -90,7 +89,7 @@ export function AccountChip() {
             role="menuitem"
             onClick={() => {
               setOpen(false)
-              setUi({ addAccount: true })
+              setUi({ addAccount: true, reauth: active?.id ?? null })
             }}
             className="mt-1 flex h-7 w-full items-center rounded-md px-2 text-body font-medium text-accent hover:bg-fill"
           >

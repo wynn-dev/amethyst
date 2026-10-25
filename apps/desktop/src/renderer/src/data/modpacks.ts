@@ -43,7 +43,7 @@ export function useModpackPreview(source: ModpackSource | null) {
 
 /** After an import or install: success toast, then the Missing files dialog when needed. */
 function finished(result: ModpackImportResult, name: string, open: (id: string) => void): void {
-  void queryClient.invalidateQueries({ queryKey: ['instance-info'] })
+  void queryClient.invalidateQueries({ queryKey: ['instances'] })
   void queryClient.invalidateQueries({ queryKey: ['instances'] })
   if (result.manual.length > 0) {
     queryClient.setQueryData<ManualState>(modpackKeys.manual(result.instanceId), { files: result.manual, watching: false })
@@ -159,7 +159,7 @@ export async function rollbackModpack(instanceId: string, backupId: string, name
 
 export function reportUpdateResult(instanceId: string, name: string, version: string, r: ModpackUpdateResult): void {
   void queryClient.invalidateQueries({ queryKey: modpackKeys.update(instanceId) })
-  void queryClient.invalidateQueries({ queryKey: ['instance-info'] })
+  void queryClient.invalidateQueries({ queryKey: ['instances'] })
   if (r.manual.length > 0) {
     queryClient.setQueryData<ManualState>(modpackKeys.manual(instanceId), { files: r.manual, watching: false })
     useModpackUi.getState().set({ missing: { instanceId, name } })

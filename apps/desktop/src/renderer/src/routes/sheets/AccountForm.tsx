@@ -1,7 +1,11 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { ChevronRight, Copy, ExternalLink } from 'lucide-react'
+import type { MicrosoftLoginMethod } from '@shared/services'
 import { Banner, Button, Segmented, Spinner, TextField, cn } from '@/ui'
-import { queryClient } from '@/data/query'
+import { describeError, errorCode, type FriendlyError } from '@/lib/error-messages'
+import { api } from '@/lib/rpc'
+import { accountActions, cancelLogin, loginMicrosoft, useAccountsStatus, useLoginStage } from '@/data/accounts'
+import { patchSettings } from '@/data/settings'
 import type { Account } from '@/data/types'
 
 export type AccountKind = 'microsoft' | 'offline'
@@ -28,103 +32,162 @@ export interface AccountFormProps {
   initialKind?: AccountKind
   /** Show the Microsoft / Offline switch. */
   showKindPicker?: boolean
+  /** Sign in again to this existing Microsoft account. */
+  reauthAccountId?: string
   onDone: (account: Account) => void
   onCancel: () => void
   /** Lays the parts out: a sheet puts actions in its footer, first run puts them under the body. */
   children: (parts: AccountFormParts) => ReactNode
 }
 
-type MsState = { step: 'start' } | { step: 'browser' } | { step: 'code'; code: string }
+type MsState = { step: 'start' } | { step: 'running'; method: MicrosoftLoginMethod }
+
+function openLink(url: string) {
+  void api.shell.openExternal(url).catch(() => {})
+}
+
+function ErrorBanner({ error }: { error: FriendlyError }) {
+  return (
+    <Banner tone="error" title={error.title} className="w-full text-left" actions={error.link ? <Button size="sm" onClick={() => openLink(error.link!)}>Learn More</Button> : undefined}>
+      {error.message}
+    </Banner>
+  )
+}
 
 /**
  * Add Account content (B9), shared by the Add Account sheet and the first-run Account step.
  * Errors are shown once, inline. Never as a toast.
  */
-export function AccountForm({ initialKind = 'microsoft', showKindPicker = true, onDone, onCancel, children }: AccountFormProps) {
-  const [kind, setKind] = useState<AccountKind>(initialKind)
+export function AccountForm({ initialKind = 'microsoft', showKindPicker = true, reauthAccountId, onDone, onCancel, children }: AccountFormProps) {
+  const status = useAccountsStatus()
+  const stage = useLoginStage((s) => s.stage)
+  const [kind, setKind] = useState<AccountKind>(reauthAccountId ? 'microsoft' : initialKind)
   const [ms, setMs] = useState<MsState>({ step: 'start' })
+  const [msError, setMsError] = useState<FriendlyError>()
   const [name, setName] = useState('')
   const [uuid, setUuid] = useState('')
   const [advanced, setAdvanced] = useState(false)
   const [copied, setCopied] = useState(false)
-  // Inline error slot for the Microsoft flow (mapped from the A12 error list when wired).
-  const [msError] = useState<string>()
+  const [offlineError, setOfflineError] = useState<FriendlyError>()
+  const [adding, setAdding] = useState(false)
+
+  // Leaving the form aborts a sign-in that is still waiting.
+  useEffect(() => () => cancelLogin(), [])
 
   const nameError = validateUsername(name)
   const uuidError = uuid && !UUID.test(uuid) ? 'Enter a UUID like 8667ba71-b85a-4004-af54-457a9734eed7, or leave it empty.' : undefined
-  const offlineValid = !!name && !nameError && !uuidError
+  const offlineAllowed = status.data?.offlineAllowed ?? true
+  const offlineValid = !!name && !nameError && !uuidError && offlineAllowed && !adding
+  const msAvailable = status.data?.microsoft.available ?? true
 
-  const addOffline = () => {
+  const addOffline = async () => {
     if (!offlineValid) return
-    // TODO(wire): api.accounts.addOffline({ name, uuid? }) → Account
-    const account: Account = {
-      id: `offline-${name.toLowerCase()}`,
-      kind: 'offline',
-      name,
-      uuid: uuid || crypto.randomUUID(),
-      status: 'ok',
-      active: true,
-      hue: (name.length * 47) % 360,
+    setAdding(true)
+    setOfflineError(undefined)
+    try {
+      onDone(await accountActions.addOffline(name, uuid || undefined))
+    } catch (e) {
+      setOfflineError(describeError(e))
+    } finally {
+      setAdding(false)
     }
-    queryClient.setQueryData<Account[]>(['accounts'], (list) => [...(list ?? []).filter((a) => a.id !== account.id).map((a) => ({ ...a, active: false })), account])
-    onDone(account)
   }
 
-  const startMicrosoft = () => {
-    // TODO(wire): api.accounts.loginMicrosoft({ deviceCode: false }) opens the system browser and resolves with the Account,
-    // or rejects with a coded error (EXSTS_CHILD, EMC_NO_PROFILE, …) shown in `msError`.
-    setMs({ step: 'browser' })
+  const startMicrosoft = async (method: MicrosoftLoginMethod) => {
+    setMsError(undefined)
+    setCopied(false)
+    setMs({ step: 'running', method })
+    try {
+      onDone(await loginMicrosoft(method, reauthAccountId))
+    } catch (e) {
+      setMs({ step: 'start' })
+      // A new sign-in cancels the previous one; that cancellation isn't an error to show.
+      if (errorCode(e) !== 'ECANCELLED') setMsError(describeError(e))
+    }
   }
 
-  const useCode = () => {
-    // TODO(wire): api.accounts.loginMicrosoft({ deviceCode: true }) → { userCode, verificationUri } then the Account.
-    setMs({ step: 'code', code: 'AMTH-7Q4K' })
+  const stopMicrosoft = () => {
+    cancelLogin()
+    setMs({ step: 'start' })
   }
 
+  const running = ms.step === 'running'
   const microsoftBody = (
-    <div className="flex flex-col items-center gap-3 py-2 text-center">
-      {msError && <Banner tone="error" title={msError} className="w-full text-left" />}
-      {ms.step === 'start' && (
+    <div className="flex flex-col items-center gap-3 py-2 text-center" data-login-stage={running ? stage.stage : 'start'}>
+      {msError && <ErrorBanner error={msError} />}
+      {!msAvailable ? (
+        <>
+          <MicrosoftLogo />
+          <p className="max-w-[360px] text-body text-label-2">
+            Microsoft sign-in isn’t available in this build of Amethyst: it was built without a Microsoft app ID. Offline accounts still work for single-player.
+          </p>
+        </>
+      ) : !running ? (
         <>
           <MicrosoftLogo />
           <p className="max-w-[340px] text-body text-label-2">
-            Sign in in your browser with the Microsoft account that owns Minecraft: Java Edition. Amethyst never sees your password.
+            {reauthAccountId ? 'Your session expired. Sign in again with the same Microsoft account.' : 'Sign in with the Microsoft account that owns Minecraft: Java Edition. Amethyst never sees your password.'}
           </p>
+          <div className="flex gap-3 text-small">
+            <Button variant="link" onClick={() => void startMicrosoft('browser')}>
+              Use my browser
+            </Button>
+            <Button variant="link" onClick={() => void startMicrosoft('device-code')}>
+              Use a code instead
+            </Button>
+          </div>
         </>
-      )}
-      {ms.step === 'browser' && (
+      ) : stage.stage === 'device-code' ? (
         <>
-          <Spinner size={22} />
-          <p className="text-body font-medium">Waiting for you to finish in your browser…</p>
-          <p className="max-w-[340px] text-small text-label-2">If the browser didn’t open, or you’d rather sign in on another device, use a code instead.</p>
-          <Button variant="link" onClick={useCode}>
-            Use a code instead
-          </Button>
-        </>
-      )}
-      {ms.step === 'code' && (
-        <>
-          <p className="text-body text-label-2">Go to microsoft.com/link and enter this code:</p>
-          <p aria-label={`Code ${ms.code.split('').join(' ')}`} className="selectable font-mono text-[32px] leading-10 font-semibold tracking-[0.12em]">
-            {ms.code}
+          <p className="text-body text-label-2">
+            Go to <span className="font-medium text-label">{stage.verificationUri.replace(/^https?:\/\//, '')}</span> and enter this code:
+          </p>
+          <p aria-label={`Code ${stage.userCode.split('').join(' ')}`} className="selectable font-mono text-[32px] leading-10 font-semibold tracking-[0.12em]">
+            {stage.userCode}
           </p>
           <div className="flex gap-2">
             <Button
               icon={<Copy />}
               onClick={() => {
-                navigator.clipboard?.writeText(ms.code)
+                void navigator.clipboard?.writeText(stage.userCode)
                 setCopied(true)
               }}
             >
               {copied ? 'Copied' : 'Copy Code'}
             </Button>
-            <Button icon={<ExternalLink />} onClick={() => window.open('https://www.microsoft.com/link')}>
+            <Button icon={<ExternalLink />} onClick={() => openLink(stage.verificationUri)}>
               Open Verification Page
             </Button>
           </div>
           <p className="flex items-center gap-1.5 text-small text-label-2">
-            <Spinner size={11} /> Waiting for sign-in…
+            <Spinner size={11} /> Waiting for sign-in… The code expires at {new Date(stage.expiresAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.
           </p>
+        </>
+      ) : stage.stage === 'browser' ? (
+        <>
+          <Spinner size={22} />
+          <p className="text-body font-medium">Waiting for you to finish in your browser…</p>
+          <div className="flex gap-3 text-small">
+            <Button variant="link" onClick={() => openLink(stage.url)}>
+              Open the page again
+            </Button>
+            <Button variant="link" onClick={() => void startMicrosoft('device-code')}>
+              Use a code instead
+            </Button>
+          </div>
+        </>
+      ) : stage.stage === 'window' ? (
+        <>
+          <Spinner size={22} />
+          <p className="text-body font-medium">Finish signing in in the Microsoft window…</p>
+          <Button variant="link" className="text-small" onClick={() => void startMicrosoft('device-code')}>
+            Use a code instead
+          </Button>
+        </>
+      ) : (
+        <>
+          <Spinner size={22} />
+          <p className="text-body font-medium">{stage.stage === 'signing-in' ? 'Signing in to Minecraft…' : 'Starting sign-in…'}</p>
         </>
       )}
     </div>
@@ -135,9 +198,23 @@ export function AccountForm({ initialKind = 'microsoft', showKindPicker = true, 
       className="flex flex-col gap-3"
       onSubmit={(e) => {
         e.preventDefault()
-        addOffline()
+        void addOffline()
       }}
     >
+      {!offlineAllowed && (
+        <Banner
+          tone="info"
+          title="Offline accounts need a Microsoft account first"
+          actions={
+            <Button size="sm" onClick={() => void patchSettings({ general: { developerMode: true } })}>
+              Turn On Developer Mode
+            </Button>
+          }
+        >
+          Add the Microsoft account that owns Minecraft first, or turn on Developer mode.
+        </Banner>
+      )}
+      {offlineError && <ErrorBanner error={offlineError} />}
       <TextField
         label="Username"
         placeholder="Steve"
@@ -176,14 +253,14 @@ export function AccountForm({ initialKind = 'microsoft', showKindPicker = true, 
 
   const body = (
     <div className="flex flex-col gap-4">
-      {showKindPicker && (
+      {showKindPicker && !reauthAccountId && (
         <Segmented<AccountKind>
           aria-label="Account type"
           className="self-center"
           value={kind}
           onValueChange={(k) => {
+            if (running) stopMicrosoft()
             setKind(k)
-            setMs({ step: 'start' })
           }}
           options={[
             { value: 'microsoft', label: 'Microsoft' },
@@ -199,19 +276,19 @@ export function AccountForm({ initialKind = 'microsoft', showKindPicker = true, 
     kind === 'offline' ? (
       <>
         <Button onClick={onCancel}>Cancel</Button>
-        <Button variant="primary" disabled={!offlineValid} onClick={addOffline}>
-          Add Account
+        <Button variant="primary" disabled={!offlineValid} onClick={() => void addOffline()}>
+          {adding ? 'Adding…' : 'Add Account'}
         </Button>
       </>
-    ) : ms.step === 'start' ? (
+    ) : !running ? (
       <>
         <Button onClick={onCancel}>Cancel</Button>
-        <Button variant="primary" onClick={startMicrosoft}>
-          Sign in with Microsoft
+        <Button variant="primary" disabled={!msAvailable} onClick={() => void startMicrosoft('window')}>
+          {reauthAccountId ? 'Sign In Again' : 'Sign in with Microsoft'}
         </Button>
       </>
     ) : (
-      <Button onClick={() => (ms.step === 'code' ? setMs({ step: 'browser' }) : setMs({ step: 'start' }))}>{ms.step === 'code' ? 'Back' : 'Cancel'}</Button>
+      <Button onClick={stopMicrosoft}>Cancel</Button>
     )
 
   return <>{children({ body, actions })}</>

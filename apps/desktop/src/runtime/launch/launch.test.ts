@@ -365,6 +365,18 @@ describe('LaunchManager pipeline', () => {
     await expect(p).rejects.toMatchObject({ code: 'ECANCELLED' })
     expect(h2.calls).not.toContain('spawn')
   })
+
+  it('cancels a launch that is still being prepared when the runtime shuts down', async () => {
+    const h = await harness({ accounts: hung, accountTimeoutMs: 60_000 })
+    await writeVersion(modernJson('1.21.1'))
+    const inst = await h.instances.create({ name: 'Q', runtime: { minecraft: '1.21.1' } })
+    await h.instances.update(inst.id, { versionId: '1.21.1' })
+    const p = h.launch.launch(inst.id)
+    await vi.waitFor(() => expect(steps(inst.id).at(-1)).toBe('account'))
+    h.launch.dispose()
+    await expect(p).rejects.toMatchObject({ code: 'ECANCELLED' })
+    expect(h.calls).not.toContain('spawn')
+  })
 })
 
 describe('LaunchManager logs', () => {

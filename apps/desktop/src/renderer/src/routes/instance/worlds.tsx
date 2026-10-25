@@ -23,7 +23,7 @@ import {
 import { openModpackImport } from '@/data/modpacks'
 import { isModpackPath, pickFiles, pickFolder, pickSaveFile, revealInFinder } from '@/lib/files'
 import { api } from '@/lib/rpc'
-import { reportError } from '@/lib/error-text'
+import { toastError } from '@/lib/error-messages'
 import { toast } from '@/ui/toast-store'
 import { AddFromInstanceSheet, DropOverlay, PlaceholderCell, ResourceIcon, ScanningNote, TrashConfirm, isPlaceholder, realIds, useFileDrop, useTableRows, type ContentRow } from './content-parts'
 import { CopyButton, InspectorHeader, InspectorSection, PropertyList, SplitView, SubToolbar, copyText, useInstanceId, useSelection } from './parts'
@@ -111,12 +111,12 @@ export default function WorldsTab() {
       const d = await api.resources.get(id, 'saves', w.id)
       await addResourceFiles(id, 'saves', [d.path])
     } catch (e) {
-      reportError(`Couldn’t duplicate “${w.name}”`, e)
+      toastError(e, `Couldn’t duplicate “${w.name}”`)
     }
   }
   const play = (w: ResourceRow) => {
     toast({ kind: 'info', title: `Launching into “${w.name}”…` })
-    api.launch.launch(id, { quickPlay: { type: 'singleplayer', world: w.fileName } }).catch((e: unknown) => reportError(`Couldn’t launch into “${w.name}”`, e))
+    api.launch.launch(id, { quickPlay: { type: 'singleplayer', world: w.fileName } }).catch((e: unknown) => toastError(e, `Couldn’t launch into “${w.name}”`))
   }
 
   const rowMenu = (keys: string[]): MenuEntry[] => {
@@ -130,7 +130,7 @@ export default function WorldsTab() {
       { label: 'Back Up', disabled: !one, onSelect: () => one && void createBackup(id, one.id, one.name) },
       { label: 'Export…', disabled: !one, onSelect: () => one && void doExport(one) },
       { label: 'Duplicate', disabled: !one, onSelect: () => one && void duplicate(one) },
-      { label: 'Show in Finder', disabled: !one, onSelect: () => one && void api.resources.get(id, 'saves', one.id).then((d) => revealInFinder(d.path), (e: unknown) => reportError('Couldn’t show the world', e)) },
+      { label: 'Show in Finder', disabled: !one, onSelect: () => one && void api.resources.get(id, 'saves', one.id).then((d) => revealInFinder(d.path), (e: unknown) => toastError(e, 'Couldn’t show the world')) },
       { label: 'Copy Name', onSelect: () => copyText(ws.map((w) => w.name).join('\n')) },
       { kind: 'separator' },
       { label: 'Move to Trash…', shortcut: 'mod+backspace', destructive: true, onSelect: () => setPendingTrash(ws.map((w) => w.id)) },

@@ -718,9 +718,13 @@ export class LaunchManager {
     }
   }
 
-  /** Stop flushing (shutdown). Running games keep running (they are detached). */
+  /**
+   * Shutdown: stop flushing and cancel launches still being prepared, so their downloads and
+   * pre-launch command do not outlive the app. Running games keep running (they are detached).
+   */
   dispose(): void {
     if (this.#flushTimer) clearTimeout(this.#flushTimer)
+    for (const run of this.#runs.values()) if (run.phase === 'preparing') run.controller.abort('The launcher is quitting')
   }
 }
 

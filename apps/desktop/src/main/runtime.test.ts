@@ -11,6 +11,7 @@ class FakeChild extends EventEmitter {
 }
 
 const children: FakeChild[] = []
+const forkOptions: { env?: Record<string, string | undefined> }[] = []
 
 vi.mock('electron', () => ({
   app: { on: vi.fn<() => void>(), isPackaged: true, getPath: () => '/tmp/amethyst-test', getVersion: () => '0.0.0' },
@@ -21,7 +22,8 @@ vi.mock('electron', () => ({
   session: { fromPartition: () => ({}) },
   shell: {},
   utilityProcess: {
-    fork: () => {
+    fork: (_path: string, _args: string[], options: { env?: Record<string, string | undefined> }) => {
+      forkOptions.push(options)
       const child = new FakeChild()
       children.push(child)
       return child
@@ -37,6 +39,14 @@ const { RuntimeSupervisor } = await import('./runtime')
 afterEach(() => {
   vi.restoreAllMocks()
   children.length = 0
+  forkOptions.length = 0
+})
+
+describe('RuntimeSupervisor spawn', () => {
+  it('gives the runtime a larger libuv pool so DNS is not starved during installs (download.md P5)', () => {
+    new RuntimeSupervisor().start()
+    expect(forkOptions[0]?.env?.UV_THREADPOOL_SIZE).toBe(process.env.UV_THREADPOOL_SIZE ?? '16')
+  })
 })
 
 describe('RuntimeSupervisor.shutdown', () => {

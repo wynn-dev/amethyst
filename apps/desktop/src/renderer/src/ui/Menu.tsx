@@ -10,7 +10,7 @@ export const menuSurface =
 
 export const menuItem =
   'relative flex h-[22px] cursor-default items-center gap-2 rounded-[4px] pr-2.5 pl-[22px] outline-none select-none ' +
-  'data-[highlighted]:bg-accent data-[highlighted]:text-on-accent data-[disabled]:text-label-3 ' +
+  'data-[highlighted]:bg-accent-fill data-[highlighted]:text-on-accent data-[disabled]:text-label-3 ' +
   '[&_svg]:size-3.5 [&_svg]:shrink-0'
 
 const separator = 'mx-2.5 my-[5px] h-px bg-separator'

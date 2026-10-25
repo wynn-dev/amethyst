@@ -13,7 +13,7 @@ import type {
   UpdateCandidate,
 } from '@shared/services'
 import { api } from '@/lib/rpc'
-import { errorMessage, reportError } from '@/lib/error-text'
+import { errorMessage, toastError } from '@/lib/error-messages'
 import { openExternal } from '@/lib/files'
 import { toast } from '@/ui/toast-store'
 import { queryClient } from './query'
@@ -175,7 +175,7 @@ export async function installProject(
           const r = await api.marketplace.install({ instanceId: target.id, platform: project.platform, projectId: d.projectId ?? '', versionId: depVersionId })
           if (r.resource) deps++
         } catch (e) {
-          reportError(`Couldn’t install a dependency of ${project.title}`, e)
+          toastError(e, `Couldn’t install a dependency of ${project.title}`)
         }
       }
     }
@@ -187,7 +187,7 @@ export async function installProject(
     return true
   } catch (e) {
     setState(k, { state: 'failed', message: errorMessage(e) })
-    reportError(`Couldn’t install ${project.title}`, e)
+    toastError(e, `Couldn’t install ${project.title}`)
     return false
   }
 }
@@ -223,7 +223,7 @@ export async function applyUpdates(instanceId: string, kind: ResourceKind, candi
       done++
     } catch (e) {
       failed.push(names[c.resourceId] ?? c.fileName)
-      if (candidates.length === 1) reportError(`Couldn’t update ${names[c.resourceId] ?? c.fileName}`, e)
+      if (candidates.length === 1) toastError(e, `Couldn’t update ${names[c.resourceId] ?? c.fileName}`)
     }
   }
   void queryClient.invalidateQueries({ queryKey: marketKeys.updates(instanceId, kind) })

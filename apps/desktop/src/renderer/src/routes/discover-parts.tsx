@@ -9,7 +9,7 @@ import { KIND_FOR_TYPE, bestVersion, installProject, projectKey, useFavourites, 
 import { installModpackFromMarket } from '@/data/modpacks'
 import { useRunningTask } from '@/data/tasks'
 import { api } from '@/lib/rpc'
-import { reportError } from '@/lib/error-text'
+import { toastError } from '@/lib/error-messages'
 
 export const TYPE_LABELS: Record<MarketProjectType, { one: string; many: string }> = {
   modpack: { one: 'Modpack', many: 'Modpacks' },
@@ -72,7 +72,7 @@ export async function installModpackProject(project: Pick<MarketProjectRow, 'pla
     if (!v) throw Object.assign(new Error(`${project.title} has no downloadable version.`), { code: 'ENO_FILE' })
     await installModpackFromMarket({ platform: project.platform, projectId: project.id, versionId: v.id }, project.title, (id) => openInstance(id, 'overview'))
   } catch (e) {
-    reportError(`Couldn’t install “${project.title}”`, e)
+    toastError(e, `Couldn’t install “${project.title}”`)
   }
 }
 

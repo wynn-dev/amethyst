@@ -230,8 +230,10 @@ describe('ResourceManager', () => {
     await new Promise((r) => setTimeout(r, 50))
     calls.length = 0
 
+    // Write the files first: under a loaded test run, writing between events can outlast the
+    // 20 ms debounce and split the burst.
+    for (let i = 0; i < 3; i++) await fabricJar(path.join(inst.path, 'mods', `new${i}.jar`), `n${i}`)
     for (let i = 0; i < 50; i++) {
-      await fabricJar(path.join(inst.path, 'mods', `new${i % 3}.jar`), `n${i % 3}`)
       fire?.(`mods/new${i % 3}.jar`)
       fire?.('logs/latest.log')
     }

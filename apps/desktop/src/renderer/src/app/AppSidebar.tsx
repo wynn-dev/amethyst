@@ -300,7 +300,7 @@ function RestartToUpdate() {
       type="button"
       onClick={() => void updaterActions.restart()}
       title={`Amethyst ${state.version} is ready`}
-      className="mb-1.5 flex h-7 w-full items-center justify-center gap-1.5 rounded-full bg-accent text-callout font-medium text-on-accent shadow-control hover:bg-accent-hover"
+      className="mb-1.5 flex h-7 w-full items-center justify-center gap-1.5 rounded-full bg-accent-fill text-callout font-medium text-on-accent shadow-control hover:bg-accent-hover"
     >
       <ArrowUpCircle className="size-3.5" /> Restart to Update
     </button>

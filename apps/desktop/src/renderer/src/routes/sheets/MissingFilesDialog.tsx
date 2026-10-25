@@ -4,7 +4,7 @@ import { Button, Sheet, Spinner, cn } from '@/ui'
 import { formatBytes } from '@/app/visuals'
 import { provideManualFiles, stopWatchingManualDownloads, useManualFiles, useModpackUi, watchManualDownloads } from '@/data/modpacks'
 import { dragHasFiles, droppedPaths, openExternal } from '@/lib/files'
-import { reportError } from '@/lib/error-text'
+import { toastError } from '@/lib/error-messages'
 import { api } from '@/lib/rpc'
 
 /**
@@ -106,7 +106,7 @@ export default function MissingFilesDialog() {
               icon={<FolderSearch />}
               onClick={async () => {
                 const paths = await api.dialog.open({ multiple: true, title: 'Choose the downloaded files' }).catch((e: unknown) => {
-                  reportError('Couldn’t open the file picker', e)
+                  toastError(e, 'Couldn’t open the file picker')
                   return [] as string[]
                 })
                 await provide(paths)

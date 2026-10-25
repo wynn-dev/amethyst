@@ -28,7 +28,7 @@ export function Switch({ checked, onCheckedChange, disabled, size = 'md', ...res
       {...rest}
       className={cn(
         'relative inline-flex shrink-0 items-center rounded-full p-px transition-colors duration-200 ease-[var(--ease-mac)]',
-        'bg-fill-3 shadow-[inset_0_0_0_0.5px_rgb(0_0_0/0.08)] data-[state=checked]:bg-accent disabled:opacity-45',
+        'bg-fill-3 shadow-[inset_0_0_0_0.5px_rgb(0_0_0/0.08)] data-[state=checked]:bg-accent-fill disabled:opacity-45',
         size === 'md' ? 'h-[18px] w-[32px]' : 'h-[14px] w-[24px]',
       )}
     >
@@ -71,7 +71,7 @@ export function Checkbox({ checked, onCheckedChange, label, description, disable
       onClick={(e) => e.stopPropagation()}
       className={cn(
         'flex size-[14px] shrink-0 items-center justify-center rounded-[3.5px] bg-control text-on-accent shadow-control',
-        'data-[state=checked]:bg-accent data-[state=indeterminate]:bg-accent data-[state=checked]:shadow-none disabled:opacity-45',
+        'data-[state=checked]:bg-accent-fill data-[state=indeterminate]:bg-accent-fill data-[state=checked]:shadow-none disabled:opacity-45',
       )}
     >
       <RCheckbox.Indicator>
@@ -321,9 +321,9 @@ export function RadioList<V extends string>({ value, onValueChange, options, cla
             id={`${base}-${o.value}`}
             value={o.value}
             disabled={o.disabled}
-            className="mt-px flex size-[14px] shrink-0 items-center justify-center rounded-full bg-control shadow-control data-[state=checked]:bg-accent data-[state=checked]:shadow-none disabled:opacity-45"
+            className="mt-px flex size-[14px] shrink-0 items-center justify-center rounded-full bg-control shadow-control data-[state=checked]:bg-accent-fill data-[state=checked]:shadow-none disabled:opacity-45"
           >
-            <RadioGroup.Indicator className="size-[5px] rounded-full bg-white" />
+            <RadioGroup.Indicator className="size-[5px] rounded-full bg-on-accent" />
           </RadioGroup.Item>
           <label htmlFor={`${base}-${o.value}`} className={cn('flex flex-col', o.disabled && 'opacity-45')}>
             <span className="text-body">{o.label}</span>

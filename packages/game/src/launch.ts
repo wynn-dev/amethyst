@@ -32,6 +32,11 @@ export interface LaunchProcessOptions {
    * since launch. Default 60 s; 0 disables.
    */
   readyFallbackMs?: number
+  /**
+   * After the process exits, how long to keep reading its output before giving up on the pipes
+   * (a grandchild may still hold them open). Default 2 s.
+   */
+  drainTimeoutMs?: number
 }
 
 export interface LaunchResult {
@@ -201,7 +206,25 @@ export async function launch(command: Pick<LaunchCommand, 'java' | 'args' | 'cwd
 
   let killTimer: ReturnType<typeof setTimeout> | undefined
   const exited = new Promise<LaunchResult>((resolve) => {
-    child.once('close', async (code, sig) => {
+    // Resolve on the child's own `exit`, not on stream `close`: a grandchild that inherited the
+    // pipes (for example an `osascript` the game started) can hold stdout open long after the
+    // game is gone. After exit, give the pipes a bounded window to drain, then let go of them.
+    let exitInfo: { code: number | null; sig: NodeJS.Signals | null } | undefined
+    let finished = false
+    let drainTimer: ReturnType<typeof setTimeout> | undefined
+    child.once('exit', (code, sig) => {
+      exitInfo = { code, sig }
+      drainTimer = setTimeout(() => {
+        child.stdout?.destroy()
+        child.stderr?.destroy()
+        void finish(code, sig)
+      }, options.drainTimeoutMs ?? 2000)
+    })
+    child.once('close', (code, sig) => void finish(exitInfo?.code ?? code, exitInfo?.sig ?? sig))
+    const finish = async (code: number | null, sig: NodeJS.Signals | null) => {
+      if (finished) return
+      finished = true
+      if (drainTimer) clearTimeout(drainTimer)
       if (fallbackTimer) clearTimeout(fallbackTimer)
       if (killTimer) clearTimeout(killTimer)
       options.signal?.removeEventListener('abort', onAbort)
@@ -230,7 +253,7 @@ export async function launch(command: Pick<LaunchCommand, 'java' | 'args' | 'cwd
       if (hsErrPath) result.hsErrPath = hsErrPath
       if (nativeLoadError) result.nativeLoadError = nativeLoadError
       resolve(result)
-    })
+    }
   })
 
   let exitedFlag = false

@@ -1,8 +1,8 @@
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdtemp, open, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { CancelledError, createTask, type TaskContext } from '@amethyst/task'
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { bytes, serveBytes, sha, startServer, type TestServer } from './__fixtures__/server'
 import { createHttpClient, download, DownloadError, downloadMany, type DownloadItem, type DownloadOptions, type HttpClient } from './index'
 
@@ -253,6 +253,110 @@ describe('download', () => {
     ])
     expect(replaced.status).toBe('fulfilled')
     expect(conflicting).toMatchObject({ status: 'rejected', reason: { code: 'ECONFLICT' } })
+  })
+})
+
+describe('download: integrity and failure regressions', () => {
+  it('never touches an existing file until the replacement is verified', async () => {
+    const good = bytes(20_000, 400)
+    const fresh = bytes(20_000, 401)
+    const dest = join(dir, 'lib.jar')
+    await writeFile(dest, good)
+    // Checksum mismatch on the new bytes, then a 404, then 'replace' with a broken mirror.
+    server.route('/regress/wrong.jar', serveBytes(bytes(20_000, 402)))
+    const item = { dest, size: fresh.length, checksum: { algorithm: 'sha1' as const, value: sha('sha1', fresh) } }
+    await expect(download({ ...item, url: `${server.url}/regress/wrong.jar` }, opts)).rejects.toMatchObject({ code: 'ECHECKSUM' })
+    await expect(download({ ...item, url: `${server.url}/regress/missing.jar` }, opts)).rejects.toMatchObject({ status: 404 })
+    await expect(download({ url: `${server.url}/regress/missing.jar`, dest }, { ...opts, existing: 'replace' })).rejects.toMatchObject({ status: 404 })
+    expect((await readFile(dest)).equals(good)).toBe(true)
+    expect(await exists(`${dest}.part`)).toBe(false)
+  })
+
+  it('rejects an empty body unless an empty file is expected', async () => {
+    server.route('/regress/empty.bin', (_req, res) => res.end())
+    const url = `${server.url}/regress/empty.bin`
+    const dest = join(dir, 'empty.bin')
+    await expect(download({ url, dest }, opts)).rejects.toMatchObject({ code: 'EBADRESPONSE', message: expect.stringContaining('empty') })
+    await expect(download({ url, dest, checksum: { algorithm: 'sha1', value: sha('sha1', bytes(10)) } }, opts)).rejects.toMatchObject({
+      code: 'EBADRESPONSE',
+    })
+    expect(await exists(dest)).toBe(false)
+    expect(await exists(`${dest}.part`)).toBe(false)
+    // Explicitly expected to be empty: by size or by the empty file's digest.
+    await download({ url, dest, size: 0 }, { ...opts, existing: 'replace' })
+    expect((await stat(dest)).size).toBe(0)
+    await download({ url, dest: join(dir, 'empty2.bin'), checksum: { algorithm: 'sha1', value: sha('sha1', Buffer.alloc(0)) } }, opts)
+    expect(await exists(join(dir, 'empty2.bin'))).toBe(true)
+  })
+
+  it('rejects an HTML page served for an unhashed file', async () => {
+    const page = Buffer.from('<html><body>Sign in to the Wi-Fi</body></html>')
+    server.route('/regress/portal.jar', (_req, res) => {
+      res.setHeader('content-type', 'text/html; charset=utf-8')
+      res.end(page)
+    })
+    const dest = join(dir, 'portal.jar')
+    await expect(download({ url: `${server.url}/regress/portal.jar`, dest }, opts)).rejects.toMatchObject({ code: 'EBADRESPONSE' })
+    expect(await exists(dest)).toBe(false)
+    // A matching checksum vouches for the bytes whatever the content type says.
+    await download({ url: `${server.url}/regress/portal.jar`, dest, checksum: { algorithm: 'sha1', value: sha('sha1', page) } }, opts)
+    expect((await readFile(dest)).equals(page)).toBe(true)
+  })
+
+  it('restarts from zero when a resumed .part turns out to be corrupt', async () => {
+    const data = bytes(300_000, 403)
+    server.route('/regress/stale.bin', serveBytes(data, { stallAfter: 100_000 }))
+    const dest = join(dir, 'stale.bin')
+    const item: DownloadItem = { url: `${server.url}/regress/stale.bin`, dest, size: data.length, checksum: { algorithm: 'sha1', value: sha('sha1', data) } }
+    await expect(downloadAndCancelAt(item, 100_000, { resume: { minBytes: 1024 } })).rejects.toBeInstanceOf(CancelledError)
+    // Corrupt the kept prefix (as a crash or disk error could).
+    const fh = await open(`${dest}.part`, 'r+')
+    await fh.write(Buffer.alloc(1000, 0xee), 0, 1000, 5000)
+    await fh.close()
+
+    server.route('/regress/stale.bin', serveBytes(data))
+    const result = await download(item, { ...opts, resume: { minBytes: 1024 } })
+    const hits = server.hits('/regress/stale.bin')
+    expect(hits.at(-2)?.headers.range).toBe('bytes=100000-')
+    expect(hits.at(-1)?.headers.range).toBeUndefined()
+    expect(result.skipped).toBe(false)
+    expect((await readFile(dest)).equals(data)).toBe(true)
+  })
+
+  it('does not re-request the body after a local write failure', async () => {
+    const data = bytes(200_000, 404)
+    server.route('/regress/nospace.bin', serveBytes(data))
+    const probe = await open(join(dir, 'probe'), 'w')
+    const proto = Object.getPrototypeOf(probe) as { writev: (...args: unknown[]) => Promise<unknown> }
+    await probe.close()
+    const spy = vi.spyOn(proto, 'writev').mockRejectedValue(Object.assign(new Error('no space left on device'), { code: 'ENOSPC', syscall: 'write' }))
+    try {
+      const dest = join(dir, 'nospace.bin')
+      await expect(download({ url: `${server.url}/regress/nospace.bin`, dest, size: data.length }, opts)).rejects.toMatchObject({ code: 'ENOSPC' })
+      expect(server.hits('/regress/nospace.bin')).toHaveLength(1)
+      expect(await exists(dest)).toBe(false)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('serializes paths that differ only by case or Unicode normalization', async () => {
+    const data = bytes(40_000, 405)
+    const serve = serveBytes(data, { delayMs: 20 })
+    let active = 0
+    let peak = 0
+    server.route('/regress/fold.jar', async (req, res) => {
+      peak = Math.max(peak, ++active)
+      res.on('close', () => active--)
+      await serve(req, res)
+    })
+    const url = `${server.url}/regress/fold.jar`
+    const checksum = { algorithm: 'sha1' as const, value: sha('sha1', data) }
+    const names = ['Caf\u00e9.jar', 'cafe\u0301.jar', 'CAF\u00c9.jar']
+    await Promise.all(names.map((n) => download({ url, dest: join(dir, n), checksum }, opts)))
+    expect(peak).toBe(1)
+    const written = await Promise.all(names.map((n) => readFile(join(dir, n))))
+    expect(written.every((buf) => buf.equals(data))).toBe(true)
   })
 })
 

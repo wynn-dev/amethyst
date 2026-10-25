@@ -120,6 +120,20 @@ export class ServiceRegistry {
   }
 }
 
+/**
+ * Send a response. A result that structured clone rejects (a function, a symbol, a native handle)
+ * makes `postMessage` throw; answer with an `ENOTCLONEABLE` error then, so the caller never waits
+ * for a response that cannot arrive.
+ */
+export function postResponse(post: (msg: RpcResponse) => void, id: number, result: RpcResult<unknown>): void {
+  try {
+    post({ t: 'res', id, result })
+  } catch (e) {
+    const message = `The result could not be sent between processes: ${e instanceof Error ? e.message : String(e)}`
+    post({ t: 'res', id, result: { ok: false, error: { name: 'RpcError', message, code: 'ENOTCLONEABLE' } } })
+  }
+}
+
 /** Client half of a request/response protocol over any `postMessage`-style transport. */
 export class RpcClient {
   #nextId = 1

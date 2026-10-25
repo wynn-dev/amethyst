@@ -13,11 +13,12 @@
  * 3. **Finish**: the backup folder gets a `backup.json` journal used by
  *    {@link rollbackModpackOperation}; the workspace and the operation record are deleted.
  */
-import { createWriteStream } from 'node:fs'
+import { createReadStream, createWriteStream } from 'node:fs'
 import { copyFile, cp, mkdir, readdir, rename, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import type { ContentStore } from '@amethyst/content'
+import { curseforgeFingerprint } from '@amethyst/marketplace'
 import { DownloadError, downloadMany, type Checksum, type DownloadItem, type DownloadManyOptions } from '@amethyst/net'
 import type { TaskContext } from '@amethyst/task'
 import { openZip, type ZipReader } from '@amethyst/zip'
@@ -45,6 +46,8 @@ export interface StageTarget {
   kind: 'file' | 'world'
   /** The resolved file, for blocked files (manual download details). */
   manual?: ManualDownload
+  /** CurseForge murmur2 fingerprint: verifies a download when the API gave no digest. */
+  fingerprint?: number
 }
 
 /** Options shared by install and update for fetching files. */
@@ -97,6 +100,7 @@ export function buildTargets(
       optional: f.optional,
       kind: f.kind ?? 'file',
       manual,
+      ...(f.fingerprint === undefined ? {} : { fingerprint: f.fingerprint }),
     })
   }
   for (const o of manifest.overrides) {
@@ -287,6 +291,19 @@ function verify(target: StageTarget, local: LocalHashes): string | undefined {
   return undefined
 }
 
+/**
+ * Downloads must be checked against something stronger than their size (known issues lesson 3).
+ * When the target has no digest at all (a CurseForge file the API listed without hashes), check
+ * its murmur2 fingerprint; with neither, refuse the file.
+ */
+async function verifyUndigested(target: StageTarget, file: string, signal?: AbortSignal): Promise<string | undefined> {
+  const { sha1, sha512, md5, crc32 } = target.hashes
+  if (sha1 || sha512 || md5 || crc32) return undefined
+  if (target.fingerprint === undefined) return 'no checksum to verify the download against'
+  const got = await curseforgeFingerprint(() => createReadStream(file, { highWaterMark: 256 * 1024 }), signal)
+  return got === target.fingerprint ? undefined : `fingerprint mismatch: expected ${target.fingerprint}, got ${got}`
+}
+
 async function reuseStaged(target: StageTarget, staged: string, signal?: AbortSignal): Promise<LocalHashes | undefined> {
   if (target.kind !== 'file') return undefined
   const st = await lstatOrUndefined(staged)
@@ -434,7 +451,7 @@ export async function stageTargets(
       }
       try {
         const local = await hashFor(dest, t.hashes, signal)
-        const bad = verify(t, local)
+        const bad = verify(t, local) ?? (await verifyUndigested(t, dest, signal))
         if (bad) {
           await rm(dest, { force: true })
           fail(t, bad)

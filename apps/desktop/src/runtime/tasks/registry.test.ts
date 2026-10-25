@@ -75,6 +75,29 @@ describe('TaskRegistry', () => {
     expect(batches.at(-1)?.removed).toEqual([newest?.id])
   })
 
+  it('cancels every running task on quit so their helper processes are stopped', async () => {
+    const registry = new TaskRegistry(() => {})
+    const aborted: string[] = []
+    const pending = (name: string) =>
+      registry.run({ name }, (ctx) =>
+        new Promise((_, reject) =>
+          ctx.signal.addEventListener('abort', () => {
+            aborted.push(name)
+            reject(ctx.signal.reason)
+          }),
+        ),
+      )
+    const a = pending('install.forge')
+    const b = pending('instances.duplicate')
+    const done = await registry.run({ name: 'test.quick' }, async () => 1).promise
+    await registry.cancelAll()
+    expect(done).toBe(1)
+    expect(aborted.toSorted()).toEqual(['install.forge', 'instances.duplicate'])
+    await expect(a.promise).rejects.toMatchObject({ code: 'ECANCELLED' })
+    await expect(b.promise).rejects.toMatchObject({ code: 'ECANCELLED' })
+    expect(registry.list().map((t) => t.state)).toEqual(['succeeded', 'cancelled', 'cancelled'])
+  })
+
   it('prunes deep and wide trees', async () => {
     const registry = new TaskRegistry(() => {})
     let release!: () => void

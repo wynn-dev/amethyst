@@ -151,9 +151,14 @@ booted.catch((e: unknown) => log.error('boot failed', e))
 const pool = once(async () => {
   const { WorkerPool } = await import('./resources/pool')
   const size = Math.max(2, Math.min(4, Math.floor(availableParallelism() / 2)))
+  // Scans and hashes time out (default 10 min); world zips run as cancellable tasks of any length.
   // Workers grow while they hash and make icon thumbnails; stop them soon after the last job
   // (respawning one costs ~30 ms) so an idle launcher does not keep their heaps resident.
-  return new WorkerPool<ResourceWorkerHandlers>(() => new Worker(new URL('./scan-worker.js', import.meta.url)), { size, idleMs: 30_000 })
+  return new WorkerPool<ResourceWorkerHandlers>(() => new Worker(new URL('./scan-worker.js', import.meta.url)), {
+    size,
+    idleMs: 30_000,
+    timeouts: { importWorld: 0, exportWorld: 0 },
+  })
 })
 
 let resourceManager: ResourceManager | undefined
@@ -527,6 +532,9 @@ let stopping = false
 async function shutdown(): Promise<void> {
   if (stopping) return
   stopping = true
+  // Abort running tasks first so the helper processes they spawned are stopped, not orphaned;
+  // give their cleanup a brief, bounded moment (main kills the runtime after 1.5 s).
+  await Promise.race([tasks.cancelAll(), new Promise((r) => setTimeout(r, 400))])
   tasks.dispose()
   launchManager?.dispose()
   javaManager?.dispose()

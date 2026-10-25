@@ -241,6 +241,27 @@ describe('ResourceManager', () => {
     m.dispose()
   })
 
+  it('reports rename failures per file and revalidates, so the UI matches the disk', async () => {
+    const inst = await instances.create({ name: 'Gone', runtime: { minecraft: '1.21.1', fabric: '0.16.5' } })
+    await fabricJar(path.join(inst.path, 'mods', 'a.jar'), 'a')
+    await fabricJar(path.join(inst.path, 'mods', 'b.jar'), 'b')
+    const m = manager()
+    await m.refresh(inst.id, 'mods')
+    await rm(path.join(inst.path, 'mods', 'a.jar'))
+    expect(await m.setEnabled(inst.id, 'mods', ['a.jar', 'b.jar'], false)).toEqual({ done: ['b.jar'], failed: [{ id: 'a.jar', code: 'ENOT_FOUND', message: expect.any(String) }] })
+    expect((await m.list(inst.id, 'mods')).items.map((r) => [r.id, r.enabled])).toEqual([['b.jar', false]])
+    m.dispose()
+  })
+
+  it('refuses to pick a shader pack without a shader mod and writes no config files', async () => {
+    const inst = await instances.create({ name: 'NoShaderMod', runtime: { minecraft: '1.21.1', fabric: '0.16.5' } })
+    await jar(path.join(inst.path, 'shaderpacks', 'BSL.zip'), { 'shaders/final.fsh': 'void main(){}' })
+    const m = manager()
+    await expect(m.setEnabled(inst.id, 'shaderpacks', ['bsl.zip'], true)).rejects.toMatchObject({ code: 'ENO_SHADER_LOADER' })
+    for (const f of ['optionsshaders.txt', 'config/iris.properties', 'config/oculus.properties']) expect(await exists(path.join(inst.path, f))).toBe(false)
+    m.dispose()
+  })
+
   it('coalesces bursts of watcher events into one rescan per folder', async () => {
     const inst = await instances.create({ name: 'Watched', runtime: { minecraft: '1.21.1' } })
     await fabricJar(path.join(inst.path, 'mods', 'a.jar'), 'a')
@@ -260,8 +281,10 @@ describe('ResourceManager', () => {
     await new Promise((r) => setTimeout(r, 50))
     calls.length = 0
 
+    // Write the files first: under a loaded test run, writing between events can outlast the
+    // 20 ms debounce and split the burst.
+    for (let i = 0; i < 3; i++) await fabricJar(path.join(inst.path, 'mods', `new${i}.jar`), `n${i}`)
     for (let i = 0; i < 50; i++) {
-      await fabricJar(path.join(inst.path, 'mods', `new${i % 3}.jar`), `n${i % 3}`)
       fire?.(`mods/new${i % 3}.jar`)
       fire?.('logs/latest.log')
     }
@@ -434,6 +457,50 @@ describe('ResourceManager', () => {
     expect((await m.list(inst.id, 'resourcepacks', { ids: ['b.zip', 'c.zip'] })).total).toBe(2)
     expect((await m.list(inst.id, 'resourcepacks', { sources: ['modrinth'] })).total).toBe(0)
     expect((await m.list(inst.id, 'resourcepacks', { sources: ['local'], offset: 1, limit: 1 })).items.map((r) => r.id)).toEqual(['b.zip'])
+    m.dispose()
+  })
+
+  it('matches NFD pack names on disk to the NFC ids the game writes, and writes NFC ids', async () => {
+    const inst = await instances.create({ name: 'Unicode', runtime: { minecraft: '1.21.1' } })
+    const packs = path.join(inst.path, 'resourcepacks')
+    const mcmeta = { 'pack.mcmeta': JSON.stringify({ pack: { pack_format: 34, description: 'x' } }) }
+    await jar(path.join(packs, 'Cafe\u0301.zip'), mcmeta)
+    await jar(path.join(packs, 'Nin\u0303o.zip'), mcmeta)
+    await writeFile(path.join(inst.path, 'options.txt'), 'resourcePacks:["vanilla","file/Caf\u00e9.zip"]\n')
+    // The quick listing (from the index) and the full scan agree.
+    const quick = manager()
+    await quick.refresh(inst.id, 'resourcepacks')
+    quick.dispose()
+    const m = manager()
+    const rows = (await m.list(inst.id, 'resourcepacks')).items
+    expect(rows.filter((r) => !r.pending).map((r) => [r.id, r.enabled, r.order ?? null])).toEqual([
+      ['caf\u00e9.zip', true, 0],
+      ['ni\u00f1o.zip', false, null],
+    ])
+    await m.setEnabled(inst.id, 'resourcepacks', ['ni\u00f1o.zip'], true)
+    expect(await readFile(path.join(inst.path, 'options.txt'), 'utf8')).toBe('resourcePacks:["vanilla","file/Caf\u00e9.zip","file/Ni\u00f1o.zip"]\n')
+    await m.setEnabled(inst.id, 'resourcepacks', ['caf\u00e9.zip'], false)
+    expect(await readFile(path.join(inst.path, 'options.txt'), 'utf8')).toBe('resourcePacks:["vanilla","file/Ni\u00f1o.zip"]\n')
+    m.dispose()
+  })
+
+  it('removes index rows of files deleted outside the launcher on the next scan', async () => {
+    const inst = await instances.create({ name: 'Stale', runtime: { minecraft: '1.21.1', fabric: '0.16.5' } })
+    const mods = path.join(inst.path, 'mods')
+    await fabricJar(path.join(mods, 'a.jar'), 'a')
+    await fabricJar(path.join(mods, 'b.jar'), 'b')
+    const m = manager()
+    await m.refresh(inst.id, 'mods')
+    expect((await db.query('meta.stats', {})).placements).toBe(2)
+    await rm(path.join(mods, 'a.jar'))
+    // A new file may reuse the freed inode: it must not inherit a.jar's metadata.
+    await fabricJar(path.join(mods, 'c.jar'), 'c')
+    await m.refresh(inst.id, 'mods')
+    expect((await db.query('meta.stats', {})).placements).toBe(2)
+    expect((await m.list(inst.id, 'mods')).items.map((r) => [r.id, r.name])).toEqual([
+      ['b.jar', 'B'],
+      ['c.jar', 'C'],
+    ])
     m.dispose()
   })
 

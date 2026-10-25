@@ -11,7 +11,7 @@ import { formatCount, formatRelative } from '@/app/visuals'
 import { useInstanceRows, runtimeLabel, type RuntimeInstanceRow } from '@/data/instance-info'
 import { useFavourites, useMarketSearch, useMarketStatus, type Favourite } from '@/data/market'
 import { api } from '@/lib/rpc'
-import { errorMessage } from '@/lib/error-text'
+import { errorMessage } from '@/lib/error-messages'
 import { FavouriteButton, InstallButton, ProjectIcon, SourceBadge, TYPE_LABELS, eligible, hueOf } from './discover-parts'
 
 type Sort = NonNullable<MarketSearchQuery['sort']>

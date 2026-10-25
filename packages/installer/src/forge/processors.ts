@@ -225,6 +225,8 @@ export interface ProcessorRunOptions {
 export type ProcessorRunner = (invocation: ProcessorInvocation, options: ProcessorRunOptions) => Promise<ProcessorRunResult>
 
 const LOG_LIMIT = 64 * 1024
+/** How long the output pipes may stay open after a processor has exited. */
+const PIPE_DRAIN_MS = 1500
 
 /**
  * The default {@link ProcessorRunner}: `java [jvmArgs] -cp <classpath> <mainClass> <args...>` in its
@@ -278,15 +280,33 @@ export const spawnProcessor: ProcessorRunner = (inv, options) =>
       if (timeout) clearTimeout(timeout)
       if (killTimer) clearTimeout(killTimer)
     }
+    let settled = false
+    let drainTimer: ReturnType<typeof setTimeout> | undefined
+    const settle = (exitCode: number | null, signal: string | null) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      if (drainTimer) clearTimeout(drainTimer)
+      if (options.signal?.aborted) reject(abortReason(options.signal))
+      else resolve({ exitCode, signal, log, timedOut })
+    }
     child.on('error', (e) => {
+      if (settled) return
+      settled = true
       cleanup()
       reject(new InstallError('EINSTALL_PROCESSOR_FAILED', `cannot start ${inv.java}: ${e.message}`, { cause: e }))
     })
-    child.on('close', (exitCode, signal) => {
-      cleanup()
-      if (options.signal?.aborted) reject(abortReason(options.signal))
-      else resolve({ exitCode, signal, log, timedOut })
+    // 'close' waits for the pipes too: a grandchild that escaped the process group (or a pipe kept
+    // open after a timeout kill) would hold them forever. Once the processor itself has exited, give
+    // the pipes a bounded time to drain, then destroy them and settle anyway.
+    child.on('exit', (exitCode, signal) => {
+      drainTimer = setTimeout(() => {
+        child.stdout.destroy()
+        child.stderr.destroy()
+        settle(exitCode, signal)
+      }, PIPE_DRAIN_MS)
     })
+    child.on('close', (exitCode, signal) => settle(exitCode, signal))
   })
 
 /** Options for {@link runProcessors}. */

@@ -34,6 +34,8 @@ export interface LogEvent {
 }
 
 const MAX_XML_EVENT = 1 << 20
+/** Longest unterminated line kept in memory; longer runs without a newline are emitted in pieces. */
+export const MAX_PARTIAL_LINE = 64 * 1024
 
 const LEVELS: Record<string, LogLevel> = {
   TRACE: 'TRACE',
@@ -186,6 +188,11 @@ export class LogParser {
     const lines = (this.#partial + text).split('\n')
     this.#partial = lines.pop() ?? ''
     for (const line of lines) this.#line(line.endsWith('\r') ? line.slice(0, -1) : line)
+    // A child writing without newlines must not grow memory without bound.
+    while (this.#partial.length > MAX_PARTIAL_LINE) {
+      this.#line(this.#partial.slice(0, MAX_PARTIAL_LINE))
+      this.#partial = this.#partial.slice(MAX_PARTIAL_LINE)
+    }
   }
 
   end(): void {

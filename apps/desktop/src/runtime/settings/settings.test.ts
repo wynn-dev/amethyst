@@ -34,6 +34,17 @@ describe('settings schema', () => {
     expect(applySettingsPatch(defaultSettings(), { appearance: { vibrancy: false } }).next.appearance.vibrancy).toBe(false)
   })
 
+  it('is the one source of defaults: the renderer’s first-paint copy must match it exactly', async () => {
+    // Renderer modules (resolved by Vitest's alias; outside the node tsconfig, hence untyped).
+    const renderer = ['@/data/settings', '@/lib/theme']
+    const [{ DEFAULT_APP_SETTINGS }, { DEFAULT_ACCENT }] = await Promise.all(renderer.map((m) => import(m)))
+    expect(DEFAULT_APP_SETTINGS).toEqual(defaultSettings())
+    expect(DEFAULT_ACCENT).toBe(defaultSettings().appearance.accentColor)
+    // A missing file, an empty object and a reset all give the same values.
+    expect(parseSettings(undefined)).toEqual(defaultSettings())
+    expect(parseSettings({})).toEqual(defaultSettings())
+  })
+
   it('falls back per field when loading', () => {
     const s = parseSettings({
       appearance: { theme: 'neon', accentColor: '#ABC', blur: { card: 99, sidebar: 3 } },
@@ -108,6 +119,21 @@ describe('SettingsStore', () => {
     expect(settings).toEqual(defaultSettings())
     expect(store.loadResult?.outcome).toBe('reset')
     expect((await readdir(root)).some((n) => n.startsWith('settings.json.corrupt-'))).toBe(true)
+  })
+
+  it('reset restores settings.json defaults and removes the background, keeping the privacy answer', async () => {
+    const store = new SettingsStore(layout, emit)
+    await store.load()
+    const src = path.join(root, 'bg.png')
+    await writeFile(src, PNG)
+    await store.setBackground({ path: src })
+    await store.patch({ appearance: { theme: 'dark', accentColor: '#007aff' }, network: { maxConnectionsPerHost: 4 }, privacy: { usageData: true, prompted: true } })
+    const s = await store.reset()
+    expect(s).toEqual({ ...defaultSettings(), privacy: { usageData: true, crashReports: false, prompted: true } })
+    expect(await readdir(layout.themeMedia)).toEqual([])
+    await store.flush()
+    const disk = parseSettings(JSON.parse(await readFile(layout.settings, 'utf8')))
+    expect(disk).toEqual(s)
   })
 
   it('imports a background by content into theme-media and replaces the old copy', async () => {

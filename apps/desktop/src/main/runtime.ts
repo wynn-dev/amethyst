@@ -1,9 +1,10 @@
 import { join } from 'node:path'
-import { app, BrowserWindow, ipcMain, MessageChannelMain, safeStorage, shell, utilityProcess, type UtilityProcess, type WebContents } from 'electron'
-import { CONNECT_CHANNEL, PORT_CHANNEL, ServiceRegistry, type RpcMessage } from '@shared/rpc'
-import type { HostServices, ReportedError } from '@shared/services'
+import { app, BrowserWindow, ipcMain, MessageChannelMain, safeStorage, shell, utilityProcess, type MessagePortMain, type UtilityProcess, type WebContents } from 'electron'
+import { CONNECT_CHANNEL, PORT_CHANNEL, postResponse, RpcClient, ServiceRegistry, unwrap, type RpcMessage } from '@shared/rpc'
+import type { Events } from '@shared/events'
+import type { HostServices, ReportedError, RuntimeServices } from '@shared/services'
 import { RUNTIME_ENV } from '@shared/paths'
-import { closeAuthWindow, openAuthWindow } from './auth-window'
+import { clearAuthSession, closeAuthWindow, openAuthWindow } from './auth-window'
 import { emitMain } from './rpc/server'
 import { mainMark } from './bench-marks'
 
@@ -32,6 +33,7 @@ const host: HostServices = {
   async closeAuthWindow() {
     closeAuthWindow()
   },
+  clearAuthSession: () => clearAuthSession(),
   async openExternal(url) {
     if (!/^https:\/\//i.test(url)) throw Object.assign(new Error('Only https: links can be opened'), { code: 'EINVALID_ARGUMENT' })
     await shell.openExternal(url)
@@ -68,6 +70,13 @@ export class RuntimeSupervisor {
   readonly #clients = new Set<WebContents>()
   /** Main-process errors waiting for the runtime to (re)start. Bounded. */
   #pendingErrors: ReportedError[] = []
+  /** Main's own connection to the runtime, like a renderer's (menu state, the quit check). */
+  #port?: MessagePortMain
+  #client?: RpcClient
+  readonly #eventListeners = new Set<(event: keyof Events, payload: unknown) => void>()
+  #quitGuard?: () => Promise<boolean>
+  #quitConfirmed = false
+  #confirmingQuit = false
 
   constructor() {
     this.#hostRegistry.register('host', host)
@@ -77,11 +86,53 @@ export class RuntimeSupervisor {
     ipcMain.on(CONNECT_CHANNEL, (event) => this.#connect(event.sender))
     this.#spawn()
     // Give the runtime a brief, bounded chance to flush (e.g. consented telemetry) before quitting.
+    // The quit guard (menu.ts) asks first when downloads or a game are running.
     app.on('before-quit', (event) => {
       if (this.#stopping || !this.#child) return this.stop()
       event.preventDefault()
-      void this.shutdown(SHUTDOWN_TIMEOUT_MS).then(() => app.quit())
+      if (this.#confirmingQuit) return
+      this.#confirmingQuit = true
+      void (async () => {
+        const ok = this.#quitConfirmed || !this.#quitGuard || (await this.#quitGuard().catch(() => true))
+        this.#confirmingQuit = false
+        if (!ok) return
+        await this.shutdown(SHUTDOWN_TIMEOUT_MS)
+        app.quit()
+      })()
     })
+  }
+
+  /** Ask before quitting (resolves `false` to cancel). Not consulted after {@link allowQuit}. */
+  setQuitGuard(guard: () => Promise<boolean>): void {
+    this.#quitGuard = guard
+  }
+
+  /** The user already confirmed (e.g. Restart to Update); the next quit doesn't ask again. */
+  allowQuit(): void {
+    this.#quitConfirmed = true
+  }
+
+  /** Call a runtime service from main. Rejects with `ERUNTIME_UNAVAILABLE` while it is down, or `ETIMEDOUT`. */
+  call<S extends keyof RuntimeServices, M extends keyof RuntimeServices[S] & string>(
+    service: S,
+    method: M,
+    args: unknown[] = [],
+    timeoutMs = 2_000,
+  ): Promise<Awaited<ReturnType<RuntimeServices[S][M] extends (...a: never[]) => unknown ? RuntimeServices[S][M] : never>>> {
+    const client = this.#client
+    if (!client) return Promise.reject(Object.assign(new Error('The runtime is not running'), { code: 'ERUNTIME_UNAVAILABLE' }))
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(Object.assign(new Error(`${service}.${method} timed out`), { code: 'ETIMEDOUT' })), timeoutMs)
+      unwrap<never>(client.call(service, method, args))
+        .then(resolve, reject)
+        .finally(() => clearTimeout(timer))
+    })
+  }
+
+  /** Runtime events (the same ones renderers get). Also fires `runtime:ready` after each (re)start. */
+  onEvent(listener: (event: keyof Events, payload: unknown) => void): () => void {
+    this.#eventListeners.add(listener)
+    return () => this.#eventListeners.delete(listener)
   }
 
   stop(): void {
@@ -94,15 +145,25 @@ export class RuntimeSupervisor {
     this.#stopping = true
     const child = this.#child
     if (!child) return
-    await new Promise<void>((resolve) => {
-      const timer = setTimeout(resolve, timeoutMs)
+    const exited = await new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => resolve(false), timeoutMs)
       child.once('exit', () => {
         clearTimeout(timer)
-        resolve()
+        resolve(true)
       })
       child.postMessage({ t: 'shutdown' })
     })
+    if (exited) return
+    // The runtime handles SIGTERM (`kill()`) by starting the same shutdown that is already stuck,
+    // so escalate: a hung runtime must never outlive the app.
     child.kill()
+    if (child.pid !== undefined) {
+      try {
+        process.kill(child.pid, 'SIGKILL')
+      } catch {
+        // Already gone.
+      }
+    }
   }
 
   /** Forward a main-process error to the runtime's telemetry service, which applies consent. */
@@ -117,6 +178,9 @@ export class RuntimeSupervisor {
       serviceName: 'Amethyst Runtime',
       stdio: app.isPackaged ? 'ignore' : 'inherit',
       env: {
+        // The runtime's file I/O, hashing and DNS share libuv's pool; the default 4 threads starve DNS
+        // during big installs (download.md P5).
+        UV_THREADPOOL_SIZE: '16',
         ...process.env,
         [RUNTIME_ENV.userData]: app.getPath('userData'),
         [RUNTIME_ENV.logs]: app.getPath('logs'),
@@ -130,12 +194,13 @@ export class RuntimeSupervisor {
     child.on('message', async (msg: RpcMessage) => {
       if (msg?.t !== 'req') return
       const result = await this.#hostRegistry.dispatch(msg)
-      child.postMessage({ t: 'res', id: msg.id, result } satisfies RpcMessage)
+      postResponse((res) => child.postMessage(res), msg.id, result)
     })
 
     child.once('spawn', () => {
       mainMark('runtime-spawn')
       this.#ready = true
+      this.#connectSelf(child)
       for (const error of this.#pendingErrors) child.postMessage({ t: 'error', source: 'main', error })
       this.#pendingErrors = []
       // Attach every window that asked to connect before the runtime was up (or before a restart).
@@ -146,6 +211,10 @@ export class RuntimeSupervisor {
       if (this.#child === child) {
         this.#child = undefined
         this.#ready = false
+        this.#port?.close()
+        this.#port = undefined
+        this.#client?.failAll({ name: 'RpcError', message: 'The runtime restarted', code: 'ERUNTIME_RESTARTED' })
+        this.#client = undefined
       }
       if (this.#stopping) return
       const delay = Math.min(30_000, 250 * 2 ** this.#restarts++)
@@ -160,6 +229,19 @@ export class RuntimeSupervisor {
     setTimeout(() => {
       if (this.#child === child) this.#restarts = 0
     }, 60_000).unref()
+  }
+
+  #connectSelf(child: UtilityProcess): void {
+    const { port1, port2 } = new MessageChannelMain()
+    const client = new RpcClient((req) => port2.postMessage(req))
+    port2.on('message', ({ data }: { data: RpcMessage }) => {
+      if (data?.t === 'res') client.settle(data)
+      else if (data?.t === 'evt') for (const listener of this.#eventListeners) listener(data.event as keyof Events, data.payload)
+    })
+    port2.start()
+    this.#port = port2
+    this.#client = client
+    child.postMessage({ t: 'connect', webContentsId: 0 }, [port1])
   }
 
   #connect(contents: WebContents): void {

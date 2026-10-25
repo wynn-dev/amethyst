@@ -5,7 +5,7 @@
 import { createReadStream } from 'node:fs'
 import { realpath, stat } from 'node:fs/promises'
 import { Readable } from 'node:stream'
-import { isInside, parseRange, resolveAssetPath } from './asset-path'
+import { isServable, parseRange, resolveAssetPath } from './asset-path'
 
 const realRoots = new Map<string, Promise<string>>()
 
@@ -30,9 +30,9 @@ export async function serveAssetRequest(dataRoot: string, url: string, rangeHead
   } catch {
     return empty(404)
   }
-  // A symlink inside the data root must not lead outside it.
+  // A symlink must not lead outside the served folders (or to a non-media file).
   const root = await realRoot(dataRoot)
-  if (!isInside(root, real)) return empty(403)
+  if (!isServable(root, real)) return empty(403)
   const st = await stat(real).catch(() => undefined)
   if (!st?.isFile()) return empty(404)
 

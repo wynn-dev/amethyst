@@ -60,3 +60,12 @@ export interface MenuCommandEvent {
 /** Instance tabs, in ⌘1–⌘7 order. */
 export const INSTANCE_TABS = ['overview', 'mods', 'resource-packs', 'shaders', 'worlds', 'logs', 'settings'] as const
 export type InstanceTab = (typeof INSTANCE_TABS)[number]
+
+/**
+ * What the main window currently shows, sent by its renderer (`window.setMenuContext`) so the
+ * Instance menu can be enabled or disabled to match (ui.md B13).
+ */
+export interface MenuContext {
+  /** The selected instance, or `null` when none is open. */
+  instance: { id: string; canPlay: boolean; canStop: boolean; pinned: boolean } | null
+}

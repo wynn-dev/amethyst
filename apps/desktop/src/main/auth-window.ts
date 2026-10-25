@@ -4,7 +4,7 @@
  * redirect. The window runs in its own persistent session partition, so Microsoft cookies never
  * mix with the app's and "pick an existing account" works across restarts.
  */
-import { BrowserWindow } from 'electron'
+import { BrowserWindow, session } from 'electron'
 
 const PARTITION = 'persist:amethyst-msa'
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]'])
@@ -96,4 +96,12 @@ export function openAuthWindow(url: string, redirectUri: string): Promise<string
 
 export function closeAuthWindow(): void {
   current?.fail('ECANCELLED', 'Sign-in cancelled')
+}
+
+/**
+ * Sign the sign-in window out of Microsoft. Its cookies are not per account, so this clears the
+ * whole partition: the next sign-in shows a fresh account picker.
+ */
+export async function clearAuthSession(): Promise<void> {
+  await session.fromPartition(PARTITION).clearStorageData()
 }

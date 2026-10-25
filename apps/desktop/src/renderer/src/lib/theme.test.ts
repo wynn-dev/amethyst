@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it } from 'vitest'
-import { accentValue, applyTheme, cacheTheme, DEFAULT_ACCENT, normalizeHex, readCachedTheme } from './theme'
+import { ACCENT_SWATCHES, accentFill, accentValue, applyTheme, cacheTheme, contrastRatio, DEFAULT_ACCENT, normalizeHex, readCachedTheme } from './theme'
 
 afterEach(() => {
   document.documentElement.removeAttribute('style')
@@ -22,6 +22,21 @@ describe('theme application', () => {
     expect(document.documentElement.style.getPropertyValue('--accent')).toBe('')
     expect(accentValue('not a colour')).toBeNull()
     expect(normalizeHex('#AbC')).toBe('#aabbcc')
+  })
+
+  it('keeps text on accent fills at 4.5:1 or better for every swatch', () => {
+    for (const { color } of ACCENT_SWATCHES) {
+      const { fill, on } = accentFill(color)
+      expect({ color, ratio: contrastRatio(fill, on === '#fff' ? '#ffffff' : '#000000') >= 4.5 }).toEqual({ color, ratio: true })
+    }
+    // Light accents keep their colour and switch to dark text instead of turning muddy.
+    expect(accentFill('#e5b000')).toEqual({ fill: '#e5b000', on: '#000' })
+    // Accents that already pass are used as they are.
+    expect(accentFill('#5856d6')).toEqual({ fill: '#5856d6', on: '#fff' })
+    applyTheme({ theme: 'system', accentColor: '#ff9500' })
+    expect(document.documentElement.style.getPropertyValue('--on-accent')).toBe('#000')
+    applyTheme({ theme: 'system', accentColor: DEFAULT_ACCENT })
+    expect(document.documentElement.style.getPropertyValue('--accent-fill')).toBe('')
   })
 
   it('forces light or dark, and follows the system otherwise', () => {

@@ -34,7 +34,7 @@ import { applyUpdates, projectKey, useUpdateCandidates } from '@/data/market'
 import { openModpackImport } from '@/data/modpacks'
 import { isModpackPath, isZipPath, openExternal, pickFiles } from '@/lib/files'
 import { api } from '@/lib/rpc'
-import { reportError } from '@/lib/error-text'
+import { toastError } from '@/lib/error-messages'
 import { revealInFinder } from '@/lib/files'
 import {
   AddFromInstanceSheet,
@@ -223,7 +223,7 @@ export default function ModsTab() {
         onSelect: () => void applyUpdates(id, 'mods', updatable, Object.fromEntries(sel.map((m) => [m.id, m.name]))),
       },
       { kind: 'separator' },
-      { label: 'Show in Finder', disabled: !one, onSelect: () => one && void api.resources.get(id, 'mods', one.id).then((d) => revealInFinder(d.path), (e: unknown) => reportError('Couldn’t show the file', e)) },
+      { label: 'Show in Finder', disabled: !one, onSelect: () => one && void api.resources.get(id, 'mods', one.id).then((d) => revealInFinder(d.path), (e: unknown) => toastError(e, 'Couldn’t show the file')) },
       ...(one?.source ? [{ label: one.source.platform === 'modrinth' ? 'Open on Modrinth' : 'Open on CurseForge', onSelect: () => openProject(one) } as MenuEntry] : []),
       { label: one ? 'Copy Name' : 'Copy Names', onSelect: () => copyText(sel.map((m) => m.name).join('\n'), 'Copied') },
       { kind: 'separator' },

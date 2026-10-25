@@ -62,7 +62,7 @@ export function Select<V extends string = string>({
         <span
           className={cn(
             'flex items-center justify-center rounded-[4px]',
-            variant === 'push' ? 'size-4 bg-accent text-on-accent' : 'size-4 text-label-2',
+            variant === 'push' ? 'size-4 bg-accent-fill text-on-accent' : 'size-4 text-label-2',
           )}
         >
           <ChevronsUpDown aria-hidden className="size-3" strokeWidth={2.25} />

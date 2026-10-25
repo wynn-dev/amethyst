@@ -57,6 +57,22 @@ function mojmapsHandler(options: ForgeInstallOptions) {
 }
 
 /**
+ * Processor libraries are executed, so a downloadable one must be checksum-verified: when neither
+ * the profile nor a maven `.sha1` sidecar provides a digest, fail closed instead of trusting any zip.
+ * Entries without a URL come from the (verified) installer's `maven/` folder.
+ *
+ * @throws {InstallError} `EINSTALL_UNVERIFIED`
+ */
+export function requireToolHashes(specs: readonly FileSpec[]): void {
+  const unverified = specs.find((s) => s.urls.length > 0 && !s.sha1 && !s.sha256 && !s.sha1Any?.length)
+  if (unverified) {
+    throw new InstallError('EINSTALL_UNVERIFIED', `refusing to run processor library ${unverified.name ?? unverified.path}: no checksum could be obtained`, {
+      path: unverified.path,
+    })
+  }
+}
+
+/**
  * Install from a modern installer jar (`install_profile.json` + `version.json`, spec 0 or 1), in the
  * stages of `install.md` §4.4:
  *
@@ -138,6 +154,7 @@ export async function installModern(zip: ZipReader, installerPath: string, artif
   await step(options.ctx, 'libraries', Math.max(1, toolSpecs.length), async (ctx) => {
     const specs = [...toolSpecs, ...versionSpecs.filter((s) => s.urls.length > 0)]
     await fillMissingHashes(specs, options.http, signal)
+    requireToolHashes(toolSpecs)
     return ensureFiles(specs, { signal, ctx, http: options.http, concurrency: options.concurrency })
   })
 
@@ -193,6 +210,7 @@ export async function rerunStoredProfile(versionId: string, options: ForgeInstal
   const profile = parseModernProfile(raw)
   const toolSpecs = toolLibrarySpecs(root, profile.libraries ?? [], platformOf(options))
   await fillMissingHashes(toolSpecs, options.http, signal)
+  requireToolHashes(toolSpecs)
   await ensureFiles(toolSpecs, { signal, http: options.http, concurrency: options.concurrency })
   const ctx: VariableContext = {
     side: 'client',

@@ -161,6 +161,8 @@ export interface SkippedFile {
   path: string
   reason: 'env-unsupported' | 'missing-on-curseforge' | 'unknown-class' | 'unsafe-path' | 'datapack'
   message: string
+  /** CurseForge file id of a `missing-on-curseforge` entry: the pack still lists it. */
+  fileId?: number
 }
 
 /** An optional file the user can toggle in the preview. */

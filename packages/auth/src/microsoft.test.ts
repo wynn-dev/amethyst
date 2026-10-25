@@ -290,8 +290,27 @@ describe('refreshMicrosoft', () => {
 
   it('flags 5xx from the token endpoint as transient', async () => {
     const f = chainFetch({ [`POST ${TOKEN_URL}`]: { status: 503, text: 'unavailable' } })
-    const e = await authError(refreshMicrosoft(existing(), { clientId: 'c', fetch: f.fetch }))
+    const e = await authError(refreshMicrosoft(existing(), { clientId: 'c', fetch: f.fetch, retry: fastRetry }))
     expect(e).toMatchObject({ code: 'EMSA_TOKEN_FAILED', reauth: false, retryable: true })
+    expect(f.callsTo(TOKEN_URL)).toHaveLength(4)
+  })
+
+  it('retries a rate-limited refresh honouring Retry-After, then succeeds', async () => {
+    const f = chainFetch({
+      [`POST ${TOKEN_URL}`]: [{ status: 429, json: { error: 'temporarily_unavailable' }, headers: { 'retry-after': '0' } }, json(msTokenResponse('ms-refresh-2'))],
+    })
+    const session = await refreshMicrosoft(existing(), { clientId: 'c', fetch: f.fetch, xboxProfile: false, retry: fastRetry })
+    expect(session.msRefreshToken).toBe('ms-refresh-2')
+    expect(f.callsTo(TOKEN_URL)).toHaveLength(2)
+  })
+
+  it('rejects refreshed tokens that resolve to a different Minecraft account', async () => {
+    const f = chainFetch()
+    const e = await authError(refreshMicrosoft(existing({ id: 'mc-account-2' }), { clientId: 'c', fetch: f.fetch, xboxProfile: false }))
+    expect(e.code).toBe('EACCOUNT_MISMATCH')
+    // The rotated token still belongs to the stored lineage; the caller decides what to do with it.
+    expect(e.rotatedRefreshToken).toBe('ms-refresh-2')
+    expect(f.callsTo(MC_PROFILE_URL)).toHaveLength(0)
   })
 
   it('attaches the rotated token when a later step fails', async () => {
@@ -319,7 +338,8 @@ describe('refreshMicrosoft', () => {
     const other = refreshMicrosoft(existing({ id: 'mc-account-2' }), options)
     release()
     const [ra, rb] = await Promise.all([a, b])
-    await other
+    // Its own flight; the fixture chain answers for mc-account-1, so it must not be relabelled.
+    await expect(other).rejects.toMatchObject({ code: 'EACCOUNT_MISMATCH' })
     expect(ra).toBe(rb)
     expect(f.callsTo(TOKEN_URL)).toHaveLength(2)
 

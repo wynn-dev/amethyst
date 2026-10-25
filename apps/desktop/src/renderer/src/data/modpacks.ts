@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { create } from 'zustand'
 import type { MarketPlatform, ModpackImportInput, ModpackImportResult, ModpackManualFile, ModpackSource, ModpackUpdateResult } from '@shared/services'
 import { api, subscribe } from '@/lib/rpc'
-import { reportError } from '@/lib/error-text'
+import { toastError } from '@/lib/error-messages'
 import { revealInFinder } from '@/lib/files'
 import { toast, toasts } from '@/ui/toast-store'
 import { queryClient } from './query'
@@ -66,7 +66,7 @@ export async function importModpack(input: ModpackImportInput, name: string, ope
     finished(result, name, open)
     return result
   } catch (e) {
-    reportError(`Couldn’t import “${name}”`, e)
+    toastError(e, `Couldn’t import “${name}”`)
     return undefined
   }
 }
@@ -78,7 +78,7 @@ export async function installModpackFromMarket(input: { platform: MarketPlatform
     finished(result, title, open)
     return result
   } catch (e) {
-    reportError(`Couldn’t install “${title}”`, e)
+    toastError(e, `Couldn’t install “${title}”`)
     return undefined
   }
 }
@@ -118,7 +118,7 @@ export async function watchManualDownloads(instanceId: string): Promise<void> {
     const files = await api.modpacks.watchManualDownloads(instanceId)
     queryClient.setQueryData<ManualState>(modpackKeys.manual(instanceId), (prev) => ({ ...prev, files, watching: files.length > 0 }))
   } catch (e) {
-    reportError('Couldn’t watch the Downloads folder', e)
+    toastError(e, 'Couldn’t watch the Downloads folder')
   }
 }
 
@@ -134,7 +134,7 @@ export async function provideManualFiles(instanceId: string, paths: string[]): P
       if (!r.matched) toast({ kind: 'warning', title: `${p.split('/').pop()} isn’t one of the missing files`, message: 'Its contents don’t match any file the modpack needs.' })
       queryClient.setQueryData<ManualState>(modpackKeys.manual(instanceId), (prev) => ({ watching: prev?.watching ?? false, ...prev, files: r.manual }))
     } catch (e) {
-      reportError(`Couldn’t use ${p.split('/').pop()}`, e)
+      toastError(e, `Couldn’t use ${p.split('/').pop()}`)
     }
   }
 }
@@ -153,7 +153,7 @@ export async function rollbackModpack(instanceId: string, backupId: string, name
     void queryClient.invalidateQueries({ queryKey: modpackKeys.update(instanceId) })
     toast({ kind: 'success', title: `Rolled back “${name}”`, message: 'The files from before the update are back.' })
   } catch (e) {
-    reportError(`Couldn’t roll back “${name}”`, e)
+    toastError(e, `Couldn’t roll back “${name}”`)
   }
 }
 
@@ -188,7 +188,7 @@ export async function exportModpack(instanceId: string, name: string, input: Par
     })
     return true
   } catch (e) {
-    reportError(`Couldn’t export “${name}”`, e)
+    toastError(e, `Couldn’t export “${name}”`)
     return false
   }
 }

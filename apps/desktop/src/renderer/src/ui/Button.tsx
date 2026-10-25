@@ -13,7 +13,7 @@ const base =
 const variants: Record<ButtonVariant, string> = {
   push: 'bg-control text-label shadow-control active:bg-control-pressed',
   primary:
-    'bg-accent text-on-accent shadow-[0_0_0_0.5px_rgb(0_0_0/0.12),0_0.5px_1.5px_rgb(0_0_0/0.18),inset_0_0.5px_0_rgb(255_255_255/0.22)] ' +
+    'bg-accent-fill text-on-accent shadow-[0_0_0_0.5px_rgb(0_0_0/0.12),0_0.5px_1.5px_rgb(0_0_0/0.18),inset_0_0.5px_0_rgb(255_255_255/0.22)] ' +
     'hover:bg-accent-hover active:brightness-95',
   borderless: 'text-label hover:bg-fill active:bg-fill-2 data-[state=open]:bg-fill-2',
   destructive:

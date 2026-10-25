@@ -28,6 +28,18 @@ export class Updater implements UpdaterService {
   #firstCheck?: NodeJS.Timeout
   #interval?: NodeJS.Timeout
   #lastProgressAt = 0
+  readonly #listeners = new Set<(state: UpdaterState) => void>()
+
+  /** The current state, synchronously (for the menu bar). */
+  get state(): UpdaterState {
+    return this.#state
+  }
+
+  /** Called on every state change (the menu bar shows "Restart to Update" when one is ready). */
+  onChange(listener: (state: UpdaterState) => void): () => void {
+    this.#listeners.add(listener)
+    return () => this.#listeners.delete(listener)
+  }
 
   /** Schedule the first check and the periodic check. */
   start(): void {
@@ -111,6 +123,7 @@ export class Updater implements UpdaterService {
     // only after electron-updater reports the download, and a rejected update must not look ready.
     this.#state = state
     emitMain('updater:state', state)
+    for (const listener of this.#listeners) listener(state)
   }
 }
 

@@ -90,12 +90,15 @@ export function parseModsToml(text: string, options: ModsTomlOptions): ParserOut
   const dependencies = forgeDependencies(depTable[id], jarVersion)
   const findRange = (ids: string[]) => dependencies.find((d) => d.kind === 'depends' && ids.includes(d.modId))
   const mcDep = findRange(['minecraft'])
-  const loaderDep = findRange(loader === 'neoforge' ? ['neoforge'] : ['forge'])
+  // NeoForge for 1.20.2–1.20.4 still read META-INF/mods.toml: a dependency on neoforge (and none on
+  // forge) marks such a jar as a NeoForge mod, so it is not flagged "made for Forge" there.
+  const kind = loader === 'forge' && dependencies.some((d) => d.modId === 'neoforge') && !dependencies.some((d) => d.modId === 'forge') ? 'neoforge' : loader
+  const loaderDep = findRange(kind === 'neoforge' ? ['neoforge'] : ['forge'])
   // `clientSideOnly` is a newer top-level key; some mods put it on the [[mods]] entry instead.
   const clientOnly = doc.clientSideOnly === true || primary.clientSideOnly === true
 
   const meta: LoaderModMetadata = {
-    loader,
+    loader: kind,
     source: file,
     id,
     name: str(primary.displayName),

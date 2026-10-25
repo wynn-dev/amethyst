@@ -116,6 +116,7 @@ jobs:
           retry spctl -a -vv "$RUNNER_TEMP/zipcheck/Amethyst.app"
 
       - name: Smoke test the signed app
+        timeout-minutes: 5
         env:
           AMETHYST_SMOKE: '1'
         run: '"$RELEASE_DIR/mac-arm64/Amethyst.app/Contents/MacOS/Amethyst"'

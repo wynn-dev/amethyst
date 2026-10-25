@@ -14,7 +14,8 @@ export type QueryHandlers = { [K in QueryName]: Handler<K> }
 
 const CORRUPTION = /file is not a database|database disk image is malformed|no such table|unable to open database|SQLITE_CORRUPT|SQLITE_NOTADB/i
 
-function isCorruption(e: unknown): boolean {
+/** True for errors that mean the file is damaged or its schema is missing: the cache must be rebuilt. */
+export function isCorruption(e: unknown): boolean {
   const code = (e as { code?: unknown }).code
   return (typeof code === 'string' && (code.startsWith('SQLITE_CORRUPT') || code === 'SQLITE_NOTADB' || code === 'SQLITE_CANTOPEN')) || CORRUPTION.test(String((e as Error)?.message ?? e))
 }
@@ -70,17 +71,33 @@ export function openDatabase(file: string, options: { now?: () => number } = {})
         // ignore
       }
       if (file === ':memory:' || attempt >= 3 || !isCorruption(e)) throw e
-      const stamp = `${now()}${attempt ? `-${attempt}` : ''}`
-      for (const suffix of ['', '-wal', '-shm']) {
-        try {
-          renameSync(`${file}${suffix}`, `${file}.${stamp}.bak${suffix}`)
-          if (suffix === '') healed.push(`${file}.${stamp}.bak`)
-        } catch {
-          // A missing -wal/-shm is fine.
-        }
-      }
+      const moved = quarantineDatabase(file, `${now()}${attempt ? `-${attempt}` : ''}`)
+      if (moved) healed.push(moved)
     }
   }
+}
+
+/** Rename `file` (and its `-wal`/`-shm`) to `<file>.<stamp>.bak`; returns the new main path, if it existed. */
+export function quarantineDatabase(file: string, stamp: string): string | undefined {
+  let moved: string | undefined
+  for (const suffix of ['', '-wal', '-shm']) {
+    try {
+      renameSync(`${file}${suffix}`, `${file}.${stamp}.bak${suffix}`)
+      if (suffix === '') moved = `${file}.${stamp}.bak`
+    } catch {
+      // A missing -wal/-shm is fine.
+    }
+  }
+  return moved
+}
+
+/** Platform id shapes. Attribution is validated before it is stored, so one corrupt id (a leaked path) cannot poison later batch requests. */
+const SOURCE_IDS: Record<string, RegExp> = { modrinth: /^[0-9A-Za-z]{8}$/, curseforge: /^[1-9][0-9]{0,11}$/ }
+
+/** True when a source row's project and version ids look like real ids of its platform. */
+export function isValidSource(r: Pick<SourceRow, 'platform' | 'projectId' | 'versionId'>): boolean {
+  const re = SOURCE_IDS[r.platform]
+  return re !== undefined && typeof r.projectId === 'string' && typeof r.versionId === 'string' && re.test(r.projectId) && re.test(r.versionId)
 }
 
 const json = (v: unknown) => JSON.stringify(v)
@@ -145,6 +162,7 @@ export function createQueryHandlers(db: Db): QueryHandlers {
 
   const putSources = tx((rows: SourceRow[]) => {
     for (const r of rows) {
+      if (!isValidSource(r)) continue
       s.putSource.run(r)
       s.deleteLookup.run(r.sha1, r.platform)
     }

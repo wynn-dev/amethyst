@@ -1,13 +1,14 @@
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { app, BrowserWindow, protocol } from 'electron'
+import { app, BrowserWindow, protocol, session } from 'electron'
 import { ASSET_SCHEME } from '@shared/paths'
 import type { ReportedError } from '@shared/services'
 import { serveAssetRequest } from './asset-protocol'
 import { dialogService, shellService, windowService } from './os-services'
 import { prepareE2eDataRoot, runE2eUi } from './e2e-ui'
-import { installAppMenu } from './menu'
+import { confirmQuit, installAppMenu, type AppMenu } from './menu'
+import { installPermissionPolicy } from './permissions'
 import { registerMainService, startMainRpc } from './rpc/server'
 import { RuntimeSupervisor, showHiddenWindows } from './runtime'
 import { Updater } from './updater'
@@ -30,6 +31,11 @@ if (benchOut) {
 const runtime = new RuntimeSupervisor()
 const updater = new Updater()
 
+// Deny web permissions (camera, microphone, geolocation…) to every session, including the sign-in
+// window's; Amethyst's own pages keep only clipboard writes and notifications.
+const devOrigin = isDev && process.env.ELECTRON_RENDERER_URL ? new URL(process.env.ELECTRON_RENDERER_URL).origin : undefined
+app.on('session-created', (s) => installPermissionPolicy(s, devOrigin))
+
 // Uncaught main-process errors are logged and forwarded to the runtime, whose telemetry service
 // drops them unless the user enabled crash reports.
 function toReported(e: unknown): ReportedError {
@@ -49,6 +55,7 @@ process.on('unhandledRejection', (reason) => {
 protocol.registerSchemesAsPrivileged([{ scheme: ASSET_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true } }])
 
 let mainWindow: BrowserWindow | undefined
+let appMenu: AppMenu | undefined
 
 // `AMETHYST_SCREENSHOT=<dir>` (dev only): start from a fresh profile so first run and fixtures are predictable.
 const screenshotDir = isDev ? process.env.AMETHYST_SCREENSHOT : undefined
@@ -194,7 +201,9 @@ function createMainWindow(): BrowserWindow {
 
   mainWindow = win
   win.on('closed', () => {
-    if (mainWindow === win) mainWindow = undefined
+    if (mainWindow !== win) return
+    mainWindow = undefined
+    appMenu?.setContext({ instance: null })
   })
 
   if (isDev && process.env.ELECTRON_RENDERER_URL) {
@@ -207,13 +216,18 @@ function createMainWindow(): BrowserWindow {
 
 app.whenReady().then(() => {
   mainMark('app-ready')
+  installPermissionPolicy(session.defaultSession, devOrigin)
   const dataRoot = app.getPath('userData')
   protocol.handle(ASSET_SCHEME, (request) => serveAssetRequest(dataRoot, request.url, request.headers.get('range')))
   // The registry only dispatches to own properties, so expose the class through a plain object.
   registerMainService('updater', {
     getState: () => updater.getState(),
     check: () => updater.check(),
-    quitAndInstall: () => updater.quitAndInstall(),
+    async quitAndInstall() {
+      if (!(await confirmQuit(runtime, 'restart'))) return
+      runtime.allowQuit()
+      return updater.quitAndInstall()
+    },
   })
   registerMainService('app', {
     async getInfo() {
@@ -225,11 +239,12 @@ app.whenReady().then(() => {
       }
     },
   })
-  registerMainService('window', windowService(() => mainWindow))
+  registerMainService('window', windowService(() => mainWindow, (context) => appMenu?.setContext(context)))
   registerMainService('shell', shellService)
   registerMainService('dialog', dialogService())
   startMainRpc()
-  installAppMenu(() => mainWindow ?? createMainWindow())
+  appMenu = installAppMenu({ getMainWindow: () => mainWindow ?? createMainWindow(), updater, runtime })
+  runtime.setQuitGuard(() => confirmQuit(runtime))
   // Window first, runtime in parallel: nothing on the paint path waits for background services.
   createMainWindow()
   runtime.start()
@@ -241,8 +256,9 @@ app.whenReady().then(() => {
   })
 })
 
-// If an update has been downloaded, electron-updater installs it as the app quits.
-app.on('before-quit', () => updater.stop())
+// If an update has been downloaded, electron-updater installs it as the app quits. (`will-quit`,
+// not `before-quit`: the quit check can still cancel a quit at that point.)
+app.on('will-quit', () => updater.stop())
 
 app.on('window-all-closed', () => {
   // macOS convention: keep the app alive with no windows; quit from the menu or ⌘Q.

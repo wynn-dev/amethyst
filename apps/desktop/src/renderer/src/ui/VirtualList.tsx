@@ -529,7 +529,7 @@ const TableRow = memo(function TableRow<T>({ rowKey, index, top, height, templat
       className={cn(
         'grid items-center text-body',
         index % 2 === 1 && 'bg-row-alt',
-        selected && 'bg-selection group-focus/table:bg-accent group-focus/table:text-on-accent',
+        selected && 'bg-selection group-focus/table:bg-accent-fill group-focus/table:text-on-accent',
         className,
       )}
     >

@@ -10,7 +10,7 @@ import { artifactUrl, type ForgeArtifact } from './forge/installer-jar'
 import { versionJsonPath, writeJsonAtomic } from './fs-util'
 import { layerLibrarySpecs, resolveInstalled } from './libraries'
 import { createMetadataClient, type MetadataClient } from './meta/client'
-import { type FabricLikeKind, fabricLikeVersionId } from './meta/fabric'
+import { type FabricLikeKind, fabricLikeVersionId, parseLoaderProfile } from './meta/fabric'
 import { forgeInstallKind } from './meta/forge'
 import { neoForgeProjectOf } from './meta/neoforge'
 import { requiredJavaMajor } from './minecraft-version'
@@ -126,6 +126,26 @@ async function loadVanillaJson(id: string, options: PlanOptions, meta: MetadataC
   return { json: checkVersionJson(JSON.parse(text), id) }
 }
 
+/**
+ * The Fabric/Quilt launcher profile from the meta service. When the service cannot be reached, a
+ * valid copy already installed as `versions/<versionId>/<versionId>.json` is used instead, so an
+ * existing loader version can be installed for another instance while offline.
+ */
+async function loadLoaderProfile(kind: FabricLikeKind, minecraft: string, loader: string, versionId: string, options: PlanOptions, meta: MetadataClient): Promise<RawVersionJson> {
+  try {
+    return await meta.loaderProfile(kind, minecraft, loader, { signal: options.signal })
+  } catch (e) {
+    if (options.signal?.aborted) throw e
+    const local = await readFile(versionJsonPath(options.root, versionId), 'utf8').catch(() => undefined)
+    if (local === undefined) throw e
+    try {
+      return parseLoaderProfile(JSON.parse(local), minecraft, kind)
+    } catch {
+      throw e
+    }
+  }
+}
+
 const sumSizes = (specs: { size?: number }[]) => specs.reduce((n, s) => n + (s.size ?? 0), 0)
 
 /**
@@ -154,10 +174,10 @@ export async function planInstall(request: InstallRequest, options: PlanOptions)
   const kind = request.loader?.kind
   const version = request.loader?.version ?? ''
   if (kind === 'fabric' || kind === 'quilt') {
-    const profile = await meta.loaderProfile(kind, request.minecraft, version, { signal })
+    versionId = fabricLikeVersionId(kind, request.minecraft, version)
+    const profile = await loadLoaderProfile(kind, request.minecraft, version, versionId, options, meta)
     const loaderLibs = layerLibrarySpecs(options.root, profile, platform)
     loader = { kind, version, profile }
-    versionId = fabricLikeVersionId(kind, request.minecraft, version)
     steps.push({ id: 'loader', files: 1 }, { id: 'loader-libraries', bytes: sumSizes(loaderLibs), files: loaderLibs.length })
   } else if (kind === 'forge') {
     const entry = (await meta.forgeVersions(request.minecraft, { signal })).find((v) => v.version === version || v.artifactVersion === version)

@@ -77,7 +77,7 @@ export async function readModpack(file: string, options: ReadModpackOptions = {}
       }
       partial = parseCurseForge(json, entries, warnings)
     } else {
-      throw new ModpackError('EUNKNOWN_FORMAT', 'The archive contains neither modrinth.index.json nor a CurseForge manifest.json')
+      throw new ModpackError('EUNKNOWN_FORMAT', unknownFormatMessage(entries))
     }
 
     if (!partial.name) {
@@ -96,6 +96,26 @@ function notAZip(archive: string, e: unknown): unknown {
   const code = (e as { code?: string }).code
   if (code === 'EZIP_MALFORMED') return new ModpackError('ENOT_A_ZIP', `This file isn't a modpack archive: ${path.basename(archive)}`, { cause: e })
   return e
+}
+
+/**
+ * Say what a zip that is not a modpack looks like (known issue #1642): a Prism/MultiMC
+ * instance export (not supported: only `.mrpack` and CurseForge packs are), a mod, a resource
+ * pack or a world. Detected from content, never from the file extension.
+ */
+function unknownFormatMessage(entries: readonly ZipEntryInfo[]): string {
+  const names = entries.filter((e) => !isJunkEntry(e.name)).map((e) => e.name)
+  const atRootOrOneDeep = (file: string) => names.some((n) => n === file || (/^[^/]+\/[^/]+$/.test(n) && n.endsWith(`/${file}`)))
+  if (atRootOrOneDeep('mmc-pack.json') || atRootOrOneDeep('instance.cfg')) {
+    return 'This is a Prism Launcher / MultiMC instance export. Amethyst imports only Modrinth (.mrpack) and CurseForge modpacks'
+  }
+  const has = (file: string) => names.includes(file)
+  if (has('fabric.mod.json') || has('quilt.mod.json') || has('META-INF/mods.toml') || has('META-INF/neoforge.mods.toml') || has('mcmod.info')) {
+    return 'This looks like a mod, not a modpack. Add it to an instance’s Mods instead'
+  }
+  if (has('pack.mcmeta')) return 'This looks like a resource pack or data pack, not a modpack'
+  if (atRootOrOneDeep('level.dat')) return 'This looks like a Minecraft world, not a modpack'
+  return 'The archive contains neither modrinth.index.json nor a CurseForge manifest.json'
 }
 
 /** The single top-level folder holding `modrinth.index.json`, if the zip is laid out that way. */

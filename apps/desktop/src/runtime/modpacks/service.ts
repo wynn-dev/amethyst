@@ -9,6 +9,7 @@
  * file install keeps the instance; importing again with `instanceId` resumes it.
  */
 import { createHash, randomUUID } from 'node:crypto'
+import { createReadStream } from 'node:fs'
 import { mkdir, readdir, readFile, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import path from 'node:path'
@@ -17,6 +18,7 @@ import {
   exportCurseForge,
   exportModrinth,
   installModpack,
+  listIncompleteOperations,
   matchManualFiles,
   planModpackUpdate,
   readModpack,
@@ -31,7 +33,7 @@ import {
   type ModpackUpstream,
   type ResolvedModpack,
 } from '@amethyst/modpack'
-import type { CurseForgeClient, ModrinthClient } from '@amethyst/marketplace'
+import { curseforgeFingerprint, type CurseForgeClient, type ModrinthClient } from '@amethyst/marketplace'
 import { download, type HttpClient } from '@amethyst/net'
 import type { TaskContext } from '@amethyst/task'
 import type {
@@ -81,6 +83,7 @@ export interface ModpackApi {
   exportModrinth: typeof exportModrinth
   exportCurseForge: typeof exportCurseForge
   readModpackLock: typeof readModpackLock
+  listIncompleteOperations: typeof listIncompleteOperations
 }
 
 const defaultApi: ModpackApi = {
@@ -95,6 +98,7 @@ const defaultApi: ModpackApi = {
   exportModrinth,
   exportCurseForge,
   readModpackLock,
+  listIncompleteOperations,
 }
 
 export interface ModpackDeps {
@@ -218,16 +222,62 @@ export class ModpackManager {
     return dest
   }
 
-  /** Read a pack once per archive (shared by concurrent callers). */
-  #read(archive: string): Promise<ModpackManifest> {
-    let p = this.#previews.get(archive)
+  /**
+   * Read a pack once per archive (shared by concurrent callers). The cache key includes the
+   * file's identity, so a pack replaced at the same path (re-downloaded, overwritten in Finder)
+   * is read again instead of installing a stale file list.
+   */
+  async #read(archive: string): Promise<ModpackManifest> {
+    const st = await stat(archive).catch(() => undefined)
+    const key = st ? `${archive}\0${st.ino}:${st.size}:${st.mtimeMs}` : archive
+    let p = this.#previews.get(key)
     if (!p) {
       p = this.#api.readModpack(archive)
-      p.catch(() => this.#previews.delete(archive))
-      this.#previews.set(archive, p)
+      p.catch(() => this.#previews.delete(key))
+      this.#previews.set(key, p)
       while (this.#previews.size > 8) this.#previews.delete(this.#previews.keys().next().value as string)
     }
     return p
+  }
+
+  /**
+   * Where a local pack file came from, looked up by its hash (`modpacks.md` §2 step 6), so an
+   * instance imported from a file still records its provenance and can be updated later. Best
+   * effort: undefined when the platforms do not know the file or cannot be reached.
+   */
+  async #identify(manifest: ModpackManifest, signal?: AbortSignal): Promise<ModpackUpstream | undefined> {
+    const { modrinth, curseforge } = this.#clients()
+    try {
+      if (manifest.format === 'modrinth') {
+        const v = (await modrinth.getVersionsFromHashes([manifest.sha1], 'sha1', signal ? { signal } : {}))[manifest.sha1]
+        return v ? { kind: 'modrinth', projectId: v.project_id, versionId: v.id, packSha1: manifest.sha1 } : undefined
+      }
+      if (!curseforge) return undefined
+      const fp = await curseforgeFingerprint(() => createReadStream(manifest.archive, { highWaterMark: 256 * 1024 }), signal)
+      const hit = (await curseforge.matchFingerprints([fp], signal ? { signal } : {})).exactMatches.find((m) => m.file.fileFingerprint === fp)
+      return hit ? { kind: 'curseforge', projectId: hit.file.modId, fileId: hit.file.id, packSha1: manifest.sha1 } : undefined
+    } catch (e) {
+      if (isAbortError(e)) throw e
+      log.warn(`cannot identify the origin of “${manifest.name}”: ${errorMessage(e)}`)
+      return undefined
+    }
+  }
+
+  /** An instance whose import of this very pack was interrupted (so importing again resumes it, `modpacks.md` §7). */
+  async #interruptedImport(packSha1: string, name: string): Promise<string | undefined> {
+    for (const row of this.#d.instances.list()) {
+      if (row.name.toLowerCase() !== name.toLowerCase()) continue
+      let dir: string
+      try {
+        dir = this.#d.instances.resolve(row.id).dir
+      } catch {
+        continue
+      }
+      // oxlint-disable-next-line no-await-in-loop -- only instances with the same name are checked
+      const ops = await this.#api.listIncompleteOperations(dir).catch(() => [])
+      if (ops.some((o) => o.kind === 'install' && o.packSha1 === packSha1)) return row.id
+    }
+    return undefined
   }
 
   #existingInstance(manifest: ModpackManifest, upstream?: ModpackUpstream): string | null {
@@ -285,9 +335,10 @@ export class ModpackManager {
           throw new AppError('EMARKET_UNAVAILABLE', 'CurseForge is not available in this build, so CurseForge modpacks cannot be imported', { platform: 'curseforge' })
         }
         const resolved = await ctx.child('modpack.resolve', (c) => this.#api.resolveModpackFiles(manifest, { modrinth, ...(curseforge ? { curseforge } : {}), ctx: c }))
-        const upstream = origin.upstream ? { ...origin.upstream, packSha1: manifest.sha1 } : undefined
+        const upstream = origin.upstream ? { ...origin.upstream, packSha1: manifest.sha1 } : await this.#identify(manifest, ctx.signal)
 
-        // The instance (or the one being resumed).
+        // The instance (or the one being resumed): importing the same pack again after a failure must not create a second one.
+        instanceId ??= await this.#interruptedImport(manifest.sha1, input.name?.trim() || manifest.name)
         if (instanceId) {
           this.#d.instances.resolve(instanceId)
         } else {
@@ -410,6 +461,8 @@ export class ModpackManager {
         download: { client },
         ctx,
         manualFiles: files,
+        // Only the missing files: configs the user changed since (or rows excluded from an update) stay as they are.
+        only: pending.manual.map((m) => m.path),
         ...(pending.selectedOptional ? { selectedOptional: pending.selectedOptional } : {}),
         ...(pending.upstream ? { upstream: pending.upstream } : {}),
       }),

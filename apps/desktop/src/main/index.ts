@@ -12,10 +12,21 @@ import { registerMainService, startMainRpc } from './rpc/server'
 import { RuntimeSupervisor, showHiddenWindows } from './runtime'
 import { Updater } from './updater'
 import { guardNavigation, runScreenshots } from './windows'
+import { mainMark } from './bench-marks'
+
+mainMark('main-start')
 
 const isDev = !app.isPackaged
 // The smoke test runs against a throwaway data root, never the user's real one.
 if (process.env.AMETHYST_SMOKE) app.setPath('userData', mkdtempSync(join(tmpdir(), 'amethyst-smoke-')))
+// `AMETHYST_BENCH=<out.json>`: the benchmark (main/bench.ts, driven by scripts/bench/run.ts), also
+// against the packaged app like the smoke test. It runs in `AMETHYST_BENCH_ROOT` (a seeded data
+// root), never the user's real one.
+const benchOut = process.env.AMETHYST_BENCH
+if (benchOut) {
+  app.setPath('userData', process.env.AMETHYST_BENCH_ROOT ?? mkdtempSync(join(tmpdir(), 'amethyst-bench-')))
+  app.setAppLogsPath(join(app.getPath('userData'), 'logs'))
+}
 const runtime = new RuntimeSupervisor()
 const updater = new Updater()
 
@@ -72,8 +83,12 @@ function createMainWindow(): BrowserWindow {
       spellcheck: false,
     },
   })
+  mainMark('window-created')
 
-  win.once('ready-to-show', () => win.show())
+  win.once('ready-to-show', () => {
+    mainMark('ready-to-show')
+    win.show()
+  })
 
   // `AMETHYST_SMOKE=1`: verify every RPC path end to end through the renderer bridge (main, the
   // runtime, its SQLite worker and the domain services), print the result, and quit. Used by CI,
@@ -169,6 +184,14 @@ function createMainWindow(): BrowserWindow {
     )
   }
 
+  if (benchOut) {
+    void import('./bench').then(({ runBench }) =>
+      runBench(win, benchOut, (ok) => {
+        void runtime.shutdown(3_000).then(() => app.exit(ok ? 0 : 1))
+      }),
+    )
+  }
+
   mainWindow = win
   win.on('closed', () => {
     if (mainWindow === win) mainWindow = undefined
@@ -183,6 +206,7 @@ function createMainWindow(): BrowserWindow {
 }
 
 app.whenReady().then(() => {
+  mainMark('app-ready')
   const dataRoot = app.getPath('userData')
   protocol.handle(ASSET_SCHEME, (request) => serveAssetRequest(dataRoot, request.url, request.headers.get('range')))
   // The registry only dispatches to own properties, so expose the class through a plain object.

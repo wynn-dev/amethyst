@@ -5,6 +5,7 @@ import type { HostServices, ReportedError } from '@shared/services'
 import { RUNTIME_ENV } from '@shared/paths'
 import { closeAuthWindow, openAuthWindow } from './auth-window'
 import { emitMain } from './rpc/server'
+import { mainMark } from './bench-marks'
 
 const SHUTDOWN_TIMEOUT_MS = 1_500
 
@@ -111,6 +112,7 @@ export class RuntimeSupervisor {
   }
 
   #spawn(): void {
+    mainMark('runtime-fork')
     const child = utilityProcess.fork(join(import.meta.dirname, 'runtime.js'), [], {
       serviceName: 'Amethyst Runtime',
       stdio: app.isPackaged ? 'ignore' : 'inherit',
@@ -132,6 +134,7 @@ export class RuntimeSupervisor {
     })
 
     child.once('spawn', () => {
+      mainMark('runtime-spawn')
       this.#ready = true
       for (const error of this.#pendingErrors) child.postMessage({ t: 'error', source: 'main', error })
       this.#pendingErrors = []

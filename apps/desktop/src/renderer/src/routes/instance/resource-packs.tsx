@@ -100,15 +100,18 @@ export default function ResourcePacksTab() {
     }
     void setPackOrder(id, next)
   }
-  const dropOn = (targetId: string, e: DragEvent) => {
-    const dragged = e.dataTransfer.getData(DRAG_TYPE)
-    if (!dragged || dragged === targetId) return
-    e.preventDefault()
-    const without = order.filter((x) => x !== dragged)
-    const at = without.indexOf(targetId)
-    without.splice(at < 0 ? without.length : at, 0, dragged)
-    void setPackOrder(id, without)
-  }
+  const dropOn = useCallback(
+    (targetId: string, e: DragEvent) => {
+      const dragged = e.dataTransfer.getData(DRAG_TYPE)
+      if (!dragged || dragged === targetId) return
+      e.preventDefault()
+      const without = order.filter((x) => x !== dragged)
+      const at = without.indexOf(targetId)
+      without.splice(at < 0 ? without.length : at, 0, dragged)
+      void setPackOrder(id, without)
+    },
+    [id, order],
+  )
 
   const drop = useFileDrop((paths) => {
     const packs = paths.filter(isModpackPath)
@@ -121,7 +124,8 @@ export default function ResourcePacksTab() {
     if (paths.length) await addResourceFiles(id, 'resourcepacks', paths)
   }
 
-  const columns: Column<Row>[] = [
+  // Memoised so the table's rows stay memoised while scrolling.
+  const columns = useMemo<Column<Row>[]>(() => [
     {
       id: 'handle',
       title: 'Order',
@@ -202,7 +206,7 @@ export default function ResourcePacksTab() {
     },
     { id: 'source', title: 'Source', header: 'Source', width: '96px', cell: (r) => (isHeader(r) || isPlaceholder(r) ? null : <RowSource row={r} />) },
     { id: 'size', title: 'Size', header: 'Size', width: '76px', align: 'end', cell: (r) => (isHeader(r) || isPlaceholder(r) ? null : <span className="text-label-2">{r.isDirectory ? 'Folder' : formatBytes(r.size)}</span>) },
-  ]
+  ], [setEnabled, dropOn, request, minecraft])
 
   const rowMenu = (keys: string[]): MenuEntry[] => {
     const rs = realIds(keys)

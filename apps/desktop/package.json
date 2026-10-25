@@ -16,7 +16,8 @@
     "icon": "sh scripts/make-icon.sh",
     "typecheck": "tsc -p tsconfig.node.json && tsc -p tsconfig.web.json",
     "size": "node scripts/bundle-size.mjs",
-    "e2e:launch": "tsx --tsconfig tsconfig.node.json scripts/e2e-launch.ts"
+    "e2e:launch": "tsx --tsconfig tsconfig.node.json scripts/e2e-launch.ts",
+    "bench": "tsx --tsconfig tsconfig.node.json scripts/bench/run.ts"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",

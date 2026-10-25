@@ -70,7 +70,8 @@ export default function WorldsTab() {
     if (dir) await addResourceFiles(id, 'saves', [dir])
   }
 
-  const columns: Column<ContentRow>[] = [
+  // Memoised so the table's rows stay memoised while scrolling.
+  const columns = useMemo<Column<ContentRow>[]>(() => [
     {
       id: 'name',
       title: 'Name',
@@ -100,7 +101,7 @@ export default function WorldsTab() {
       cell: (w) => (isPlaceholder(w) ? null : <span className="text-label-2">{w.world?.lastPlayed ? formatRelative(w.world.lastPlayed) : w.mtimeMs ? formatRelative(w.mtimeMs) : '—'}</span>),
     },
     { id: 'version', title: 'Version', header: 'Version', width: '80px', cell: (w) => (isPlaceholder(w) ? null : <span className="text-label-2">{w.version || '—'}</span>) },
-  ]
+  ], [request])
 
   const doExport = async (w: ResourceRow) => {
     const out = await pickSaveFile(`${w.name}.zip`, [{ name: 'Zip archive', extensions: ['zip'] }], `Export “${w.name}”`)

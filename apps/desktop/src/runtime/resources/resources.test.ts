@@ -15,6 +15,7 @@ import { defaultSettings } from '../settings/schema'
 import { TaskRegistry } from '../tasks/registry'
 import { WorkerPool } from './pool'
 import { ResourceManager } from './service'
+import { decodePng, encodePng } from './thumbnail'
 import { routeChange } from './watcher'
 import { createResourceWorkerHandlers, type ResourceWorkerHandlers, type ScanFolderResult } from './worker-handlers'
 
@@ -162,6 +163,56 @@ describe('ResourceManager', () => {
     expect((await second.list(inst.id, 'mods')).items.find((r) => r.id === 'sodium.jar')?.enabled).toBe(false)
     first.dispose()
     second.dispose()
+  })
+
+  it('caches mod icons as thumbnails and only lists icons that are in the cache', async () => {
+    const inst = await instances.create({ name: 'Icons', runtime: { minecraft: '1.21.1', fabric: '0.16.5' } })
+    const size = 512
+    const rgba = new Uint8Array(size * size * 4).fill(200)
+    const z = createZip(path.join(inst.path, 'mods', 'big.jar'))
+    z.addBuffer(Buffer.from(JSON.stringify({ schemaVersion: 1, id: 'big', version: '1.0.0', icon: 'assets/big/icon.png' })), 'fabric.mod.json')
+    z.addBuffer(encodePng({ width: size, height: size, rgba }), 'assets/big/icon.png')
+    await z.finish()
+
+    const first = manager()
+    await first.list(inst.id, 'mods')
+    await first.refresh(inst.id, 'mods')
+    const iconUrl = (await first.list(inst.id, 'mods')).items[0]?.iconUrl
+    expect(iconUrl).toMatch(/-t128\.png$/)
+    const [icon] = await readdir(layout.icons)
+    const thumb = decodePng(await readFile(path.join(layout.icons, icon!)))
+    expect([thumb?.width, thumb?.height]).toEqual([128, 128])
+    first.dispose()
+
+    // A fresh runtime lists the cached icon at once; without the cache file it lists none until the scan re-extracts it.
+    const second = manager()
+    expect((await second.list(inst.id, 'mods')).items[0]?.iconUrl).toBe(iconUrl)
+    second.dispose()
+    await rm(layout.icons, { recursive: true })
+    const third = manager()
+    expect((await third.list(inst.id, 'mods')).items[0]?.iconUrl).toBeNull()
+    await third.refresh(inst.id, 'mods')
+    expect((await third.list(inst.id, 'mods')).items[0]?.iconUrl).toBe(iconUrl)
+    third.dispose()
+  })
+
+  it('rescanning an unchanged folder hashes nothing and never retries an icon that cannot be read', async () => {
+    const inst = await instances.create({ name: 'No Icon', runtime: { minecraft: '1.21.1', fabric: '0.16.5' } })
+    await jar(path.join(inst.path, 'mods', 'ghost.jar'), { 'fabric.mod.json': JSON.stringify({ schemaVersion: 1, id: 'ghost', version: '1.0.0', icon: 'assets/ghost/icon.png' }) })
+    const calls: { method: string; result?: unknown }[] = []
+    const m = manager({ pool: recordingPool(calls) })
+    await m.list(inst.id, 'mods')
+    await m.refresh(inst.id, 'mods')
+    expect(calls.filter((c) => c.method === 'extractIcons')).toHaveLength(1)
+    expect((await m.list(inst.id, 'mods')).items[0]?.iconUrl).toBeNull()
+
+    calls.length = 0
+    await m.refresh(inst.id, 'mods')
+    const scan = calls.find((c) => c.method === 'scanFolder')?.result as ScanFolderResult
+    expect(scan.result.stats).toMatchObject({ total: 1, cached: 1, hashed: 0, parsed: 0 })
+    expect(scan.missingIcons).toEqual([])
+    expect(calls.map((c) => c.method)).toEqual(['scanFolder'])
+    m.dispose()
   })
 
   it('enables and disables mods, resource packs and shader packs', async () => {

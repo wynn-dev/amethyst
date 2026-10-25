@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, useRouterState } from '@tanstack/react-router'
 import { AlertTriangle, ArrowUpCircle, Compass, Folder, House, PanelLeft, Plus } from 'lucide-react'
 import type { InstanceTab } from '@shared/menu'
@@ -27,6 +27,7 @@ import { openModpackExport } from '@/data/modpacks'
 import { SIDEBAR_MAX, SIDEBAR_MIN, useUi } from './ui-store'
 import { BlockIcon } from './visuals'
 import { AccountChip } from './AccountChip'
+import { markOnce } from '@/lib/perf'
 
 type Row =
   | { kind: 'header'; key: string; title: string; action?: ReactNode; open?: boolean; onOpenChange?: (o: boolean) => void }
@@ -50,6 +51,10 @@ export function AppSidebar() {
   const [instancesOpen, setInstancesOpen] = useState(true)
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const selectedId = pathname.startsWith('/instances/') ? pathname.split('/')[2] : undefined
+  // Startup timing: the instance list is on screen (docs/PERFORMANCE.md).
+  useEffect(() => {
+    if (!isPending) markOnce('sidebar-instances')
+  }, [isPending])
 
   const rows = useMemo<Row[]>(() => {
     const out: Row[] = [

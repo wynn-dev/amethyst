@@ -36,12 +36,21 @@ export interface GlfwArm64Source {
 export const GLFW_PATCHED_ARTIFACT = 'lwjgl-glfw-patched'
 
 /**
- * Placeholder manifest until the CI job publishes the first `natives-lwjgl3-glfw-*` release. With
- * no artifacts, plans for Minecraft 1.13–1.18 on an arm64 JVM report `ENATIVES_UNAVAILABLE`.
+ * The pinned `natives-lwjgl3-glfw-v1` release (its `manifest.json`), built by
+ * `.github/workflows/natives-lwjgl3-glfw.yml`. Pinned by sha256 so launches work offline once the
+ * jar is cached. Bump this when a new release is published.
  */
 export const DEFAULT_GLFW_ARM64_SOURCE: GlfwArm64Source = Object.freeze({
   baseUrl: 'https://github.com/wynn-dev/amethyst/releases/download/natives-lwjgl3-glfw-v1/',
-  artifacts: Object.freeze([]) as readonly GlfwArm64Artifact[],
+  artifacts: Object.freeze([
+    Object.freeze({
+      name: 'lwjgl-glfw',
+      version: '3.3.1',
+      url: 'lwjgl-glfw-patched-3.3.1-natives-macos-arm64.jar',
+      sha256: '5556c6c0fea6373e837dbbfd5b2e2a219464cbcd16ff120df7e098c1968c34e9',
+      size: 63442,
+    }),
+  ]) as readonly GlfwArm64Artifact[],
 })
 
 /** Find the patched GLFW built for `lwjglVersion`. */

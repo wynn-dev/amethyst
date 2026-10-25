@@ -136,7 +136,7 @@ describe('planNatives on an arm64 JVM', () => {
   }
 
   it('1.16.5 without a patched GLFW build reports ENATIVES_UNAVAILABLE once', async () => {
-    const p = await plan('1.16.5', 'arm64', TEST_LWJGL2_SOURCE, DEFAULT_GLFW_ARM64_SOURCE)
+    const p = await plan('1.16.5', 'arm64', TEST_LWJGL2_SOURCE, { baseUrl: DEFAULT_GLFW_ARM64_SOURCE.baseUrl, artifacts: [] })
     expect(p.ok).toBe(false)
     expect(p.issues).toEqual([
       {
@@ -225,9 +225,13 @@ describe('GLFW manifest', () => {
     expect(parseGlfwArm64Source({ baseUrl: 'https://x/', artifacts: [{ ...a, sha256: 'AB'.repeat(32) }] }).artifacts[0]?.sha256).toBe('ab'.repeat(32))
   })
 
-  it('the placeholder default has no artifacts until a natives-lwjgl3-glfw release is pinned', () => {
+  it('pins the published natives-lwjgl3-glfw release for LWJGL 3.3.1', async () => {
     expect(DEFAULT_GLFW_ARM64_SOURCE.baseUrl).toMatch(/^https:\/\/github\.com\/wynn-dev\/amethyst\/releases\/download\/natives-lwjgl3-glfw-v\d+\/$/)
-    expect(DEFAULT_GLFW_ARM64_SOURCE.artifacts).toEqual([])
+    expect(DEFAULT_GLFW_ARM64_SOURCE.artifacts.map((a) => [a.name, a.version])).toEqual([['lwjgl-glfw', '3.3.1']])
+    expect(DEFAULT_GLFW_ARM64_SOURCE.artifacts[0]?.sha256).toMatch(/^[0-9a-f]{64}$/)
+    // With the pinned default, 1.16.5 on arm64 plans cleanly.
+    const p = await plan('1.16.5', 'arm64', TEST_LWJGL2_SOURCE, DEFAULT_GLFW_ARM64_SOURCE)
+    expect(p.issues).toEqual([])
   })
 })
 

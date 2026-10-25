@@ -7,7 +7,7 @@
 import { randomBytes } from 'node:crypto'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { disableResourcePack, enableResourcePack, readOptionsFile, writeOptionsFile } from '@amethyst/content'
+import { disableResourcePack, enableResourcePack, orderResourcePacks, readOptionsFile, writeOptionsFile } from '@amethyst/content'
 
 export type ShaderLoader = 'iris' | 'oculus' | 'optifine'
 
@@ -116,6 +116,20 @@ export async function setPacksEnabled(instanceDir: string, ids: string[], enable
   const options = await readOptionsFile(file)
   let list = options.resourcePacks
   for (const id of ids) list = enabled ? enableResourcePack(list, id) : disableResourcePack(list, id)
+  options.resourcePacks = list
+  await writeOptionsFile(file, options)
+}
+
+/**
+ * Set the enabled file packs and their order (`topFirst`: highest priority first), keeping
+ * built-in and mod packs where they are. `vanilla` is added at the bottom of an empty list, as the
+ * game does.
+ */
+export async function setPackOrder(instanceDir: string, topFirst: string[]): Promise<void> {
+  const file = path.join(instanceDir, 'options.txt')
+  const options = await readOptionsFile(file)
+  let list = orderResourcePacks(options.resourcePacks, topFirst)
+  if (topFirst.length > 0 && list.length === topFirst.length) list = ['vanilla', ...list]
   options.resourcePacks = list
   await writeOptionsFile(file, options)
 }

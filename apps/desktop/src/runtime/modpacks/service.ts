@@ -9,7 +9,7 @@
  * file install keeps the instance; importing again with `instanceId` resumes it.
  */
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdir, readFile, stat } from 'node:fs/promises'
+import { mkdir, readdir, readFile, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import path from 'node:path'
 import {
@@ -35,6 +35,7 @@ import type { CurseForgeClient, ModrinthClient } from '@amethyst/marketplace'
 import { download, type HttpClient } from '@amethyst/net'
 import type { TaskContext } from '@amethyst/task'
 import type {
+  ExportFileRow,
   InstanceDetail,
   InstanceUpstream,
   LoaderKind,
@@ -53,6 +54,8 @@ import type {
   Settings,
 } from '@shared/services'
 import type { Emit } from '../context'
+import type { DbClient } from '../db/client'
+import type { SourceRow } from '../db/protocol'
 import type { InstallManager } from '../install/service'
 import type { InstanceManager } from '../instances/service'
 import type { DataLayout } from '../layout'
@@ -110,6 +113,21 @@ export interface ModpackDeps {
   downloadsDir?: string
   /** How long a manual-download watcher runs (default 30 minutes). */
   watchTimeoutMs?: number
+  /** The SQLite index: installed pack files are recorded as attributed to their platform. */
+  db?: Pick<DbClient, 'query'>
+}
+
+/** Attribution of the pack's Modrinth/CurseForge files, so content tabs show their source. */
+export function sourceRows(files: readonly { hashes: { sha1?: string }; origin: { kind: string; projectId?: string | number; versionId?: string; fileId?: number } }[], now: number): SourceRow[] {
+  const out: SourceRow[] = []
+  for (const f of files) {
+    const sha1 = f.hashes.sha1?.toLowerCase()
+    if (!sha1) continue
+    const o = f.origin
+    if (o.kind === 'modrinth' && o.projectId && o.versionId) out.push({ sha1, platform: 'modrinth', projectId: String(o.projectId), versionId: o.versionId, confidence: 'manifest', resolvedAt: now })
+    else if (o.kind === 'curseforge' && o.projectId && o.fileId) out.push({ sha1, platform: 'curseforge', projectId: String(o.projectId), versionId: String(o.fileId), confidence: 'manifest', resolvedAt: now })
+  }
+  return out
 }
 
 /** What is needed to place manual files later (kept in memory; bounded). */
@@ -309,6 +327,8 @@ export class ModpackManager {
             throw new AppError(errorCode(e) ?? 'EINSTALL_INCOMPLETE', `The modpack files could not be installed: ${errorMessage(e)}. Import again to resume.`, { instanceId: id, ...(e as { details?: object }).details }, { cause: e })
           }
           const manual = files.value.unresolved
+          const rows = sourceRows(resolved.files, Date.now())
+          if (this.#d.db && rows.length > 0) await this.#d.db.query('sources.put', { rows }).catch((e: unknown) => log.warn('cannot record pack file attribution', e))
           this.#remember(id, { manifest, resolved, ...(upstream ? { upstream } : {}), ...(input.selectedOptional ? { selectedOptional: input.selectedOptional } : {}), manual })
           this.#d.telemetry.capture('modpack_imported', { source: sourceKind })
           const runtimeError = runtime.status === 'rejected' ? { code: errorCode(runtime.reason) ?? 'EINSTALL_FAILED', message: errorMessage(runtime.reason) } : null
@@ -655,6 +675,42 @@ export class ModpackManager {
     }
   }
 
+  async listExportFiles(instanceId: string): Promise<ExportFileRow[]> {
+    const dir = this.#d.instances.resolve(instanceId).dir
+    const entries = await readdir(dir, { withFileTypes: true }).catch(() => [])
+    // Bounded: a huge saves/ folder must not stall the picker.
+    let budget = 20_000
+    const measure = async (p: string): Promise<{ size: number; files: number }> => {
+      let size = 0
+      let files = 0
+      const stack = [p]
+      while (stack.length > 0 && budget > 0) {
+        const cur = stack.pop() as string
+        // oxlint-disable-next-line no-await-in-loop -- a bounded walk, one folder at a time
+        for (const e of await readdir(cur, { withFileTypes: true }).catch(() => [])) {
+          if (--budget <= 0) break
+          const child = path.join(cur, e.name)
+          if (e.isDirectory()) stack.push(child)
+          else if (e.isFile()) {
+            files++
+            // oxlint-disable-next-line no-await-in-loop
+            size += (await stat(child).catch(() => undefined))?.size ?? 0
+          }
+        }
+      }
+      return { size, files }
+    }
+    const rows: ExportFileRow[] = []
+    for (const e of entries.toSorted((a, b) => a.name.localeCompare(b.name))) {
+      if (e.name.startsWith('.') || !(e.isDirectory() || e.isFile())) continue
+      const rel = e.isDirectory() ? `${e.name}/` : e.name
+      // oxlint-disable-next-line no-await-in-loop
+      const m = e.isDirectory() ? await measure(path.join(dir, e.name)) : { size: (await stat(path.join(dir, e.name)).catch(() => undefined))?.size ?? 0, files: 1 }
+      rows.push({ path: rel, isDirectory: e.isDirectory(), size: m.size, files: m.files, defaultSelected: DEFAULT_EXPORT_INCLUDE.includes(rel) })
+    }
+    return rows
+  }
+
   dispose(): void {
     for (const w of this.#watchers.values()) w.close()
     this.#watchers.clear()
@@ -676,5 +732,6 @@ export function modpackService(manager: ModpackManager): ModpackService {
     applyUpdate: (planId, options) => manager.applyUpdate(planId, options),
     rollback: (id, backupId) => manager.rollback(id, backupId),
     export: (id, input) => manager.export(id, input),
+    listExportFiles: (id) => manager.listExportFiles(id),
   }
 }

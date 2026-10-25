@@ -1,9 +1,11 @@
 import { useState } from 'react'
-import { ArrowDownToLine, Box, ChevronRight, Coffee, Pause, Play, RefreshCw, ShieldCheck, Upload, X, CheckCircle2, XCircle, CircleSlash, Circle } from 'lucide-react'
-import { Button, EmptyState, IconButton, Popover, ProgressBar, ProgressRing, cn, toast } from '@/ui'
-import { useTasks } from '@/data/misc'
-import { queryClient } from '@/data/query'
+import { ArrowDownToLine, Archive, Box, ChevronRight, Coffee, Copy as CopyIcon, RefreshCw, ShieldCheck, Upload, X, CheckCircle2, XCircle, CircleSlash, Circle } from 'lucide-react'
+import { Button, EmptyState, IconButton, Popover, ProgressBar, ProgressRing, cn } from '@/ui'
+import { installInstance } from '@/data/instances'
+import { javaActions } from '@/data/java'
+import { taskActions, useTaskStore, useTaskSummary, useTasks } from '@/data/tasks'
 import type { TaskSnapshot, TaskState } from '@/data/types'
+import { copyToClipboard } from './clipboard'
 import { formatBytes, formatRelative } from './visuals'
 import { useUi } from './ui-store'
 
@@ -15,12 +17,19 @@ const kindIcon: Record<TaskSnapshot['kind'], React.ReactNode> = {
   update: <RefreshCw />,
   export: <Upload />,
   verify: <ShieldCheck />,
+  copy: <CopyIcon />,
+  backup: <Archive />,
 }
 
 const active = (s: TaskState) => s === 'running' || s === 'paused' || s === 'queued'
 
-function patchTask(id: string, patch: Partial<TaskSnapshot>) {
-  queryClient.setQueryData<TaskSnapshot[]>(['tasks'], (l) => l?.map((t) => (t.id === id ? { ...t, ...patch } : t)))
+/** Retry for the tasks that can be started again from here. */
+function retryOf(task: TaskSnapshot): (() => void) | undefined {
+  const view = useTaskStore.getState().byId[task.id]
+  if (!view) return undefined
+  if (task.name === 'install.run' && task.instanceId) return () => void installInstance({ id: task.instanceId!, name: String(view.params.name ?? 'instance') })
+  if (task.name === 'java.install' && typeof view.params.major === 'number') return () => void javaActions.install(view.params.major as number)
+  return undefined
 }
 
 function eta(ms?: number) {
@@ -31,12 +40,10 @@ function eta(ms?: number) {
 
 /** Toolbar button: a ring showing overall progress while work runs; opens the Activity popover. */
 export function ActivityButton() {
-  const { data: tasks = [] } = useTasks()
   const open = useUi((s) => s.activity)
   const set = useUi((s) => s.set)
-  const running = tasks.filter((t) => t.state === 'running')
-  const failed = tasks.filter((t) => t.state === 'failed').length
-  const overall = running.length ? running.reduce((a, t) => a + (t.progress ?? 0), 0) / running.length : undefined
+  const { running: runningCount, fraction: overall, failed } = useTaskSummary()
+  const running = { length: runningCount }
 
   return (
     <Popover
@@ -58,9 +65,15 @@ export function ActivityButton() {
         </button>
       }
     >
-      <ActivityPanel tasks={tasks} />
+      <LiveActivityPanel />
     </Popover>
   )
+}
+
+/** The popover body: subscribes to every task only while it is open. */
+function LiveActivityPanel() {
+  const { data } = useTasks()
+  return <ActivityPanel tasks={data} />
 }
 
 export function ActivityPanel({ tasks }: { tasks: TaskSnapshot[] }) {
@@ -70,7 +83,7 @@ export function ActivityPanel({ tasks }: { tasks: TaskSnapshot[] }) {
     <div className="flex max-h-[min(520px,70vh)] flex-col">
       <div className="flex items-baseline justify-between px-4 pt-3 pb-2">
         <h2 className="text-title3 font-semibold">Activity</h2>
-        {inProgress.some((t) => t.state === 'running') && <span className="text-small text-label-2 tabular">12.4 MB/s</span>}
+        {inProgress.length > 0 && <span className="text-small text-label-2 tabular">{inProgress.length} running</span>}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
         {tasks.length === 0 && <EmptyState title="No activity" description="Downloads and installs will appear here." className="py-8" />}
@@ -79,10 +92,7 @@ export function ActivityPanel({ tasks }: { tasks: TaskSnapshot[] }) {
       </div>
       {recent.length > 0 && (
         <div className="flex justify-end border-t border-separator px-3 py-2">
-          <Button
-            size="sm"
-            onClick={() => queryClient.setQueryData<TaskSnapshot[]>(['tasks'], (l) => l?.filter((t) => active(t.state) || t.state === 'failed'))}
-          >
+          <Button size="sm" onClick={() => void taskActions.clearFinished()}>
             Clear Completed
           </Button>
         </div>
@@ -151,18 +161,22 @@ function TaskRow({ task }: { task: TaskSnapshot }) {
             <div className="mt-0.5">
               <p className="text-small text-red">{task.error.message}</p>
               <div className="mt-1.5 flex gap-2">
-                <Button size="sm" onClick={() => patchTask(task.id, { state: 'running', progress: 0, error: undefined })}>
-                  Retry
-                </Button>
-                <Button
-                  size="sm"
-                  variant="borderless"
-                  onClick={() => {
-                    navigator.clipboard?.writeText(`${task.title}\n${task.error?.message}\n${task.error?.details}`)
-                    toast({ kind: 'success', title: 'Copied details' })
-                  }}
-                >
+                {retryOf(task) && (
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      void taskActions.dismiss(task.id)
+                      retryOf(task)?.()
+                    }}
+                  >
+                    Retry
+                  </Button>
+                )}
+                <Button size="sm" variant="borderless" onClick={() => copyToClipboard(`${task.title}\n${task.error?.details ?? task.error?.message}`, 'Copied details')}>
                   Copy Details
+                </Button>
+                <Button size="sm" variant="borderless" onClick={() => void taskActions.dismiss(task.id)}>
+                  Dismiss
                 </Button>
               </div>
             </div>
@@ -179,17 +193,9 @@ function TaskRow({ task }: { task: TaskSnapshot }) {
             </ul>
           )}
         </div>
-        {isActive && (
+        {isActive && task.cancellable && (
           <div className="flex shrink-0 items-center">
-            {/* TODO(wire): api.tasks.pause(id) / api.tasks.resume(id) / api.tasks.cancel(id) */}
-            <IconButton
-              label={task.state === 'paused' ? 'Resume' : 'Pause'}
-              size="sm"
-              onClick={() => patchTask(task.id, { state: task.state === 'paused' ? 'running' : 'paused' })}
-            >
-              {task.state === 'paused' ? <Play /> : <Pause />}
-            </IconButton>
-            <IconButton label="Cancel" size="sm" onClick={() => patchTask(task.id, { state: 'cancelled', finishedAt: Date.now() })}>
+            <IconButton label="Cancel" size="sm" onClick={() => void taskActions.cancel(task.id)}>
               <X />
             </IconButton>
           </div>

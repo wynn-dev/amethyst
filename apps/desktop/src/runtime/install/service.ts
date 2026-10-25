@@ -309,7 +309,7 @@ export function usesLwjgl2(version: Pick<ResolvedVersion, 'libraries'>): boolean
 }
 
 /** The RPC facade. */
-export function installService(manager: InstallManager): InstallService {
+export function installService(manager: InstallManager): Omit<InstallService, 'changeVersion'> {
   return {
     plan: (id) => manager.plan(id),
     status: (id) => manager.status(id),

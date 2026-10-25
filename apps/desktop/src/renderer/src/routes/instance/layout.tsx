@@ -1,16 +1,20 @@
-import { useState, type MouseEvent } from 'react'
+import { useEffect, useState, type MouseEvent } from 'react'
 import { Outlet, useNavigate, useRouterState } from '@tanstack/react-router'
 import { ChevronDown, FolderOpen, MoreHorizontal, Play, Square, X } from 'lucide-react'
 import { INSTANCE_TABS, type InstanceTab } from '@shared/menu'
 import { Alert, Button, EmptyState, IconButton, Menu, Segmented, Skeleton, ToolbarTitle, cn, type MenuEntry } from '@/ui'
 import { PageToolbar } from '@/app/PageToolbar'
 import { QueryError } from '@/app/RouteStates'
-import { TAB_LABELS, notYetAvailable, openInstance } from '@/app/commands'
+import { TAB_LABELS, openInstance } from '@/app/commands'
 import { useUi } from '@/app/ui-store'
 import { BlockIcon } from '@/app/visuals'
 import { instanceActions, useInstance, useInstances, versionLabel } from '@/data/instances'
 import { useWorlds } from '@/data/content'
-import { useAccounts } from '@/data/misc'
+import { useAccounts } from '@/data/accounts'
+import { openModpackExport } from '@/data/modpacks'
+import { STEP_LABELS } from '@/data/launch'
+import { useInstanceTask } from '@/data/tasks'
+import { api } from '@/lib/rpc'
 import type { InstanceSummary } from '@/data/types'
 import { useInstanceId } from './parts'
 
@@ -23,6 +27,11 @@ export function InstanceLayout() {
   const tab = useRouterState({ select: (s) => (s.location.pathname.split('/')[3] as InstanceTab | undefined) ?? 'overview' })
   // The list carries live state (installing/running); fall back to the detail while the list loads.
   const inst = list?.find((i) => i.id === id) ?? detail.data ?? undefined
+
+  // Opening an instance records it for "recent" sorting (also when reached by a link).
+  useEffect(() => {
+    if (id) void api.instances.markOpened(id).catch(() => {})
+  }, [id])
 
   if (detail.isError) {
     return (
@@ -77,7 +86,7 @@ export function InstanceLayout() {
         trailing={
           <>
             <PlayButton inst={inst} />
-            <IconButton label="Show in Finder" shortcut="shift+mod+r" onClick={() => notYetAvailable('Show in Finder')}>
+            <IconButton label="Show in Finder" shortcut="shift+mod+r" onClick={() => void instanceActions.revealInFinder(inst)}>
               <FolderOpen />
             </IconButton>
             <OverflowMenu inst={inst} />
@@ -101,12 +110,15 @@ export function InstanceLayout() {
 
 function OverflowMenu({ inst }: { inst: InstanceSummary }) {
   const set = useUi((s) => s.set)
+  const target = { id: inst.id, name: inst.name }
   const items: MenuEntry[] = [
-    { label: 'Export Modpack…', shortcut: 'shift+mod+e', onSelect: () => notYetAvailable('Export Modpack') },
-    { label: 'Duplicate…', shortcut: 'mod+d', onSelect: () => set({ duplicate: { id: inst.id, name: inst.name } }) },
+    { label: 'Export Modpack…', shortcut: 'shift+mod+e', onSelect: () => openModpackExport(inst.id, inst.name) },
+    { label: 'Duplicate…', shortcut: 'mod+d', onSelect: () => set({ duplicate: target }) },
+    { label: 'Rename…', onSelect: () => set({ rename: target }) },
+    { label: 'Change Version…', onSelect: () => set({ changeVersion: target }) },
     { label: 'Open Logs', shortcut: 'mod+l', onSelect: () => openInstance(inst.id, 'logs') },
     { kind: 'separator' },
-    { label: 'Move to Trash…', shortcut: 'mod+backspace', destructive: true, onSelect: () => set({ trash: { id: inst.id, name: inst.name } }) },
+    { label: inst.external ? 'Remove from Amethyst…' : 'Move to Trash…', shortcut: 'mod+backspace', destructive: true, onSelect: () => set({ trash: target }) },
   ]
   return (
     <Menu
@@ -130,6 +142,7 @@ function PlayButton({ inst }: { inst: InstanceSummary }) {
   const { data: accounts = [] } = useAccounts()
   const { data: worlds = [] } = useWorlds(inst.id)
   const [confirmStop, setConfirmStop] = useState(false)
+  const progress = useInstanceTask(inst.state.kind === 'installing' ? inst.id : undefined)
   const s = inst.state
 
   let label = 'Play'
@@ -137,11 +150,11 @@ function PlayButton({ inst }: { inst: InstanceSummary }) {
   let variant: 'primary' | 'push' = 'primary'
   let onClick: (e: MouseEvent) => void = () => instanceActions.launch(inst)
   if (s.kind === 'installing') {
-    label = `Installing ${Math.round(s.progress * 100)}%`
+    label = progress === undefined ? 'Installing…' : `Installing ${Math.round(progress * 100)}%`
     icon = <span className="size-3.5 rounded-full border-2 border-on-accent/40 border-t-on-accent animate-spin" aria-hidden />
     onClick = () => set({ activity: true })
   } else if (s.kind === 'launching') {
-    label = 'Launching…'
+    label = s.step ? `${STEP_LABELS[s.step]}…` : 'Launching…'
     icon = <X />
     variant = 'push'
     onClick = () => instanceActions.cancel(inst)
@@ -159,9 +172,8 @@ function PlayButton({ inst }: { inst: InstanceSummary }) {
       disabled: s.kind !== 'idle' && s.kind !== 'problem',
       items: accounts.length
         ? accounts.map<MenuEntry>((a) => ({
-            label: a.status === 'expired' ? `${a.name} (session expired)` : a.name,
-            // TODO(wire): api.launch.start(id, { accountId })
-            onSelect: () => instanceActions.launch(inst),
+            label: a.status === 'needs-sign-in' ? `${a.name} (session expired)` : a.name,
+            onSelect: () => instanceActions.launch(inst, { accountId: a.id }),
           }))
         : [{ label: 'No accounts', disabled: true }],
     },
@@ -170,7 +182,7 @@ function PlayButton({ inst }: { inst: InstanceSummary }) {
       label: 'Launch into World',
       disabled: s.kind !== 'idle' && s.kind !== 'problem',
       items: worlds.length
-        ? worlds.map<MenuEntry>((w) => ({ label: w.name, onSelect: () => instanceActions.launch(inst) /* TODO(wire): { worldId } */ }))
+        ? worlds.map<MenuEntry>((w) => ({ label: w.name, onSelect: () => instanceActions.launch(inst, { quickPlay: { type: 'singleplayer', world: w.id } }) }))
         : [{ label: 'No worlds', disabled: true }],
     },
     { kind: 'separator' },
@@ -187,6 +199,7 @@ function PlayButton({ inst }: { inst: InstanceSummary }) {
         onClick={onClick}
         aria-keyshortcuts={s.kind === 'running' ? 'Meta+.' : 'Meta+Enter'}
         title={s.kind === 'running' ? 'Stop (⌘.) — ⌥-click to force quit' : s.kind === 'idle' ? 'Play (⌘↩)' : undefined}
+        disabled={s.kind === 'problem'}
         className={cn('min-w-[88px] rounded-r-none', s.kind === 'installing' && 'tabular')}
       >
         {label}

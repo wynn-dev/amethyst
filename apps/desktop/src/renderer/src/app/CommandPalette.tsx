@@ -2,10 +2,11 @@ import { Fragment, useEffect, useId, useMemo, useRef, useState, type KeyboardEve
 import { ArrowRight, ChevronLeft, ChevronRight, Compass, CornerDownLeft, LayoutPanelTop, Search, Settings2, Sparkles } from 'lucide-react'
 import { PanelDialog, Switch, cn, shortcutGlyphs } from '@/ui'
 import { useInstanceActions, useInstances } from '@/data/instances'
-import { useSettings, useUpdateSettings } from '@/data/settings'
+import { useAppSettings, useSettings } from '@/data/settings'
 import type { InstanceSummary } from '@/data/types'
 import { router } from './router'
 import { currentInstanceId, openInstance, openSettings, runCommand } from './commands'
+import { applyToggle } from './settings-index'
 import { buildPaletteItems, searchPalette, type PaletteAction, type PaletteItem, type PaletteResult } from './palette-items'
 import { useUi } from './ui-store'
 import { BlockIcon } from './visuals'
@@ -26,8 +27,9 @@ export function CommandPalette() {
 export function PaletteBody({ onClose, instancesOverride }: { onClose: () => void; instancesOverride?: InstanceSummary[] }) {
   const { data } = useInstances()
   const instances = instancesOverride ?? data ?? NO_INSTANCES
-  const settings = useSettings()
-  const updateSettings = useUpdateSettings()
+  const view = useSettings()
+  const app = useAppSettings()
+  const settings = useMemo(() => ({ app, view }), [app, view])
   const actions = useInstanceActions()
   const [query, setQuery] = useState('')
   const [stack, setStack] = useState<PaletteItem[]>([])
@@ -118,7 +120,7 @@ export function PaletteBody({ onClose, instancesOverride }: { onClose: () => voi
       else onClose()
     } else if (e.key === ' ' && cur?.toggle && navigated) {
       e.preventDefault()
-      updateSettings(cur.toggle.patch)
+      applyToggle(cur.toggle.action)
     } else if (e.metaKey && /^[1-9]$/.test(e.key)) {
       const pick = results[Number(e.key) - 1]
       if (pick) {
@@ -184,7 +186,7 @@ export function PaletteBody({ onClose, instancesOverride }: { onClose: () => voi
                 </span>
                 {r.item.toggle && (
                   <span onClick={(e) => e.stopPropagation()}>
-                    <Switch size="sm" checked={r.item.toggle.on} onCheckedChange={() => updateSettings(r.item.toggle!.patch)} aria-label={r.item.title} />
+                    <Switch size="sm" checked={r.item.toggle.on} onCheckedChange={() => applyToggle(r.item.toggle!.action)} aria-label={r.item.title} />
                   </span>
                 )}
                 {r.item.shortcut && <span className={cn('text-callout tracking-[0.08em]', i === active ? 'text-on-accent/75' : 'text-label-3')}>{shortcutGlyphs(r.item.shortcut)}</span>}

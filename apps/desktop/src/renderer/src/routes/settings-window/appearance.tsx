@@ -1,7 +1,8 @@
-import { useSyncExternalStore } from 'react'
+import { useState, useSyncExternalStore } from 'react'
+import { ImageIcon } from 'lucide-react'
+import type { AppearanceSettings } from '@shared/services'
 import { Button, Form, FormSection, Segmented, Slider, Switch } from '@/ui'
-import { notYetAvailable } from '@/app/commands'
-import { useSettings, useUpdateSettings, type Settings } from '@/data/settings'
+import { backgroundUrl, useAppearance, usePatchAppearance, useSetBackground } from '@/data/appearance'
 import { SettingRow } from './context'
 import { AccentPicker, MiniWindow, ModePicker } from './appearance-pickers'
 
@@ -16,14 +17,37 @@ function usePrefersDark() {
   return useSyncExternalStore(subscribeDark, () => darkQuery?.matches ?? false)
 }
 
-/** Settings → Appearance (B8). */
+type Background = AppearanceSettings['background']
+
+/** Mode and accent rows for Settings → General (B7.1), bound to the same appearance settings. */
+export function AppearanceQuickRows() {
+  const a = useAppearance()
+  const patch = usePatchAppearance()
+  return (
+    <>
+      <SettingRow row="appearance" label="Appearance" stacked>
+        <ModePicker value={a.theme} onValueChange={(theme) => patch({ theme })} />
+      </SettingRow>
+      <SettingRow row="accent" label="Accent colour">
+        <AccentPicker value={a.accentColor} onValueChange={(accentColor) => patch({ accentColor })} />
+      </SettingRow>
+    </>
+  )
+}
+
+/** Settings → Appearance (B8): mode, accent, sidebar material and an optional background. */
 export function AppearancePane() {
-  const s = useSettings()
-  const update = useUpdateSettings()
+  const a = useAppearance()
+  const patch = usePatchAppearance()
+  const setBackground = useSetBackground()
   const systemDark = usePrefersDark()
-  const bg = s.background
-  const setBg = (patch: Partial<Settings['background']>) => update({ background: { ...bg, ...patch } })
-  const previewScheme = s.appearance === 'system' ? (systemDark ? 'dark' : 'light') : s.appearance
+  const bg = a.background
+  const url = backgroundUrl(a)
+  const previewScheme = a.theme === 'system' ? (systemDark ? 'dark' : 'light') : a.theme
+  // Sliders preview locally and save once released (one write per gesture, not per pixel).
+  const [blurDraft, setBlurDraft] = useState<number | null>(null)
+  const blur = blurDraft ?? bg.blur
+  const setBg = (p: Partial<Background>) => patch({ background: p })
 
   return (
     <Form>
@@ -31,92 +55,99 @@ export function AppearancePane() {
       <div className="flex justify-center">
         <MiniWindow
           scheme={previewScheme}
-          translucent={s.translucentSidebar}
-          background={bg}
+          translucent={a.vibrancy}
+          background={{ kind: bg.kind, url, fit: bg.fit, blur, overlay: bg.overlay }}
           className="h-[132px] w-[216px] rounded-lg shadow-card"
         />
       </div>
 
       <FormSection>
         <SettingRow row="mode" label="Appearance" stacked>
-          <ModePicker value={s.appearance} onValueChange={(appearance) => update({ appearance })} />
+          <ModePicker value={a.theme} onValueChange={(theme) => patch({ theme })} />
         </SettingRow>
         <SettingRow row="accent" label="Accent colour" description="Used for buttons, selection, focus rings and progress." stacked>
-          <AccentPicker value={s.accent} onValueChange={(accent) => update({ accent })} labels />
+          <AccentPicker value={a.accentColor} onValueChange={(accentColor) => patch({ accentColor })} labels />
         </SettingRow>
       </FormSection>
 
       <FormSection title="Sidebar">
-        <SettingRow row="translucent" label="Translucent sidebar" description="Off uses a solid sidebar. Reduce Transparency in macOS always uses solid surfaces." htmlFor="set-translucent">
-          <Switch id="set-translucent" checked={s.translucentSidebar} onCheckedChange={(translucentSidebar) => update({ translucentSidebar })} />
-        </SettingRow>
-        <SettingRow row="icon-size" label="Sidebar icon size">
-          <Segmented<Settings['sidebarIconSize']>
-            aria-label="Sidebar icon size"
-            value={s.sidebarIconSize}
-            onValueChange={(sidebarIconSize) => update({ sidebarIconSize })}
-            options={[
-              { value: 'small', label: 'Small' },
-              { value: 'medium', label: 'Medium' },
-              { value: 'large', label: 'Large' },
-            ]}
-          />
+        <SettingRow
+          row="translucent"
+          label="Translucent sidebar"
+          description="Shows the desktop through the sidebar. Off uses a solid sidebar. Reduce Transparency in macOS always uses solid surfaces."
+          htmlFor="set-translucent"
+        >
+          <Switch id="set-translucent" checked={a.vibrancy} onCheckedChange={(vibrancy) => patch({ vibrancy })} />
         </SettingRow>
       </FormSection>
 
       <FormSection
         title="Background"
-        footer="Content panels stay solid on top of the background. Videos pause while you play, while the window is hidden and in Low Power Mode."
+        footer="Off by default. Content panels stay solid on top of the background. Videos are muted, and pause while the window is hidden or minimised and when Reduce Motion is on."
       >
-        <SettingRow row="background" label="Background">
-          <Segmented<Settings['background']['kind']>
-            aria-label="Background"
-            value={bg.kind}
-            onValueChange={(kind) => setBg({ kind })}
-            options={[
-              { value: 'none', label: 'None' },
-              { value: 'image', label: 'Image' },
-              { value: 'video', label: 'Video' },
-            ]}
-          />
+        <SettingRow row="background" label="Background" description={bg.kind === 'none' ? 'None' : bg.kind === 'image' ? 'Image' : 'Video'}>
+          <div className="flex items-center gap-2">
+            {url ? (
+              bg.kind === 'image' ? (
+                <img src={url} alt="" className="h-7 w-11 rounded-[4px] object-cover shadow-[0_0_0_0.5px_rgb(0_0_0/0.2)]" />
+              ) : (
+                <video src={url} muted preload="metadata" className="h-7 w-11 rounded-[4px] object-cover shadow-[0_0_0_0.5px_rgb(0_0_0/0.2)]" />
+              )
+            ) : (
+              <span className="flex h-7 w-11 items-center justify-center rounded-[4px] border border-dashed border-label-3 text-label-3">
+                <ImageIcon className="size-3.5" />
+              </span>
+            )}
+            {url && (
+              <Button disabled={setBackground.isPending} onClick={() => setBackground.mutate('clear')}>
+                Remove
+              </Button>
+            )}
+            <Button disabled={setBackground.isPending} onClick={() => setBackground.mutate('choose')}>
+              {url ? 'Change…' : 'Choose Image or Video…'}
+            </Button>
+          </div>
         </SettingRow>
-        {bg.kind !== 'none' && (
+        {url && (
           <>
-            <SettingRow row="background-file" label={bg.kind === 'image' ? 'Image' : 'Video'} description={bg.url ?? 'No file chosen'}>
-              {bg.kind === 'image' && <Button onClick={() => notYetAvailable('Use Desktop Picture')}>Use Desktop Picture</Button>}
-              <Button onClick={() => notYetAvailable('Choosing a background file')}>Choose File…</Button>
-            </SettingRow>
             <SettingRow row="background-fit" label="Fit">
-              <Segmented<Settings['background']['fit']>
+              <Segmented<Background['fit']>
                 aria-label="Background fit"
                 value={bg.fit}
                 onValueChange={(fit) => setBg({ fit })}
                 options={[
-                  { value: 'fill', label: 'Fill' },
-                  { value: 'fit', label: 'Fit' },
+                  { value: 'cover', label: 'Fill' },
+                  { value: 'contain', label: 'Fit' },
                 ]}
               />
             </SettingRow>
-            <SettingRow row="background-dim" label="Dim">
-              <div className="flex w-[220px] items-center gap-2">
-                <Slider aria-label="Dim" min={0} max={80} step={5} value={bg.dim} onValueChange={(dim) => setBg({ dim })} valueText={(v) => `${v}%`} className="flex-1" />
-                <span className="w-9 text-right text-small text-label-2 tabular">{bg.dim}%</span>
-              </div>
-            </SettingRow>
             <SettingRow row="background-blur" label="Blur">
               <div className="flex w-[220px] items-center gap-2">
-                <Slider aria-label="Blur" min={0} max={40} step={1} value={bg.blur} onValueChange={(blur) => setBg({ blur })} valueText={(v) => `${v} px`} className="flex-1" />
-                <span className="w-9 text-right text-small text-label-2 tabular">{bg.blur}</span>
+                <Slider
+                  aria-label="Background blur"
+                  min={0}
+                  max={30}
+                  step={1}
+                  value={blur}
+                  onValueChange={setBlurDraft}
+                  onValueCommit={(v) => {
+                    setBg({ blur: v })
+                    setBlurDraft(null)
+                  }}
+                  valueText={(v) => `${v} px`}
+                  className="flex-1"
+                />
+                <span className="w-9 text-right text-small text-label-2 tabular">{blur}</span>
               </div>
             </SettingRow>
-            {bg.kind === 'video' && (
-              <SettingRow row="background-volume" label="Volume" description={bg.volume === 0 ? 'Muted' : undefined}>
-                <div className="flex w-[220px] items-center gap-2">
-                  <Slider aria-label="Video volume" min={0} max={100} step={5} value={bg.volume} onValueChange={(volume) => setBg({ volume })} valueText={(v) => `${v}%`} className="flex-1" />
-                  <span className="w-9 text-right text-small text-label-2 tabular">{bg.volume}%</span>
-                </div>
-              </SettingRow>
-            )}
+            <SettingRow
+              row="background-overlay"
+              label="Tint content pages"
+              description="Draws the window colour over the background everywhere except Home, so text stays easy to read."
+              htmlFor="set-bg-overlay"
+            >
+              <Switch id="set-bg-overlay" checked={bg.overlay} onCheckedChange={(overlay) => setBg({ overlay })} />
+            </SettingRow>
           </>
         )}
       </FormSection>

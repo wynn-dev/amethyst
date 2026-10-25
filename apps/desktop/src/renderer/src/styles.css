@@ -293,7 +293,90 @@ textarea {
 [role='grid']:focus [aria-selected='true'] :is(.text-label-2, .text-label-3, .text-accent) {
   color: rgb(255 255 255 / 0.78);
 }
+[role='grid']:focus [aria-selected='true'] .row-badge > span {
+  color: white;
+  background: rgb(255 255 255 / 0.2);
+}
 
 @utility tabular {
   font-variant-numeric: tabular-nums;
+}
+
+/* Sanitised project descriptions and changelogs (routes/markdown.tsx). */
+.md-body {
+  font-size: var(--text-body);
+  line-height: 20px;
+  color: var(--color-label);
+  overflow-wrap: anywhere;
+}
+.md-body > * + * {
+  margin-top: 0.75em;
+}
+.md-body :is(h1, h2, h3, h4) {
+  font-weight: 600;
+  line-height: 1.25;
+  margin-top: 1.2em;
+}
+.md-body h1 {
+  font-size: var(--text-title2);
+}
+.md-body h2 {
+  font-size: var(--text-title3);
+}
+.md-body :is(h3, h4) {
+  font-size: var(--text-body);
+}
+.md-body a {
+  color: var(--color-accent);
+}
+.md-body a:hover {
+  text-decoration: underline;
+}
+.md-body :is(ul, ol) {
+  padding-left: 1.4em;
+}
+.md-body ul {
+  list-style: disc;
+}
+.md-body ol {
+  list-style: decimal;
+}
+.md-body img {
+  display: inline-block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+}
+.md-body :is(code, pre) {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--text-callout);
+  background: var(--color-fill);
+  border-radius: 4px;
+}
+.md-body code {
+  padding: 0.1em 0.3em;
+}
+.md-body pre {
+  padding: 8px 10px;
+  overflow-x: auto;
+}
+.md-body pre code {
+  background: none;
+  padding: 0;
+}
+.md-body blockquote {
+  border-left: 3px solid var(--color-separator);
+  padding-left: 10px;
+  color: var(--color-label-2);
+}
+.md-body hr {
+  border: 0;
+  border-top: 1px solid var(--color-separator);
+}
+.md-body table {
+  border-collapse: collapse;
+}
+.md-body :is(td, th) {
+  border: 1px solid var(--color-separator);
+  padding: 3px 6px;
 }

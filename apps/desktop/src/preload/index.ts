@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { MAIN_EVENT_CHANNEL, MAIN_RPC_CHANNEL, CONNECT_CHANNEL, PORT_CHANNEL, RpcClient, type Bridge, type RpcMessage } from '@shared/rpc'
 import { MAIN_SERVICES } from '@shared/services'
 
@@ -47,6 +47,13 @@ const bridge: Bridge = {
     return () => listeners.delete(listener)
   },
   platform: process.platform,
+  pathForFile: (file) => {
+    try {
+      return webUtils.getPathForFile(file)
+    } catch {
+      return ''
+    }
+  },
 }
 
 contextBridge.exposeInMainWorld('amethyst', bridge)

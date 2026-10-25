@@ -9,7 +9,8 @@
  * hold any lock another call waits on: launching, instance edits and other folders proceed while
  * a scan runs. Open instances get one coalescing file watcher (see `watcher.ts`).
  */
-import { lstat, mkdir, readdir, stat } from 'node:fs/promises'
+import { randomBytes } from 'node:crypto'
+import { lstat, mkdir, readdir, rename, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 import {
   backupWorld,
@@ -37,7 +38,7 @@ import {
   type WorkerScanOptions,
 } from '@amethyst/content'
 import { mapLimit, type TaskContext } from '@amethyst/task'
-import type { BackupRow, BulkResult, HostServices, ResourceDetail, ResourceKind, ResourcePage, ResourceQuery, ResourceRow, ResourcesService, ResourceSource, Settings } from '@shared/services'
+import type { BackupRow, BulkResult, DeleteResult, HostServices, ModAnalysis, ResourceDetail, ResourceKind, ResourcePage, ResourceQuery, ResourceRow, ResourcesService, ResourceSource, Settings } from '@shared/services'
 import type { Emit } from '../context'
 import type { DbClient } from '../db/client'
 import type { SourceRow } from '../db/protocol'
@@ -48,13 +49,31 @@ import { loaderOf } from '../instances/model'
 import type { InstanceManager } from '../instances/service'
 import type { TaskRegistry } from '../tasks/registry'
 import { AppError, errorCode, errorMessage, invalid, isAbortError, notFound } from '../util/errors'
-import { readActiveShaderPack, readEnabledPacks, setPacksEnabled, shaderLoaderFor, writeActiveShaderPack } from './game-config'
+import { analyzeMods } from './analysis'
+import { readActiveShaderPack, readEnabledPacks, setPackOrder, setPacksEnabled, shaderLoaderFor, writeActiveShaderPack } from './game-config'
 import type { WorkerPool } from './pool'
-import { entryDetail, entryRow, pendingRow, resourceId, rowChanged, saveRow } from './rows'
+import { entryDetail, entryRow, packOrder, pendingRow, resourceId, rowChanged, saveRow } from './rows'
 import { InstanceWatcher, type WatchFactory } from './watcher'
 import { iconName, type ResourceWorkerHandlers } from './worker-handlers'
 
 const log = logger('resources')
+/** Where undoable deletes wait inside an instance folder. */
+const TRASH_DIR = path.join('.amethyst', 'trash')
+const UNDO_GRACE_MS = 30_000
+
+interface StagedFile {
+  id: string
+  from: string
+  staged: string
+}
+
+interface StagedBatch {
+  instanceId: string
+  kind: ResourceKind
+  dir: string
+  files: StagedFile[]
+  timer: ReturnType<typeof setTimeout>
+}
 const KINDS: ReadonlySet<string> = new Set<ResourceKind>(['mods', 'resourcepacks', 'shaderpacks', 'saves'])
 const MAX_WATCHED = 4
 const MAX_CACHED_INSTANCES = 8
@@ -108,6 +127,8 @@ export interface ResourceManagerDeps {
   debounceMs?: number
   /** Delay before an unwatched instance's watcher stops (default 2 s). */
   releaseGraceMs?: number
+  /** How long undoable deletes wait before going to the Trash (default 30 s). */
+  undoGraceMs?: number
   now?: () => number
 }
 
@@ -141,6 +162,8 @@ export class ResourceManager {
   readonly #states = new Map<string, InstanceState>()
   /** Watch references of instances being moved, restored once the move is done. */
   readonly #movedRefs = new Map<string, number>()
+  /** Undoable deletes waiting for their undo window to end, by token. */
+  readonly #staged = new Map<string, StagedBatch>()
   readonly #now: () => number
 
   constructor(deps: ResourceManagerDeps) {
@@ -151,6 +174,7 @@ export class ResourceManager {
     // move (rename), watch the new folder for whoever watched the old one.
     deps.instances.addHooks({
       release: async (id) => {
+        await this.#finishTrashOf(id)
         const refs = this.#states.get(id)?.refs ?? 0
         this.#drop(id)
         if (refs > 0) this.#movedRefs.set(id, refs)
@@ -181,6 +205,7 @@ export class ResourceManager {
     if (!st) {
       st = { id: instanceId, dir: inst.dir, collections: new Map(), watcher: undefined, refs: 0, releaseTimer: undefined, controller: new AbortController(), lastUsed: 0 }
       this.#states.set(instanceId, st)
+      void this.#sweepTrash(inst.dir)
       this.#evictIdle()
     }
     st.lastUsed = this.#now()
@@ -231,6 +256,14 @@ export class ResourceManager {
     const limit = Math.min(1000, Math.max(1, Math.trunc(query.limit ?? 200)))
     let rows = [...col.items.values()].map((i) => i.row)
     if (query.enabled !== undefined) rows = rows.filter((r) => r.enabled === query.enabled)
+    if (Array.isArray(query.ids)) {
+      const ids = new Set(query.ids)
+      rows = rows.filter((r) => ids.has(r.id))
+    }
+    if (Array.isArray(query.sources)) {
+      const sources = new Set<string>(query.sources)
+      rows = rows.filter((r) => sources.has(r.source?.platform ?? 'local'))
+    }
     const search = query.search?.trim().toLowerCase()
     if (search) rows = rows.filter((r) => r.name.toLowerCase().includes(search) || r.fileName.toLowerCase().includes(search) || r.authors.some((a) => a.toLowerCase().includes(search)))
     const sort = query.sort ?? 'name'
@@ -240,7 +273,10 @@ export class ResourceManager {
       modified: (a, b) => b.mtimeMs - a.mtimeMs,
       size: (a, b) => b.size - a.size,
     }
-    rows = rows.toSorted(by[sort] ?? by.name)
+    const compare = by[sort] ?? by.name
+    const natural = sort === 'modified' || sort === 'size' ? 'desc' : 'asc'
+    const reverse = query.direction !== undefined && query.direction !== natural
+    rows = rows.toSorted(reverse ? (a, b) => compare(b, a) : compare)
     return { items: rows.slice(offset, offset + limit), total: rows.length, scanning: col.scanning !== undefined, revision: col.revision }
   }
 
@@ -283,7 +319,8 @@ export class ResourceManager {
     }
     const kind = col.kind
     const records = new Map(await this.#records(col.dir))
-    const enabledPacks = kind === 'resourcepacks' ? new Set(await readEnabledPacks(st.dir)) : undefined
+    const enabledList = kind === 'resourcepacks' ? await readEnabledPacks(st.dir) : []
+    const enabledPacks = kind === 'resourcepacks' ? new Set(enabledList) : undefined
     const activeShader = kind === 'shaderpacks' ? await readActiveShaderPack(st.dir) : undefined
     const prefer = this.#preferLoader(st)
     const listed = await mapLimit(dirents, 32, async (d) => {
@@ -328,7 +365,21 @@ export class ResourceManager {
       if (i.entry) next.set(i.id, { entry: i.entry, row: entryRow(i.id, i.entry, { ...(i.icon ? { iconFile: i.icon } : {}), source: pickSource(sources.get(i.entry.hashes?.sha1 ?? '')) }) })
       else if (i.pending) next.set(i.id, { row: i.pending })
     }
+    if (kind === 'resourcepacks') this.#applyPackOrder(next, enabledList)
     col.items = next
+  }
+
+  /** Stamp enabled resource packs with their load-order position (0 = top). */
+  #applyPackOrder(items: Map<string, Item>, enabledList: string[]): void {
+    const order = packOrder(enabledList)
+    for (const item of items.values()) {
+      const pos = item.row.enabled ? order.get(item.row.fileName) : undefined
+      if (pos !== undefined) item.row = { ...item.row, order: pos }
+      else if (item.row.order !== undefined) {
+        const { order: _drop, ...row } = item.row
+        item.row = row
+      }
+    }
   }
 
   #uniqueId(taken: Iterable<string>, id: string): string {
@@ -381,7 +432,8 @@ export class ResourceManager {
     const kind = col.kind
     const records = await this.#records(col.dir)
     const options: WorkerScanOptions = { hashes: ['sha1'], concurrency: 8, preferLoader: this.#preferLoader(st) }
-    if (kind === 'resourcepacks') options.enabledPacks = await readEnabledPacks(st.dir)
+    const enabledList = kind === 'resourcepacks' ? await readEnabledPacks(st.dir) : []
+    if (kind === 'resourcepacks') options.enabledPacks = enabledList
     if (kind === 'shaderpacks') options.activeShaderPack = await readActiveShaderPack(st.dir)
     const res = await this.#d.pool.call('scanFolder', { dir: col.dir, kind, options, records, iconsDir }, signal)
     if (signal.aborted) return
@@ -397,6 +449,7 @@ export class ResourceManager {
       const iconFile = res.icons[entry.path]
       next.set(id, { entry, row: entryRow(id, entry, { ...(iconFile ? { iconFile } : {}), source: pickSource(sources.get(entry.hashes?.sha1 ?? '')) }) })
     }
+    if (kind === 'resourcepacks') this.#applyPackOrder(next, enabledList)
     this.#commit(st, col, next)
   }
 
@@ -554,11 +607,13 @@ export class ResourceManager {
     return result
   }
 
-  async delete(instanceId: string, kind: ResourceKind, ids: string[]): Promise<BulkResult> {
+  async delete(instanceId: string, kind: ResourceKind, ids: string[], options: { undoable?: boolean } = {}): Promise<DeleteResult> {
     if (!Array.isArray(ids)) throw invalid('ids must be a list')
     const { st, col } = await this.#scanned(instanceId, kind)
     if (kind === 'saves' && this.#d.isRunning?.(instanceId)) throw new AppError('EBUSY', 'Quit the game before deleting worlds')
-    const result: BulkResult = { done: [], failed: [] }
+    const result: DeleteResult = { done: [], failed: [], undoToken: null }
+    const token = options?.undoable ? randomBytes(8).toString('hex') : undefined
+    const staged: StagedFile[] = []
     for (const id of ids) {
       const item = col.items.get(id)
       const target = item?.entry?.path ?? item?.save?.path
@@ -568,15 +623,132 @@ export class ResourceManager {
       }
       try {
         this.#inside(col, target)
-        await this.#d.host.trash(target)
+        if (token) {
+          // Set aside on the same volume (a rename), so Undo is instant and exact.
+          const dir = path.join(st.dir, TRASH_DIR, token, String(staged.length))
+          await mkdir(dir, { recursive: true })
+          const to = path.join(dir, path.basename(target))
+          try {
+            await rename(target, to)
+            staged.push({ id, from: target, staged: to })
+          } catch {
+            await this.#d.host.trash(target)
+          }
+        } else {
+          await this.#d.host.trash(target)
+        }
         result.done.push(id)
       } catch (e) {
         result.failed.push({ id, code: errorCode(e) ?? 'ETRASH_FAILED', message: errorMessage(e) })
       }
     }
+    if (token && staged.length > 0) {
+      const timer = setTimeout(() => void this.#finishTrash(token), this.#d.undoGraceMs ?? UNDO_GRACE_MS)
+      timer.unref?.()
+      this.#staged.set(token, { instanceId, kind, dir: path.join(st.dir, TRASH_DIR, token), files: staged, timer })
+      result.undoToken = token
+    }
     // Revalidate either way, so the UI shows reality even after a failure.
     await this.#scan(st, col)
     return result
+  }
+
+  async undoDelete(instanceId: string, undoToken: string): Promise<BulkResult> {
+    const batch = typeof undoToken === 'string' ? this.#staged.get(undoToken) : undefined
+    if (!batch || batch.instanceId !== instanceId) throw notFound('Deleted files (they are already in the Trash)')
+    clearTimeout(batch.timer)
+    this.#staged.delete(undoToken)
+    const result: BulkResult = { done: [], failed: [] }
+    for (const f of batch.files) {
+      try {
+        const dir = path.dirname(f.from)
+        await mkdir(dir, { recursive: true })
+        // Something new took the name meanwhile: restore next to it instead of overwriting.
+        const taken = await lstat(f.from).then(
+          () => true,
+          () => false,
+        )
+        const dest = taken ? path.join(dir, await uniqueName(dir, path.basename(f.from))) : f.from
+        await rename(f.staged, dest)
+        result.done.push(resourceId(path.basename(dest), batch.kind))
+      } catch (e) {
+        result.failed.push({ id: f.id, code: errorCode(e) ?? 'EFAILED', message: errorMessage(e) })
+      }
+    }
+    await rm(batch.dir, { recursive: true, force: true }).catch(() => undefined)
+    const st = this.#states.get(instanceId)
+    if (st) await this.#scan(st, this.#collection(st, batch.kind))
+    return result
+  }
+
+  /** Move a set-aside batch to the macOS Trash (the undo window ended). */
+  async #finishTrash(token: string): Promise<void> {
+    const batch = this.#staged.get(token)
+    if (!batch) return
+    this.#staged.delete(token)
+    clearTimeout(batch.timer)
+    for (const f of batch.files) {
+      await this.#d.host.trash(f.staged).catch((e: unknown) => log.warn(`cannot move ${f.staged} to the Trash`, e))
+    }
+    await rm(batch.dir, { recursive: true, force: true }).catch(() => undefined)
+  }
+
+  /** Finish every pending undo window of an instance now (before its folder moves). */
+  async #finishTrashOf(instanceId: string): Promise<void> {
+    await Promise.all([...this.#staged].filter(([, b]) => b.instanceId === instanceId).map(([token]) => this.#finishTrash(token)))
+  }
+
+  /** Files set aside by a previous session (it quit inside an undo window) go to the Trash. */
+  async #sweepTrash(dir: string): Promise<void> {
+    const root = path.join(dir, TRASH_DIR)
+    const tokens = await readdir(root).catch(() => [] as string[])
+    for (const token of tokens) {
+      if (this.#staged.has(token)) continue
+      const slots = await readdir(path.join(root, token)).catch(() => [] as string[])
+      for (const slot of slots) {
+        for (const name of await readdir(path.join(root, token, slot)).catch(() => [] as string[])) {
+          await this.#d.host.trash(path.join(root, token, slot, name)).catch(() => undefined)
+        }
+      }
+      await rm(path.join(root, token), { recursive: true, force: true }).catch(() => undefined)
+    }
+  }
+
+  async setPackOrder(instanceId: string, ids: string[]): Promise<void> {
+    if (!Array.isArray(ids)) throw invalid('ids must be a list')
+    if (this.#d.isRunning?.(instanceId)) throw new AppError('EBUSY', 'Quit the game first: it rewrites its options when it exits')
+    const { st, col } = await this.#scanned(instanceId, 'resourcepacks')
+    const packIds: string[] = []
+    for (const id of ids) {
+      const item = col.items.get(id)
+      if (!item) throw notFound(`Resource pack ${String(id)}`)
+      packIds.push(resourcePackId(item.row.fileName))
+    }
+    await setPackOrder(st.dir, packIds)
+    await this.#scan(st, col)
+  }
+
+  async analyze(instanceId: string): Promise<ModAnalysis> {
+    const { items } = await this.items(instanceId, 'mods')
+    const runtime = this.#d.instances.resolve(instanceId).config.runtime
+    const loader = loaderOf(runtime)
+    const out = analyzeMods(
+      items.filter((i) => i.row.enabled && !i.row.problem && i.entry?.mod),
+      loader ? loader.kind : null,
+    )
+    out.broken = items.flatMap((i) => (i.row.problem ? [{ id: i.row.id, message: i.row.problem.message }] : []))
+    return out
+  }
+
+  async exportWorld(instanceId: string, worldId: string, output: string): Promise<{ path: string; size: number }> {
+    if (typeof output !== 'string' || !path.isAbsolute(output)) throw invalid('An absolute output path is required')
+    const { col } = await this.#scanned(instanceId, 'saves')
+    const save = col.items.get(worldId)?.save
+    if (!save) throw notFound('World')
+    if (isPathInside(save.path, output)) throw invalid('Choose a location outside the world folder')
+    return this.#d.tasks.runAndWait({ name: 'resources.export-world', params: { world: save.level.levelName ?? save.folderName }, instanceId }, (ctx) =>
+      this.#d.pool.call('exportWorld', { source: save.path, output }, ctx.signal),
+    )
   }
 
   async add(instanceId: string, kind: ResourceKind, paths: string[]): Promise<BulkResult> {
@@ -769,6 +941,9 @@ export class ResourceManager {
 
   /** Stop every watcher and cancel every scan (shutdown). */
   dispose(): void {
+    // Files inside an undo window stay set aside; the next session's sweep trashes them.
+    for (const batch of this.#staged.values()) clearTimeout(batch.timer)
+    this.#staged.clear()
     for (const id of this.#states.keys()) this.#drop(id)
   }
 }
@@ -783,7 +958,11 @@ export function resourcesService(manager: ResourceManager): ResourcesService {
     refresh: (i, k) => manager.refresh(i, k),
     cancelScans: (i) => manager.cancelScans(i),
     setEnabled: (i, k, ids, e) => manager.setEnabled(i, k, ids, e),
-    delete: (i, k, ids) => manager.delete(i, k, ids),
+    delete: (i, k, ids, o) => manager.delete(i, k, ids, o),
+    undoDelete: (i, t) => manager.undoDelete(i, t),
+    setPackOrder: (i, ids) => manager.setPackOrder(i, ids),
+    analyze: (i) => manager.analyze(i),
+    exportWorld: (i, w, o) => manager.exportWorld(i, w, o),
     add: (i, k, paths) => manager.add(i, k, paths),
     addFromInstance: (i, k, from, ids) => manager.addFromInstance(i, k, from, ids),
     createBackup: (i, w) => manager.createBackup(i, w),

@@ -43,6 +43,7 @@ import type { VersionsManager } from './versions/service'
 import type { RuntimeConfig } from './context'
 import { DbClient } from './db/client'
 import { InstanceManager, instancesService } from './instances/service'
+import { LibraryStore, libraryService } from './instances/library'
 import { dataLayout } from './layout'
 import { deferred, once } from './lazy'
 import { logger, setLogFile, timed } from './log'
@@ -94,6 +95,7 @@ const httpClient = once(async (): Promise<HttpClient> => {
 const fetchBytes = async (url: string, options: { maxBytes: number; signal?: AbortSignal }) => (await httpClient()).bytes(url, options)
 
 const instances = new InstanceManager({ layout, emit, host, tasks, fetchBytes })
+const library = new LibraryStore(layout.library, { emit, exists: (id) => instances.has(id) })
 // Forget index rows of deleted (or moved) instance folders; they would never match again.
 instances.addHooks({
   removed: async (_id, dir) => {
@@ -119,6 +121,7 @@ const booted = (async () => {
     Promise.all([
       timed(log, 'settings loaded', () => settings.load()),
       timed(log, 'instance index loaded', async () => log.info(`${await instances.load()} instances`)),
+      library.load().catch((e: unknown) => log.warn('cannot read the sidebar layout', e)),
       timed(log, 'database opened', async () => {
         try {
           const ready = await db.open()
@@ -269,6 +272,7 @@ const modpacks = once(async () => {
     market: marketImpl,
     http: httpClient,
     telemetry: telemetryHooks,
+    ...(index.ok ? { db } : {}),
   })
   return modpackManager
 })
@@ -327,11 +331,30 @@ registerService(
   'settings',
   deferred<SettingsService>({ get: true, patch: true, reset: true, setBackground: true, getPaths: true, getSystemInfo: true }, () => ready(settingsImpl)),
 )
-const instancesImpl = instancesService(instances)
+const instancesImpl: InstancesService = { ...instancesService(instances), ...libraryService(library) }
 registerService(
   'instances',
   deferred<InstancesService>(
-    { list: true, get: true, create: true, update: true, rename: true, duplicate: true, delete: true, inspectFolder: true, import: true, repair: true, setIcon: true, markOpened: true },
+    {
+      list: true,
+      get: true,
+      create: true,
+      update: true,
+      rename: true,
+      duplicate: true,
+      delete: true,
+      inspectFolder: true,
+      import: true,
+      repair: true,
+      setIcon: true,
+      markOpened: true,
+      getLayout: true,
+      setPinned: true,
+      createFolder: true,
+      updateFolder: true,
+      deleteFolder: true,
+      moveToFolder: true,
+    },
     () => ready(instancesImpl),
   ),
 )
@@ -354,6 +377,10 @@ registerService(
       restoreBackup: true,
       deleteBackup: true,
       pruneBackups: true,
+      undoDelete: true,
+      setPackOrder: true,
+      analyze: true,
+      exportWorld: true,
     },
     async () => {
       const [{ resourcesService }, manager] = await Promise.all([import('./resources/service'), resources()])
@@ -409,9 +436,15 @@ registerService(
 )
 registerService(
   'install',
-  deferred<InstallService>({ plan: true, status: true, install: true, repair: true }, async () => {
-    const [{ installService }, manager] = await Promise.all([import('./install/service'), installs()])
-    return installService(manager)
+  deferred<InstallService>({ plan: true, status: true, install: true, repair: true, changeVersion: true }, async () => {
+    const [{ installService }, { changeVersion }, manager] = await Promise.all([import('./install/service'), import('./install/change-version'), installs()])
+    const deps = {
+      instances,
+      install: manager,
+      isRunning: (id: string) => launchManager?.isActive(id) ?? false,
+      backupWorlds: async (id: string) => (await resources()).autoBackupWorlds(id, 'pre-version-change'),
+    }
+    return { ...installService(manager), changeVersion: (id, runtime) => changeVersion(deps, id, runtime) }
   }),
 )
 registerService(
@@ -440,6 +473,7 @@ registerService(
       applyUpdate: true,
       rollback: true,
       export: true,
+      listExportFiles: true,
     },
     async () => {
       const [{ modpackService }, manager] = await Promise.all([import('./modpacks/service'), modpacks()])
@@ -485,6 +519,7 @@ async function shutdown(): Promise<void> {
   const settled = await Promise.allSettled([
     settings.flush(),
     instances.flush(),
+    library.flush(),
     market?.flush(),
     accountManager?.flush(),
     javaManager?.flush(),

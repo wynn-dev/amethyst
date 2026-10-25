@@ -1,7 +1,14 @@
 import type { MenuCommand } from '@shared/menu'
 import { INSTANCE_TABS, type InstanceTab } from '@shared/menu'
+import type { UpdaterState } from '@shared/services'
+import { api } from '@/lib/rpc'
+import { toastError } from '@/lib/error-messages'
+import { chooseInstanceIcon, getInstanceSummary, instanceActions, libraryActions } from '@/data/instances'
 import { queryClient } from '@/data/query'
-import { instanceActions, instanceKeys } from '@/data/instances'
+import { updaterActions, updaterKey } from '@/data/updater'
+import { addResourceFiles } from '@/data/content'
+import { openModpackExport, openModpackImport, useModpackUi } from '@/data/modpacks'
+import { pickFiles } from '@/lib/files'
 import type { InstanceSummary } from '@/data/types'
 import { toast } from '@/ui/toast-store'
 import { router } from './router'
@@ -18,7 +25,7 @@ export function currentInstanceId(): string | undefined {
 
 export function currentInstance(): InstanceSummary | undefined {
   const id = currentInstanceId()
-  return id ? queryClient.getQueryData<InstanceSummary[]>(instanceKeys.list)?.find((i) => i.id === id) : undefined
+  return id ? getInstanceSummary(id) : undefined
 }
 
 export function currentTab(): InstanceTab | undefined {
@@ -50,11 +57,22 @@ export function openSettings(pane = 'general', row?: string) {
   window.open(`${location.origin}${location.pathname}${hash}`, 'amethyst-settings')
 }
 
-/** Feedback for commands whose service isn't wired yet. Never silently do nothing. */
-export function notYetAvailable(what: string) {
-  // TODO(wire): every caller of this is waiting on a runtime service.
-  toast({ kind: 'info', title: `${what} isn’t available yet`, message: 'This needs a background service that hasn’t been connected.' })
+/** Open one of the well-known data folders in Finder. */
+export async function openDataFolder(which: 'dataRoot' | 'logs' | 'instances' | 'backups') {
+  try {
+    const paths = await queryClient.fetchQuery({ queryKey: ['settings', 'paths'], queryFn: () => api.settings.getPaths() })
+    await api.shell.openFolder(paths[which])
+  } catch (e) {
+    toastError(e, 'Couldn’t open the folder')
+  }
 }
+
+export function openExternal(url: string) {
+  void api.shell.openExternal(url).catch((e: unknown) => toastError(e, 'Couldn’t open the link'))
+}
+
+const RELEASES_URL = 'https://github.com/wynn-dev/amethyst/releases/tag/nightly'
+const ISSUES_URL = 'https://github.com/wynn-dev/amethyst/issues/new'
 
 /** Runs a menu-bar or palette command. The single dispatcher keeps menu, palette and shortcuts in sync. */
 export function runCommand(command: MenuCommand, arg?: string): void {
@@ -94,6 +112,8 @@ export function runCommand(command: MenuCommand, arg?: string): void {
       return ui.set({ shortcuts: true })
     case 'file.newInstance':
       return ui.set({ newInstance: true })
+    case 'file.newFolder':
+      return ui.set({ newFolder: {} })
     case 'account.add':
       return ui.set({ addAccount: true })
     case 'account.manage':
@@ -107,61 +127,73 @@ export function runCommand(command: MenuCommand, arg?: string): void {
       window.dispatchEvent(new CustomEvent('amethyst:find-step', { detail: command === 'edit.findNext' ? 1 : -1 }))
       return
     case 'instance.play':
-      return needInstance((i) => i.state.kind === 'idle' && instanceActions.launch(i))
+      return needInstance((i) => {
+        if (i.state.kind === 'idle') instanceActions.launch(i)
+        else if (i.state.kind === 'problem') toast({ kind: 'warning', title: `“${i.name}” can’t be played`, message: i.state.message })
+        else toast({ kind: 'info', title: i.state.kind === 'running' ? `“${i.name}” is already running` : `“${i.name}” is busy` })
+      })
     case 'instance.stop':
     case 'instance.forceStop':
-      return needInstance((i) => i.state.kind === 'running' && instanceActions.stop(i, command === 'instance.forceStop'))
+      return needInstance((i) => {
+        if (i.state.kind === 'running' || i.state.kind === 'launching') instanceActions.stop(i, command === 'instance.forceStop')
+        else toast({ kind: 'info', title: `“${i.name}” isn’t running` })
+      })
     case 'instance.addMods':
       return needInstance((i) => router.navigate({ to: '/discover', search: { type: 'mod', target: i.id } }))
     case 'instance.openLogs':
+    case 'instance.openLogWindow':
       return needInstance((i) => openInstance(i.id, 'logs'))
     case 'instance.changeVersion':
-      return needInstance((i) => openInstance(i.id, 'settings'))
+      return needInstance((i) => ui.set({ changeVersion: { id: i.id, name: i.name } }))
     case 'instance.checkForUpdates':
       return needInstance((i) => openInstance(i.id, 'mods'))
     case 'instance.togglePin':
-      return needInstance((i) =>
-        queryClient.setQueryData<InstanceSummary[]>(instanceKeys.list, (l) => l?.map((x) => (x.id === i.id ? { ...x, pinned: !x.pinned } : x))),
-      )
+      return needInstance((i) => void libraryActions.togglePin(i))
+    case 'instance.rename':
+      return needInstance((i) => ui.set({ rename: { id: i.id, name: i.name } }))
+    case 'instance.changeIcon':
+      return needInstance((i) => void chooseInstanceIcon(i))
     case 'file.duplicate':
       return needInstance((i) => ui.set({ duplicate: { id: i.id, name: i.name } }))
     case 'file.trash':
       return needInstance((i) => ui.set({ trash: { id: i.id, name: i.name } }))
+    case 'file.showInFinder':
+      return needInstance((i) => void instanceActions.revealInFinder(i))
+    case 'file.openDataFolder':
+      return void openDataFolder('dataRoot')
     case 'instance.repair':
-      return needInstance((i) => instanceActions.repair(i))
+      return needInstance((i) => void instanceActions.repair(i))
     case 'app.about':
       return openSettings('about')
-    case 'app.checkForUpdates':
-      return openSettings('updates')
-    case 'file.newFolder':
-      return notYetAvailable('New Folder')
-    case 'file.importModpack':
-      return notYetAvailable('Import Modpack')
+    case 'app.checkForUpdates': {
+      const state = queryClient.getQueryData<UpdaterState>(updaterKey)
+      if (state?.status === 'ready') return void updaterActions.restart()
+      openSettings('updates')
+      return void updaterActions.check()
+    }
     case 'file.addExistingFolder':
-      return notYetAvailable('Add Existing Folder')
+      return ui.set({ newInstance: true, newInstanceSource: 'folder' })
+    case 'file.importModpack':
+      return void pickFiles('modpack', { title: 'Import Modpack' }).then(([path]) => path && openModpackImport({ path }))
     case 'file.importUrl':
-      return notYetAvailable('Import from URL')
+      return useModpackUi.getState().set({ importUrl: true })
     case 'file.exportModpack':
-      return notYetAvailable('Export Modpack')
-    case 'file.showInFinder':
-      return notYetAvailable('Show in Finder')
-    case 'file.openDataFolder':
-      return notYetAvailable('Open Data Folder')
+      return needInstance((i) => openModpackExport(i.id, i.name))
     case 'instance.addFiles':
-      return notYetAvailable('Add Files')
-    case 'instance.openLogWindow':
-      return notYetAvailable('The log window')
-    case 'instance.rename':
-      return notYetAvailable('Rename')
-    case 'instance.changeIcon':
-      return notYetAvailable('Change Icon')
+      return needInstance((i) => {
+        const tab = currentTab()
+        const kind = tab === 'resource-packs' ? 'resourcepacks' : tab === 'shaders' ? 'shaderpacks' : tab === 'worlds' ? 'saves' : 'mods'
+        if (kind === 'mods' && tab !== 'mods') openInstance(i.id, 'mods')
+        void pickFiles(kind).then(async (paths) => {
+          if (paths.length > 0) await addResourceFiles(i.id, kind, paths)
+        })
+      })
     case 'help.openLauncherLogs':
-      return notYetAvailable('Open Launcher Logs')
+      return void openDataFolder('logs')
     case 'help.releaseNotes':
-      return notYetAvailable('Release Notes')
+      return openExternal(RELEASES_URL)
     case 'help.reportIssue':
-      window.open('https://github.com/wynn-dev/amethyst/issues/new')
-      return
+      return openExternal(ISSUES_URL)
   }
 }
 

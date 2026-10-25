@@ -20,6 +20,8 @@ export interface Events {
 
   /** Instances were added, edited (including renames and play-time updates) or removed. */
   'instances:changed': { added: string[]; updated: string[]; removed: string[] }
+  /** The sidebar organisation (pins, folders) changed; refetch `instances.getLayout()`. */
+  'library:changed': { at: number }
 
   /**
    * A content folder changed. `changed` rows were added or updated (refetch them), `removed`

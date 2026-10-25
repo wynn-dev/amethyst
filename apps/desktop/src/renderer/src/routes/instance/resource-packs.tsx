@@ -1,61 +1,124 @@
-import { useMemo, useState, type KeyboardEvent } from 'react'
+import { useCallback, useDeferredValue, useMemo, useState, type DragEvent, type KeyboardEvent } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { AlertTriangle, ArrowDown, ArrowUp, Check, GripVertical, Image, Plus } from 'lucide-react'
-import { Button, EmptyState, SearchField, SkeletonRows, Switch, Tooltip, VirtualTable, type Column, type MenuEntry } from '@/ui'
+import { AlertTriangle, ArrowDown, ArrowUp, Check, GripVertical, Image, Plus, Trash2 } from 'lucide-react'
+import type { ResourceRow } from '@shared/services'
+import { Button, EmptyState, IconButton, Menu, SearchField, SkeletonRows, Switch, Tooltip, VirtualTable, cn, type Column, type MenuEntry } from '@/ui'
 import { QueryError } from '@/app/RouteStates'
-import { notYetAvailable } from '@/app/commands'
 import { findTargetRef } from '@/app/ui-store'
-import { BlockIcon, formatBytes } from '@/app/visuals'
-import { useResourcePacks, useSetResourcePackOrder } from '@/data/content'
-import type { ResourcePack } from '@/data/types'
-import { InspectorHeader, InspectorSection, PropertyList, SourceBadge, SplitView, SubToolbar, copyText, useInstanceId, useSelection } from './parts'
+import { formatBytes } from '@/app/visuals'
+import { addResourceFiles, setPackOrder, setResourcesEnabled, trashResources, usePagedResources, useResourceAll, useResourceDetail, useWatchInstance } from '@/data/content'
+import { useInstanceInfo } from '@/data/instance-info'
+import { openModpackImport } from '@/data/modpacks'
+import { isModpackPath, pickFiles, revealInFinder } from '@/lib/files'
+import { api } from '@/lib/rpc'
+import { reportError } from '@/lib/error-text'
+import {
+  AddFromInstanceSheet,
+  DropOverlay,
+  FileSection,
+  PlaceholderCell,
+  ProblemNote,
+  ResourceIcon,
+  RowSource,
+  ScanningNote,
+  TrashConfirm,
+  isPlaceholder,
+  realIds,
+  useFileDrop,
+  type ContentRow,
+} from './content-parts'
+import { packCompat, releasesFor } from './pack-format'
+import { InspectorHeader, InspectorSection, PropertyList, SplitView, SubToolbar, copyText, useInstanceId, useSelection } from './parts'
+import { UpdatesSheet } from './updates-sheet'
 
-type Row = ResourcePack | { header: string; key: string }
-const isHeader = (r: Row): r is { header: string; key: string } => 'header' in r
+type Header = { header: string; id: string }
+type Row = ContentRow | Header
+const isHeader = (r: Row): r is Header => 'header' in r
+const DRAG_TYPE = 'application/x-amethyst-pack'
 
 /** Resource Packs tab: the enabled load order (top wins) and the available packs (B4.2). */
 export default function ResourcePacksTab() {
   const id = useInstanceId()
   const navigate = useNavigate()
-  const packs = useResourcePacks(id)
-  const setOrder = useSetResourcePackOrder(id)
+  useWatchInstance(id)
+  const info = useInstanceInfo(id)
+  const minecraft = info.data?.minecraft
   const [query, setQuery] = useState('')
+  const search = useDeferredValue(query.trim())
   const { selection, setSelection, only } = useSelection()
+  const [pendingTrash, setPendingTrash] = useState<string[] | null>(null)
+  const [fromInstance, setFromInstance] = useState(false)
+  const [updatesOpen, setUpdatesOpen] = useState(false)
 
-  const all = useMemo(() => packs.data ?? [], [packs.data])
-  const enabled = useMemo(() => all.filter((p) => p.enabled).toSorted((a, b) => (a.order ?? 0) - (b.order ?? 0)), [all])
-  const byId = useMemo(() => new Map(all.map((p) => [p.id, p])), [all])
+  const enabledQuery = useResourceAll(id, 'resourcepacks', { enabled: true })
+  const available = usePagedResources(id, 'resourcepacks', { enabled: false, ...(search ? { search } : {}) })
+  const enabled = useMemo(() => (enabledQuery.data ?? []).toSorted((a, b) => (a.order ?? 0) - (b.order ?? 0)), [enabledQuery.data])
+  const order = useMemo(() => enabled.map((p) => p.id), [enabled])
+  const byId = useMemo(() => {
+    const m = new Map<string, ResourceRow>()
+    for (const r of enabled) m.set(r.id, r)
+    for (const r of available.rows) if (r) m.set(r.id, r)
+    return m
+  }, [enabled, available.rows])
+  const { request } = available
 
   const rows = useMemo<Row[]>(() => {
-    const q = query.trim().toLowerCase()
-    const match = (p: ResourcePack) => !q || p.name.toLowerCase().includes(q)
-    const en = enabled.filter(match)
-    const av = all.filter((p) => !p.enabled && match(p))
+    const q = search.toLowerCase()
+    const en = enabled.filter((p) => !q || p.name.toLowerCase().includes(q) || p.fileName.toLowerCase().includes(q))
     return [
-      { header: `Enabled (load order) — top overrides bottom`, key: 'h-enabled' },
+      { header: `Enabled (load order) — top overrides bottom`, id: 'h-enabled' },
       ...en,
-      { header: 'Available', key: 'h-available' },
-      ...av,
+      { header: 'Available', id: 'h-available' },
+      ...available.rows.map((r, index): ContentRow => r ?? { placeholder: true, id: `\u0000p${index}`, index }),
     ]
-  }, [all, enabled, query])
+  }, [enabled, available.rows, search])
 
-  const order = enabled.map((p) => p.id)
-  const setEnabled = (ids: string[], on: boolean) => {
-    if (on) setOrder.mutate([...ids.filter((i) => !order.includes(i)), ...order])
-    else setOrder.mutate(order.filter((i) => !ids.includes(i)))
-  }
-  const toggle = (ids: string[]) => setEnabled(ids, ids.some((i) => !byId.get(i)?.enabled))
-  const move = (ids: string[], delta: -1 | 1) => {
+  const setEnabled = useCallback(
+    (ids: string[], on: boolean) => {
+      const real = realIds(ids)
+      // Enabling puts packs on top; disabling drops them from the order.
+      if (on) void setPackOrder(id, [...real.filter((i) => !order.includes(i)), ...order])
+      else void setResourcesEnabled(id, 'resourcepacks', real, false)
+    },
+    [id, order],
+  )
+  const toggle = (ids: string[]) => setEnabled(ids, realIds(ids).some((i) => !byId.get(i)?.enabled))
+  const move = (ids: string[], delta: -1 | 1 | 'top' | 'bottom') => {
     const next = [...order]
     const sel = new Set(ids.filter((i) => next.includes(i)))
     if (!sel.size) return
+    if (delta === 'top' || delta === 'bottom') {
+      const rest = next.filter((x) => !sel.has(x))
+      const moved = next.filter((x) => sel.has(x))
+      return void setPackOrder(id, delta === 'top' ? [...moved, ...rest] : [...rest, ...moved])
+    }
     const idxs = next.map((x, i) => (sel.has(x) ? i : -1)).filter((i) => i >= 0)
     if (delta < 0 ? idxs[0] === 0 : idxs[idxs.length - 1] === next.length - 1) return
     for (const i of delta < 0 ? idxs : idxs.toReversed()) {
       const j = i + delta
       ;[next[i], next[j]] = [next[j]!, next[i]!]
     }
-    setOrder.mutate(next)
+    void setPackOrder(id, next)
+  }
+  const dropOn = (targetId: string, e: DragEvent) => {
+    const dragged = e.dataTransfer.getData(DRAG_TYPE)
+    if (!dragged || dragged === targetId) return
+    e.preventDefault()
+    const without = order.filter((x) => x !== dragged)
+    const at = without.indexOf(targetId)
+    without.splice(at < 0 ? without.length : at, 0, dragged)
+    void setPackOrder(id, without)
+  }
+
+  const drop = useFileDrop((paths) => {
+    const packs = paths.filter(isModpackPath)
+    if (packs[0]) openModpackImport({ path: packs[0] })
+    const rest = paths.filter((p) => !isModpackPath(p))
+    if (rest.length) void addResourceFiles(id, 'resourcepacks', rest)
+  })
+  const addFiles = async () => {
+    const paths = await pickFiles('resourcepacks', { title: 'Add Resource Packs' })
+    if (paths.length) await addResourceFiles(id, 'resourcepacks', paths)
   }
 
   const columns: Column<Row>[] = [
@@ -65,7 +128,20 @@ export default function ResourcePacksTab() {
       header: <span className="sr-only">Order</span>,
       width: '28px',
       align: 'center',
-      cell: (r) => (!isHeader(r) && r.enabled ? <GripVertical aria-label={`Position ${(r.order ?? 0) + 1}`} className="size-3.5 text-label-3" /> : null),
+      cell: (r) =>
+        !isHeader(r) && !isPlaceholder(r) && r.enabled ? (
+          <span
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.setData(DRAG_TYPE, r.id)
+              e.dataTransfer.effectAllowed = 'move'
+            }}
+            className="flex cursor-grab items-center active:cursor-grabbing"
+            title="Drag to change the load order (⌥⌘↑ / ⌥⌘↓)"
+          >
+            <GripVertical aria-label={`Position ${(r.order ?? 0) + 1}`} className="size-3.5 text-label-3" />
+          </span>
+        ) : null,
     },
     {
       id: 'enabled',
@@ -73,7 +149,7 @@ export default function ResourcePacksTab() {
       header: <span className="sr-only">Enabled</span>,
       width: '42px',
       align: 'center',
-      cell: (r) => (isHeader(r) ? null : <Switch size="sm" checked={r.enabled} aria-label={`Enable ${r.name}`} onCheckedChange={(on) => setEnabled([r.id], on)} />),
+      cell: (r) => (isHeader(r) || isPlaceholder(r) ? null : <Switch size="sm" checked={r.enabled} aria-label={`Enable ${r.name}`} onCheckedChange={(on) => setEnabled([r.id], on)} />),
     },
     {
       id: 'name',
@@ -81,12 +157,23 @@ export default function ResourcePacksTab() {
       header: 'Name',
       width: 'minmax(220px,1fr)',
       cell: (r) =>
-        isHeader(r) ? null : (
-          <div className="flex min-w-0 items-center gap-2.5">
-            <BlockIcon hue={r.hue} label={r.name} size={24} />
+        isHeader(r) ? null : isPlaceholder(r) ? (
+          <PlaceholderCell index={r.index} request={request} />
+        ) : (
+          <div
+            className="flex h-full min-w-0 flex-1 items-center gap-2.5"
+            onDragOver={(e) => {
+              if (r.enabled && Array.from(e.dataTransfer.types).includes(DRAG_TYPE)) e.preventDefault()
+            }}
+            onDrop={(e) => r.enabled && dropOn(r.id, e)}
+          >
+            <ResourceIcon row={r} />
             <div className="flex min-w-0 flex-col">
-              <span className="truncate">{r.name}</span>
-              <span className="truncate text-small text-label-2">{r.description}</span>
+              <span className="flex items-center gap-1.5 truncate">
+                <span className="truncate">{r.name}</span>
+                {r.problem && <AlertTriangle aria-label={r.problem.message} className="size-3 shrink-0 text-orange" />}
+              </span>
+              <span className="truncate text-small text-label-2">{r.pending ? 'Reading…' : r.summary || r.fileName}</span>
             </div>
           </div>
         ),
@@ -95,36 +182,44 @@ export default function ResourcePacksTab() {
       id: 'compat',
       title: 'Compatibility',
       header: 'Compatibility',
-      width: '128px',
-      cell: (r) =>
-        isHeader(r) ? null : r.compatible ? (
+      width: '150px',
+      cell: (r) => {
+        if (isHeader(r) || isPlaceholder(r)) return null
+        const c = packCompat(r.packFormats, minecraft)
+        if (!c) return null
+        return c.ok ? (
           <span className="flex items-center gap-1 text-small text-label-2">
             <Check className="size-3.5 text-green" /> Compatible
           </span>
         ) : (
-          <Tooltip content={`Pack format ${r.packFormat} was made for Minecraft ${r.madeFor}. Some textures may be missing or look wrong.`}>
-            <span tabIndex={0} className="flex items-center gap-1 text-small text-orange">
-              <AlertTriangle className="size-3.5" /> Made for {r.madeFor}
+          <Tooltip content={c.detail}>
+            <span tabIndex={0} className="flex min-w-0 items-center gap-1 text-small text-orange">
+              <AlertTriangle className="size-3.5 shrink-0" /> <span className="truncate">{c.label}</span>
             </span>
           </Tooltip>
-        ),
+        )
+      },
     },
-    { id: 'source', title: 'Source', header: 'Source', width: '96px', cell: (r) => (isHeader(r) ? null : <SourceBadge source={r.source} />) },
-    { id: 'size', title: 'Size', header: 'Size', width: '76px', align: 'end', cell: (r) => (isHeader(r) ? null : <span className="text-label-2">{formatBytes(r.sizeBytes)}</span>) },
+    { id: 'source', title: 'Source', header: 'Source', width: '96px', cell: (r) => (isHeader(r) || isPlaceholder(r) ? null : <RowSource row={r} />) },
+    { id: 'size', title: 'Size', header: 'Size', width: '76px', align: 'end', cell: (r) => (isHeader(r) || isPlaceholder(r) ? null : <span className="text-label-2">{r.isDirectory ? 'Folder' : formatBytes(r.size)}</span>) },
   ]
 
   const rowMenu = (keys: string[]): MenuEntry[] => {
-    const rs = keys.map((k) => byId.get(k)).filter((p): p is ResourcePack => !!p)
+    const rs = realIds(keys)
+      .map((k) => byId.get(k))
+      .filter((p): p is ResourceRow => !!p)
     const allOn = rs.every((p) => p.enabled)
+    const one = rs.length === 1 ? rs[0] : undefined
     return [
-      { label: allOn ? 'Disable' : 'Enable', onSelect: () => setEnabled(keys, !allOn) },
+      { label: allOn ? 'Disable' : 'Enable', onSelect: () => setEnabled(rs.map((p) => p.id), !allOn) },
       { label: 'Move Up', shortcut: 'alt+mod+up', disabled: !allOn, onSelect: () => move(keys, -1) },
       { label: 'Move Down', shortcut: 'alt+mod+down', disabled: !allOn, onSelect: () => move(keys, 1) },
+      { label: 'Move to Top', disabled: !allOn, onSelect: () => move(keys, 'top') },
       { kind: 'separator' },
-      { label: 'Show in Finder', onSelect: () => notYetAvailable('Show in Finder') },
+      { label: 'Show in Finder', disabled: !one, onSelect: () => one && void api.resources.get(id, 'resourcepacks', one.id).then((d) => revealInFinder(d.path), (e: unknown) => reportError('Couldn’t show the file', e)) },
       { label: 'Copy Name', onSelect: () => copyText(rs.map((p) => p.name).join('\n')) },
       { kind: 'separator' },
-      { label: 'Move to Trash…', destructive: true, onSelect: () => notYetAvailable('Moving resource packs to the Trash') },
+      { label: 'Move to Trash…', shortcut: 'mod+backspace', destructive: true, onSelect: () => setPendingTrash(rs.map((p) => p.id)) },
     ]
   }
 
@@ -132,95 +227,182 @@ export default function ResourcePacksTab() {
     if (e.altKey && e.metaKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
       e.preventDefault()
       e.stopPropagation()
-      move([...selection], e.key === 'ArrowUp' ? -1 : 1)
+      move(realIds(selection), e.key === 'ArrowUp' ? -1 : 1)
     }
   }
 
   const selected = only ? byId.get(only) : undefined
+  const total = enabled.length + (search ? 0 : available.total)
+  const browse = () => navigate({ to: '/discover', search: { type: 'resourcepack', target: id } })
   const addButton = (
-    <Button variant="primary" icon={<Plus />} onClick={() => navigate({ to: '/discover', search: { type: 'resourcepack', target: id } })}>
+    <Button variant="primary" icon={<Plus />} onClick={browse}>
       Add Resource Packs
     </Button>
   )
+  const names = Object.fromEntries([...byId.values()].map((r) => [r.id, { name: r.name, version: r.version }]))
+  const loading = enabledQuery.isPending || available.isPending
 
   return (
-    <>
+    <div className="relative flex min-h-0 flex-1 flex-col" {...drop.props}>
       <SubToolbar
         trailing={
           <>
-            <Button onClick={() => notYetAvailable('Add from Files')}>Add from Files…</Button>
+            <Button onClick={() => setUpdatesOpen(true)}>Check for Updates</Button>
             {addButton}
+            <Menu
+              align="end"
+              items={[
+                { label: 'Add from Files…', onSelect: () => void addFiles() },
+                { label: 'Add from Another Instance…', onSelect: () => setFromInstance(true) },
+              ]}
+              trigger={
+                <IconButton label="More ways to add" variant="push" size="sm" className="!size-6">
+                  <Plus />
+                </IconButton>
+              }
+            />
           </>
         }
       >
         <SearchField ref={findTargetRef} value={query} onValueChange={setQuery} placeholder="Search resource packs" className="w-[220px]" />
-        {packs.data && <span className="text-small text-label-2 tabular">{`${enabled.length} enabled · ${all.length} total`}</span>}
+        {!loading && <span className="text-small text-label-2 tabular">{`${enabled.length} enabled · ${search ? `${available.total} more found` : `${total} total`}`}</span>}
+        <ScanningNote scanning={available.scanning} />
       </SubToolbar>
       <SplitView
         inspectorLabel="Resource pack details"
         inspector={
           selected ? (
-            <>
-              <InspectorHeader icon={<BlockIcon hue={selected.hue} label={selected.name} size={44} />} title={selected.name} subtitle={selected.enabled ? `Position ${(selected.order ?? 0) + 1} in load order` : 'Not enabled'} />
-              <div className="flex items-center justify-between px-4 pb-3">
-                <label htmlFor="rp-enabled" className="text-body">
-                  Enabled
-                </label>
-                <Switch id="rp-enabled" checked={selected.enabled} onCheckedChange={(on) => setEnabled([selected.id], on)} />
-              </div>
-              {selected.enabled && (
-                <div className="flex gap-2 px-4 pb-3">
-                  <Button size="sm" icon={<ArrowUp />} onClick={() => move([selected.id], -1)} disabled={selected.order === 0}>
-                    Move Up
-                  </Button>
-                  <Button size="sm" icon={<ArrowDown />} onClick={() => move([selected.id], 1)} disabled={selected.order === enabled.length - 1}>
-                    Move Down
-                  </Button>
-                </div>
-              )}
-              <InspectorSection>
-                <p className="text-callout">{selected.description}</p>
-              </InspectorSection>
-              <InspectorSection title="Details">
-                <PropertyList
-                  rows={[
-                    { label: 'Pack format', value: selected.packFormat },
-                    { label: 'Compatibility', value: selected.compatible ? 'Compatible' : `Made for ${selected.madeFor}` },
-                    { label: 'Size', value: formatBytes(selected.sizeBytes) },
-                    { label: 'Source', value: <SourceBadge source={selected.source} /> },
-                  ]}
-                />
-              </InspectorSection>
-            </>
+            <PackInspector
+              key={selected.id}
+              instanceId={id}
+              pack={selected}
+              minecraft={minecraft}
+              position={order.indexOf(selected.id)}
+              count={order.length}
+              onEnabled={(on) => setEnabled([selected.id], on)}
+              onMove={(d) => move([selected.id], d)}
+              onTrash={() => setPendingTrash([selected.id])}
+            />
           ) : (
             <p className="m-auto px-6 text-center text-body text-label-3">Select a resource pack to see its details</p>
           )
         }
       >
-        {packs.isPending ? (
+        {loading ? (
           <SkeletonRows rows={8} className="pt-2" />
-        ) : packs.isError ? (
-          <QueryError error={packs.error} onRetry={() => packs.refetch()} what="resource packs" />
-        ) : all.length === 0 ? (
-          <EmptyState icon={<Image />} title="No resource packs yet" description="Resource packs change textures, sounds and fonts. Drop .zip files here or browse for packs." actions={addButton} />
+        ) : enabledQuery.isError || available.isError ? (
+          <QueryError error={enabledQuery.error ?? available.error} onRetry={available.refetch} what="resource packs" />
+        ) : total === 0 && !search ? (
+          <EmptyState
+            icon={<Image />}
+            title="No resource packs yet"
+            description="Resource packs change textures, sounds and fonts. Drop .zip files or pack folders here, or browse for packs."
+            actions={
+              <>
+                <Button onClick={() => void addFiles()}>Add from Files…</Button>
+                {addButton}
+              </>
+            }
+          />
         ) : (
           <div className="flex min-h-0 flex-1 flex-col" onKeyDownCapture={onKeyDownCapture}>
             <VirtualTable
               aria-label="Resource packs"
               rows={rows}
               columns={columns}
-              getKey={(r) => (isHeader(r) ? r.key : r.id)}
+              getKey={(r) => r.id}
               groupHeader={(r) => (isHeader(r) ? r.header : null)}
               rowHeight={40}
               selection={selection}
               onSelectionChange={setSelection}
               onToggle={toggle}
+              onDelete={(keys) => setPendingTrash(realIds(keys))}
               rowMenu={rowMenu}
               className="flex-1"
             />
           </div>
         )}
       </SplitView>
+      <DropOverlay active={drop.active} label="Add to Resource Packs" hint="Drop .zip files or pack folders." />
+      <TrashConfirm
+        kind="resourcepacks"
+        pending={pendingTrash}
+        label={pendingTrash?.length === 1 ? byId.get(pendingTrash[0] ?? '')?.name : undefined}
+        onCancel={() => setPendingTrash(null)}
+        onConfirm={(ids) => {
+          const label = ids.length === 1 ? byId.get(ids[0] ?? '')?.name : undefined
+          setSelection(new Set())
+          setPendingTrash(null)
+          void trashResources(id, 'resourcepacks', ids, label)
+        }}
+      />
+      <AddFromInstanceSheet open={fromInstance} onOpenChange={setFromInstance} instanceId={id} kind="resourcepacks" />
+      <UpdatesSheet open={updatesOpen} onOpenChange={setUpdatesOpen} instanceId={id} kind="resourcepacks" names={names} />
+    </div>
+  )
+}
+
+function PackInspector({
+  instanceId,
+  pack,
+  minecraft,
+  position,
+  count,
+  onEnabled,
+  onMove,
+  onTrash,
+}: {
+  instanceId: string
+  pack: ResourceRow
+  minecraft: string | undefined
+  position: number
+  count: number
+  onEnabled: (on: boolean) => void
+  onMove: (d: -1 | 1 | 'top') => void
+  onTrash: () => void
+}) {
+  const detail = useResourceDetail(instanceId, 'resourcepacks', pack.id)
+  const compat = packCompat(pack.packFormats, minecraft)
+  const f = pack.packFormats
+  return (
+    <>
+      <InspectorHeader icon={<ResourceIcon row={pack} size={44} />} title={pack.name} subtitle={pack.enabled ? `Position ${position + 1} of ${count} in the load order` : 'Not enabled'} />
+      <div className="flex items-center justify-between px-4 pb-3">
+        <label htmlFor="rp-enabled" className="text-body">
+          Enabled
+        </label>
+        <Switch id="rp-enabled" checked={pack.enabled} onCheckedChange={onEnabled} />
+      </div>
+      {pack.enabled && (
+        <div className="flex gap-2 px-4 pb-3">
+          <Button size="sm" icon={<ArrowUp />} onClick={() => onMove(-1)} disabled={position === 0}>
+            Move Up
+          </Button>
+          <Button size="sm" icon={<ArrowDown />} onClick={() => onMove(1)} disabled={position === count - 1}>
+            Move Down
+          </Button>
+        </div>
+      )}
+      <InspectorSection>
+        <p className="text-callout whitespace-pre-line">{detail.data?.description || pack.summary || 'No description.'}</p>
+        <ProblemNote row={pack} />
+      </InspectorSection>
+      <InspectorSection title="Compatibility">
+        <PropertyList
+          rows={[
+            { label: 'Pack format', value: f ? (f.min === f.max ? f.max : `${f.min}–${f.max}`) : '—' },
+            { label: 'Made for', value: f ? (releasesFor(f.max) ?? '—') : '—' },
+            { label: 'This instance', value: compat ? <span className={cn(compat.ok ? 'text-green' : 'text-orange')}>{compat.label}</span> : '—' },
+          ]}
+        />
+        {compat && !compat.ok && <p className="mt-2 text-small text-label-2">{compat.detail}</p>}
+      </InspectorSection>
+      <FileSection row={pack} detail={detail.data} />
+      <InspectorSection>
+        <Button variant="borderless" className="-ml-2 text-red" icon={<Trash2 />} onClick={onTrash}>
+          Move to Trash…
+        </Button>
+      </InspectorSection>
     </>
   )
 }

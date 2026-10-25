@@ -40,6 +40,9 @@ export async function serveAssetRequest(dataRoot: string, url: string, rangeHead
     'content-type': resolved.mime,
     'accept-ranges': 'bytes',
     'x-content-type-options': 'nosniff',
+    // Only Amethyst's own renderers can reach this scheme. CORS lets `crossOrigin` images (skins
+    // drawn into WebGL by the 3D viewer, the 2D head canvas) read the pixels.
+    'access-control-allow-origin': '*',
     // Content-hashed names never change; other URLs carry a ?v= version.
     'cache-control': resolved.immutable ? 'public, max-age=31536000, immutable' : 'no-cache',
   }

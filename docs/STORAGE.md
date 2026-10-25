@@ -9,6 +9,7 @@ layout is defined in code in `apps/desktop/src/runtime/layout.ts`; keep the two 
 Amethyst/
   settings.json            launcher settings (+ .bak)                       JSON document
   instances.json           registry of external ("imported in place") instances (+ .bak)
+  library.json             sidebar organisation: pinned instances and folders (+ .bak)
   accounts.json            account records, public fields only (+ .bak)     never holds tokens
   secrets/<hash>.bin       one encrypted credential blob per account (0600)
   index.sqlite             resource index + marketplace cache (+ -wal, -shm) rebuildable cache
@@ -44,7 +45,7 @@ hand), `.amethyst/backups/modpack-<ts>/` (files replaced or removed by an update
 
 ## JSON documents
 
-`settings.json`, `instances.json`, `accounts.json` and every `instance.json` go through one store
+`settings.json`, `instances.json`, `library.json`, `accounts.json` and every `instance.json` go through one store
 (`runtime/store/json-store.ts`) with these guarantees:
 
 - **Atomic writes.** Data is written to `<file>.<random>.tmp`, fsynced, and renamed over the file. A

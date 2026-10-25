@@ -1,4 +1,4 @@
-import { stat } from 'node:fs/promises'
+import { realpath, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { app, BrowserWindow, dialog, nativeTheme, shell, type OpenDialogOptions as ElectronOpenDialogOptions } from 'electron'
 import type { MenuContext } from '@shared/menu'
@@ -66,6 +66,40 @@ export function windowService(mainWindow: () => BrowserWindow | undefined, onMen
   }
 }
 
+/** Folder extensions macOS treats as packages (opened, launched or installed as one item, not browsed). */
+const PACKAGE_EXTENSIONS = new Set([
+  'action',
+  'app',
+  'appex',
+  'bundle',
+  'component',
+  'framework',
+  'kext',
+  'mdimporter',
+  'mpkg',
+  'pkg',
+  'plugin',
+  'prefpane',
+  'qlgenerator',
+  'saver',
+  'service',
+  'systemextension',
+  'wdgt',
+  'workflow',
+  'xpc',
+])
+
+/**
+ * True for a folder Finder would open as a package rather than browse: a known package
+ * extension, or any `name.ext` folder with a bundle's `Contents/Info.plist`.
+ */
+export async function isPackageDirectory(dir: string): Promise<boolean> {
+  const ext = /\.([A-Za-z0-9-]+)$/.exec(path.basename(dir))?.[1]?.toLowerCase()
+  if (!ext) return false
+  if (PACKAGE_EXTENSIONS.has(ext)) return true
+  return (await stat(path.join(dir, 'Contents', 'Info.plist')).catch(() => undefined)) !== undefined
+}
+
 export const shellService: ShellService = {
   async showItemInFolder(p) {
     const file = absolute(p)
@@ -73,10 +107,12 @@ export const shellService: ShellService = {
     shell.showItemInFolder(file)
   },
   async openFolder(p) {
-    const dir = absolute(p)
-    const st = await stat(dir).catch(() => undefined)
-    if (!st) throw fail('ENOT_FOUND', 'The folder no longer exists')
-    if (!st.isDirectory()) return shell.showItemInFolder(dir)
+    // Through symlinks: what matters is what Finder would open.
+    const dir = await realpath(absolute(p)).catch(() => undefined)
+    const st = dir ? await stat(dir).catch(() => undefined) : undefined
+    if (!dir || !st) throw fail('ENOT_FOUND', 'The folder no longer exists')
+    // `openPath` on an app (or any other bundle) launches or installs it: only ever reveal those.
+    if (!st.isDirectory() || (await isPackageDirectory(dir))) return shell.showItemInFolder(dir)
     const error = await shell.openPath(dir)
     if (error) throw fail('EOPEN_FAILED', error)
   },

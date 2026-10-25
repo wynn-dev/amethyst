@@ -7,6 +7,7 @@ import type { ReportedError } from '@shared/services'
 import { serveAssetRequest } from './asset-protocol'
 import { dialogService, shellService, windowService } from './os-services'
 import { prepareE2eDataRoot, runE2eUi } from './e2e-ui'
+import { isSmokeRun } from './flags'
 import { confirmQuit, installAppMenu, type AppMenu } from './menu'
 import { installPermissionPolicy } from './permissions'
 import { registerMainService, startMainRpc } from './rpc/server'
@@ -15,8 +16,10 @@ import { Updater } from './updater'
 import { guardNavigation, runScreenshots } from './windows'
 
 const isDev = !app.isPackaged
-// The smoke test runs against a throwaway data root, never the user's real one.
-if (process.env.AMETHYST_SMOKE) app.setPath('userData', mkdtempSync(join(tmpdir(), 'amethyst-smoke-')))
+// The smoke test runs against a throwaway data root, never the user's real one. A packaged app
+// needs `--amethyst-smoke` as well as the variable (flags.ts).
+const smoke = isSmokeRun({ env: process.env, argv: process.argv, packaged: app.isPackaged })
+if (smoke) app.setPath('userData', mkdtempSync(join(tmpdir(), 'amethyst-smoke-')))
 const runtime = new RuntimeSupervisor()
 const updater = new Updater()
 
@@ -82,11 +85,11 @@ function createMainWindow(): BrowserWindow {
 
   win.once('ready-to-show', () => win.show())
 
-  // `AMETHYST_SMOKE=1`: verify every RPC path end to end through the renderer bridge (main, the
+  // `AMETHYST_SMOKE=1` (plus `--amethyst-smoke` when packaged): verify every RPC path end to end through the renderer bridge (main, the
   // runtime, its SQLite worker and the domain services), print the result, and quit. Used by CI,
   // also against the packaged app, where it additionally proves that the externalized
   // electron-updater module made it into the asar.
-  if (process.env.AMETHYST_SMOKE) {
+  if (smoke) {
     win.webContents.once('did-finish-load', async () => {
       const calls: [string, string][] = [
         ['app', 'getInfo'],
@@ -110,6 +113,11 @@ function createMainWindow(): BrowserWindow {
       )
       // A rejection must be a structured RPC error (e.g. EHTTP offline), never a crash or a hang.
       const networkOk = networkResult.every((r) => r.ok || typeof r.error?.message === 'string')
+      // React rendered: the renderer's module scripts loaded from the asar under the CSP and the
+      // file:// fuse (GrantFileProtocolExtraPrivileges is off).
+      const rendered: boolean = await win.webContents.executeJavaScript(
+        `new Promise((resolve) => { const t0 = Date.now(); const tick = () => { if ((document.getElementById('root')?.childElementCount ?? 0) > 0) return resolve(true); if (Date.now() - t0 > 15000) return resolve(false); setTimeout(tick, 100) }; tick() })`,
+      )
       const updaterModule = await import('electron-updater').then(
         () => ({ ok: true }),
         (e: Error) => ({ ok: false, error: { name: e.name, message: e.message } }),
@@ -125,13 +133,15 @@ function createMainWindow(): BrowserWindow {
           }),
         ),
         'electron-updater': updaterModule,
+        rendered,
       }
       process.stdout.write(`SMOKE ${JSON.stringify(summary)}\n`)
-      const value = (name: string) => (summary as Record<string, { value?: unknown } | undefined>)[name]?.value
+      const value = (name: string) => (summary as unknown as Record<string, { value?: unknown } | undefined>)[name]?.value
       const ping = value('runtime.ping') as { index?: { ok?: boolean } } | undefined
       const ok =
         result.every((r) => r.ok) &&
         updaterModule.ok &&
+        rendered &&
         ping?.index?.ok === true &&
         Array.isArray(value('instances.list')) &&
         Array.isArray(value('accounts.list')) &&

@@ -63,6 +63,8 @@ export {
 export { readShaderPack, type ShaderPackInfo } from './packs/shaderpack'
 export { openPackSource, readPackFile, type PackSource } from './packs/source'
 export { flattenTextComponent, stripFormatting } from './packs/text'
+export { readRegularFile } from './util/fs'
+export { isWorldOpen, sessionLockHolders, type SessionLockOptions } from './saves/lock'
 export { isPathInside, pathKey, samePath, sanitizeFileName, splitExtension, uniqueName } from './paths'
 export {
   exportWorld,

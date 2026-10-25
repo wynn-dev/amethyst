@@ -131,6 +131,22 @@ function isSimple(spec: FileSpec): boolean {
   return !!(spec.sha1 || spec.sha256) && !spec.sha1Any?.length && spec.validator !== 'json'
 }
 
+/**
+ * True for a URL that must never be downloaded: anything but `https:`, except plain `http:` to a
+ * loopback host (local mirrors and tests). Library URLs are upgraded to HTTPS before they get here
+ * (`secureUrl`); this catches everything else (client jar, asset index, log config, tools).
+ */
+export function isInsecureDownloadUrl(url: string): boolean {
+  let u: URL
+  try {
+    u = new URL(url)
+  } catch {
+    return true
+  }
+  if (u.protocol === 'https:') return false
+  return !(u.protocol === 'http:' && (u.hostname === '127.0.0.1' || u.hostname === 'localhost' || u.hostname === '[::1]'))
+}
+
 function toItem(spec: FileSpec, urls: string[], existing: DownloadItem['existing']): DownloadItem {
   const item: DownloadItem = { url: urls, dest: spec.path, existing }
   if (spec.size !== undefined && spec.size >= 0) item.size = spec.size
@@ -167,7 +183,13 @@ function problemError(spec: FileSpec, problem: FileProblem): InstallError {
 export async function ensureFiles(specs: Iterable<FileSpec>, options: EnsureFilesOptions = {}): Promise<EnsureFilesResult> {
   const signal = options.signal ?? options.ctx?.signal
   const byPath = new Map<string, FileSpec>()
-  for (const spec of specs) byPath.set(resolve(spec.path), { ...spec, path: resolve(spec.path) })
+  for (const spec of specs) {
+    const insecure = spec.urls.find(isInsecureDownloadUrl)
+    if (insecure !== undefined) {
+      throw new InstallError('EINSTALL_BAD_METADATA', `${spec.name ?? spec.path}: refusing to download over plain HTTP (${insecure})`, { path: spec.path })
+    }
+    byPath.set(resolve(spec.path), { ...spec, path: resolve(spec.path) })
+  }
   let list = [...byPath.values()]
   const result: EnsureFilesResult = { downloaded: 0, skipped: 0, bytes: 0 }
 

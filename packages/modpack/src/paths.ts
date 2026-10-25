@@ -6,8 +6,10 @@
  * through {@link pathKey} (NFC + lower case) because APFS is case- and
  * normalisation-insensitive.
  */
+import { realpath } from 'node:fs/promises'
 import path from 'node:path'
 import { pathKey } from '@amethyst/content'
+import { ModpackError } from './errors'
 
 export { pathKey }
 
@@ -41,6 +43,56 @@ export function resolveInside(root: string, rel: string): string {
   const back = path.relative(root, abs)
   if (back === '' || back.startsWith('..') || path.isAbsolute(back)) throw new Error(`Path escapes the instance: ${rel}`)
   return abs
+}
+
+/**
+ * Guards writes against symlinked folders inside the instance (`mods/` → `~/Documents`, a
+ * symlinked `.amethyst/`, ...). {@link resolveInside} only checks the path as a string; this
+ * checks the folders on disk: the nearest existing parent of every target must really be inside
+ * the instance. Verified folders are cached for the guard's lifetime (one operation).
+ */
+export class Containment {
+  readonly #root: string
+  #realRoot: Promise<string> | undefined
+  readonly #ok = new Set<string>()
+
+  constructor(root: string) {
+    this.#root = path.resolve(root)
+  }
+
+  /** `resolveInside(root, rel)`, after checking that writing there stays inside the root. */
+  async resolve(rel: string): Promise<string> {
+    const abs = resolveInside(this.#root, rel)
+    await this.check(abs)
+    return abs
+  }
+
+  /** Throw `EUNSAFE_PATH` when the nearest existing parent folder of `abs` resolves outside the root. */
+  async check(abs: string): Promise<void> {
+    this.#realRoot ??= realpath(this.#root)
+    const realRoot = await this.#realRoot
+    let dir = path.dirname(abs)
+    while (!this.#ok.has(dir)) {
+      let real: string
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- walks up a few folders at most
+        real = await realpath(dir)
+      } catch (e) {
+        const code = (e as NodeJS.ErrnoException).code
+        if ((code === 'ENOENT' || code === 'ENOTDIR') && dir.length > this.#root.length) {
+          dir = path.dirname(dir)
+          continue
+        }
+        throw e
+      }
+      const back = path.relative(realRoot, real)
+      if (back.startsWith('..') || path.isAbsolute(back)) {
+        throw new ModpackError('EUNSAFE_PATH', `${path.relative(this.#root, dir) || '.'} is a link to a folder outside the instance (${real}); refusing to write through it`)
+      }
+      this.#ok.add(dir)
+      break
+    }
+  }
 }
 
 /** True for the zip entries that never carry content: `__MACOSX/` and `.DS_Store`. */

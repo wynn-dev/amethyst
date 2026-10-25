@@ -6,7 +6,7 @@ import { availableParallelism, freemem, totalmem } from 'node:os'
 import path from 'node:path'
 import { rm } from 'node:fs/promises'
 import type { Events } from '@shared/events'
-import type { DataPaths, Settings, SettingsPatch, SettingsService } from '@shared/services'
+import type { DataPaths, Settings, SettingsNotice, SettingsPatch, SettingsService } from '@shared/services'
 import type { DataLayout } from '../layout'
 import { relativeToRoot } from '../layout'
 import { logger } from '../log'
@@ -27,6 +27,8 @@ export class SettingsStore {
   readonly #listeners = new Set<SettingsListener>()
   /** Problems found while loading (surfaced in diagnostics). */
   loadResult: LoadResult<Settings> | undefined
+  /** Shown once to the user: `settings.json` was moved aside as unreadable. */
+  #notice: SettingsNotice | null = null
 
   constructor(layout: DataLayout, emit: <K extends keyof Events>(event: K, payload: Events[K]) => void) {
     this.#layout = layout
@@ -41,8 +43,21 @@ export class SettingsStore {
 
   async load(): Promise<Settings> {
     this.loadResult = await this.#doc.load()
-    if (this.loadResult.corruptPath) log.warn(`settings.json was unreadable (${this.loadResult.error}); kept as ${this.loadResult.corruptPath}, outcome ${this.loadResult.outcome}`)
+    const { corruptPath, outcome } = this.loadResult
+    if (corruptPath) {
+      log.warn(`settings.json was unreadable (${this.loadResult.error}); kept as ${corruptPath}, outcome ${outcome}`)
+      this.#notice = { kind: outcome === 'recovered' ? 'recovered' : 'reset', corruptPath }
+      // Windows already connected look now; later ones ask when they start (takeNotice).
+      this.#emit('settings:notice', { at: Date.now() })
+    }
     return this.#doc.value
+  }
+
+  /** The pending one-time notice; the first caller takes it, so it is shown once. */
+  takeNotice(): SettingsNotice | null {
+    const notice = this.#notice
+    this.#notice = null
+    return notice
   }
 
   get value(): Settings {
@@ -127,6 +142,7 @@ export function settingsService(store: SettingsStore, layout: DataLayout): Setti
     reset: () => store.reset(),
     setBackground: (source) => store.setBackground(source),
     getPaths: async (): Promise<DataPaths> => ({ dataRoot: layout.root, instances: layout.instances, backups: layout.backups, logs: layout.logs }),
+    takeNotice: async () => store.takeNotice(),
     getSystemInfo: async () => ({
       totalMemoryMB: Math.round(totalmem() / 1024 / 1024),
       freeMemoryMB: Math.round(freemem() / 1024 / 1024),

@@ -97,13 +97,13 @@ Amethyst offers two interactive methods. Silent refresh (§3) comes first whenev
 **A. Authorization code + PKCE in an embedded window (default).**
 
 1. Generate a PKCE `code_verifier` (43–128 chars, high entropy) and an S256 `code_challenge`, plus a random `state`.
-2. Start, or reuse, a loopback HTTP listener bound to **127.0.0.1 only**, on a free port. It handles the fallback in option B. Build `redirect_uri = http://localhost:<port>/auth`.
+2. Start, or reuse, a loopback HTTP listener bound to **the loopback interfaces only** (`127.0.0.1`, plus `[::1]` on the same port, since `localhost` may resolve to either; Microsoft ignores the port only for `localhost` redirect URIs and does not support `[::1]`), on a free port. It handles the fallback in option B. Build `redirect_uri = http://localhost:<port>/auth`.
 3. Open `https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize?client_id=…&response_type=code&redirect_uri=…&scope=XboxLive.signin%20offline_access&code_challenge=…&code_challenge_method=S256&state=…&prompt=select_account`. Add `login_hint=<email>` when re-authenticating a known account.
 4. Open this URL in a dedicated modal `BrowserWindow`:
    - Size about 560×720, minimum 420×600, parented to the main window, hidden until `ready-to-show`.
    - `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`.
    - A **dedicated persistent session partition**, so Microsoft cookies are isolated from the app and survive restarts. That makes "pick an existing account" easy.
-5. Watch `will-redirect` and `will-navigate`. When the target URL matches the redirect URI, cancel the navigation and parse it. Treat `localhost`, `127.0.0.1` and `[::1]` as equivalent when the scheme, port and path match, because Microsoft can rewrite the loopback host. Then:
+5. Watch `will-redirect` and `will-navigate`. Top-level navigations may only go to Microsoft/Live/Xbox sign-in hosts over https (`apps/desktop/src/main/auth-navigation.ts`); other https links open in the browser, everything else is cancelled, and popups never open a new window. When the target URL matches the redirect URI, cancel the navigation and parse it. Treat `localhost`, `127.0.0.1` and `[::1]` as equivalent when the scheme, port and path match, because Microsoft can rewrite the loopback host. Then:
    - `error` param → fail with `error_description || error` (see §2.8).
    - Mismatched `state` → fail.
    - `code` param → resolve with the code.

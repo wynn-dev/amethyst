@@ -22,6 +22,8 @@ Amethyst/
     versions/<id>/<id>-natives-<arch>/   natives extracted per JVM architecture
   runtimes/<name>/         Java runtimes installed by Amethyst (Mojang mac-os-arm64 or Azul Zulu)
   java.json                user-added Java paths and hidden (removed) runtimes (+ .bak)
+  running-games.json       games still running (instance, pid, process start time), adopted after a runtime restart
+  client-id.json           random per-install launcher client id passed as ${clientid} (+ .bak); not the telemetry id
   store/sha1/<aa>/<sha1>   content-addressed blobs (read-only, 0444); store/tmp/ for ingests
   backups/<instance id>/<world folder>/<YYYY-MM-DD_HH-mm-ss>.zip (+ .json sidecar)
   rescued-worlds/<instance> <date>/<world>   worlds moved out of deleted instances

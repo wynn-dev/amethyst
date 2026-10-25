@@ -38,12 +38,23 @@ function bad(message: string): never {
   throw new JavaError('EBADMANIFEST', message)
 }
 
+/** `https:` only; plain `http:` is accepted for loopback hosts (local mirrors and tests). */
+function isSecureUrl(url: string): boolean {
+  let u: URL
+  try {
+    u = new URL(url)
+  } catch {
+    return false
+  }
+  return u.protocol === 'https:' || (u.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(u.hostname))
+}
+
 function parseDownload(v: unknown, where: string): MojangDownload {
   if (!v || typeof v !== 'object') bad(`${where}: missing download`)
   const o = v as Record<string, unknown>
   if (typeof o.sha1 !== 'string' || !SHA1.test(o.sha1)) bad(`${where}: invalid sha1`)
   if (typeof o.size !== 'number' || !Number.isSafeInteger(o.size) || o.size < 0) bad(`${where}: invalid size`)
-  if (typeof o.url !== 'string' || !/^https?:\/\//.test(o.url)) bad(`${where}: invalid url`)
+  if (typeof o.url !== 'string' || !isSecureUrl(o.url)) bad(`${where}: invalid url (https required)`)
   return { sha1: o.sha1.toLowerCase(), size: o.size, url: o.url }
 }
 

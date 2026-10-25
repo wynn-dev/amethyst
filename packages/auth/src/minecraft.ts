@@ -6,7 +6,7 @@
  * error bodies are read exactly once.
  */
 
-import { AuthError } from './errors'
+import { AuthError, redactSecrets } from './errors'
 import { asObject, num, postJson, request, str, type HttpOptions, type HttpResponse } from './http'
 import { validateSkinPng } from './png'
 
@@ -230,7 +230,7 @@ export type SkinModel = 'classic' | 'slim'
 function skinError(res: HttpResponse): AuthError {
   if (res.status === 401 || res.status === 429 || res.status >= 500) return profileError(res)
   const body = asObject(res.json)
-  const message = messageOf(body) ?? res.text.slice(0, 200)
+  const message = redactSecrets(messageOf(body) ?? res.text).slice(0, 200)
   if (/invalid|banned|not allowed/i.test(message) && /image|skin|texture/i.test(message)) {
     return new AuthError('ESKIN_REJECTED_IMAGE', 'Minecraft rejected this image (invalid or not allowed).', { status: res.status, body: res.text })
   }

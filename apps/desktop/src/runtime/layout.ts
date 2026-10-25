@@ -49,6 +49,10 @@ export interface DataLayout {
   nativesCache: string
   /** Downloaded modpack archives (imports from URLs and the marketplace, update targets). */
   modpackCache: string
+  /** Games started by Amethyst that are still running (adopted again after a runtime restart). */
+  runningGames: string
+  /** The stable per-install launcher client id passed to the game as `${clientid}`. */
+  clientId: string
 }
 
 export function dataLayout(root: string, logs?: string): DataLayout {
@@ -77,6 +81,8 @@ export function dataLayout(root: string, logs?: string): DataLayout {
     javaProbeCache: path.join(r, 'cache', 'java-probe.json'),
     nativesCache: path.join(r, 'cache', 'natives'),
     modpackCache: path.join(r, 'cache', 'modpacks'),
+    runningGames: path.join(r, 'running-games.json'),
+    clientId: path.join(r, 'client-id.json'),
   }
 }
 

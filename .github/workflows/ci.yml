@@ -20,13 +20,15 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version-file: .nvmrc
           cache: pnpm
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/Library/Caches/electron
@@ -41,7 +43,7 @@ jobs:
       # A blank or hung window must fail fast, not hold the runner for hours.
       - name: Smoke test (renderer ↔ main ↔ runtime RPC)
         timeout-minutes: 5
-        run: pnpm --filter @amethyst/desktop exec electron .
+        run: pnpm --filter @amethyst/desktop exec electron . --amethyst-smoke
         env:
           AMETHYST_SMOKE: '1'
       # Catches packaging regressions (missing externalized modules, asar layout) before merge.
@@ -49,8 +51,19 @@ jobs:
         run: pnpm dist
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      # The Electron fuses electron-builder.yml asks for (RunAsNode off, asar-only with integrity…).
+      - name: Check the Electron fuses
+        run: |
+          FUSES="$(pnpm dlx @electron/fuses@1.8.0 read --app "$PWD/apps/desktop/release/mac-arm64/Amethyst.app")"
+          echo "$FUSES"
+          for fuse in 'RunAsNode is Disabled' 'EnableNodeOptionsEnvironmentVariable is Disabled' \
+            'EnableNodeCliInspectArguments is Disabled' 'EnableEmbeddedAsarIntegrityValidation is Enabled' \
+            'OnlyLoadAppFromAsar is Enabled' 'EnableCookieEncryption is Enabled'; do
+            grep -qF "$fuse" <<<"$FUSES" || { echo "::error::expected fuse: $fuse"; exit 1; }
+          done
+      # A packaged app runs the smoke check only with --amethyst-smoke as well as the variable (main/flags.ts).
       - name: Smoke test (packaged app)
         timeout-minutes: 5
-        run: apps/desktop/release/mac-arm64/Amethyst.app/Contents/MacOS/Amethyst
+        run: apps/desktop/release/mac-arm64/Amethyst.app/Contents/MacOS/Amethyst --amethyst-smoke
         env:
           AMETHYST_SMOKE: '1'

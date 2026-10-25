@@ -52,6 +52,7 @@ import {
   parseInstanceConfig,
   parseOverrides,
   parseUpstream,
+  sanitizeImportedOverrides,
   uniqueDisplayName,
   validateName,
   validateRuntime,
@@ -149,6 +150,16 @@ function newConfig(id: string, name: string, runtime: InstanceRuntime, now: numb
     lastOpenedAt: now,
     lastPlayedAt: 0,
     playTimeMs: 0,
+  }
+}
+
+/** The raw `overrides.env` of a folder's `instance.json` (to list the keys reading it dropped). */
+async function rawOverridesEnv(dir: string): Promise<unknown> {
+  try {
+    const raw: unknown = JSON.parse(await readFile(metaPath(dir), 'utf8'))
+    return asRecord(asRecord(raw).overrides).env
+  } catch {
+    return undefined
   }
 }
 
@@ -649,6 +660,8 @@ export class InstanceManager {
     const managedRoots = [this.#layout.instances, await realpath(this.#layout.instances).catch(() => this.#layout.instances)]
     const dataRoots = [this.#layout.root, await realpath(this.#layout.root).catch(() => this.#layout.root)]
     if (managedRoots.some((r) => isPathInside(r, real) || isPathInside(r, dir)) || dataRoots.some((r) => samePath(r, real))) return 'inside-managed-root'
+    // Copying (or later trashing) a folder that holds Amethyst's own data would recurse into it.
+    if (dataRoots.some((r) => isPathInside(real, r) || isPathInside(dir, r))) return 'contains-data-root'
     for (const e of this.#entries.values()) if (samePath(e.dir, real) || samePath(e.dir, dir)) return 'already-registered'
     const meta = metaPath(dir)
     if (await stat(meta).catch(() => undefined)) {
@@ -676,6 +689,8 @@ export class InstanceManager {
         candidate.kind = 'amethyst'
         candidate.name = r.value.name
         candidate.runtime = r.value.runtime
+        const { removed } = sanitizeImportedOverrides(r.value.overrides, await rawOverridesEnv(dir))
+        if (removed.length > 0) candidate.removedLaunchSettings = removed
       }
     }
     if (candidate.kind === 'empty' && ['mods', 'saves', 'options.txt', 'config', 'versions', 'resourcepacks'].some((n) => names.has(n))) candidate.kind = 'game-dir'
@@ -741,8 +756,13 @@ export class InstanceManager {
   }
 
   async #importAs(input: ImportInstanceInput, src: string, name: string, runtime: InstanceRuntime, existing: InstanceConfig | undefined, now: number): Promise<InstanceDetail> {
+    // Launch overrides that run code (commands, a Java path, agents, DYLD_* env) are not imported;
+    // the review listed them (`removedLaunchSettings`).
+    const imported = existing ? sanitizeImportedOverrides(existing.overrides) : undefined
+    if (imported && imported.removed.length > 0) log.warn(`import of ${src}: removed launch settings: ${imported.removed.join('; ')}`)
+    // Ids name folders (backups/<id>/) on a case-insensitive volume: never reuse one that differs only by case.
     const config: InstanceConfig = existing
-      ? { ...existing, id: this.#entries.has(existing.id) ? randomUUID() : existing.id, name, runtime }
+      ? { ...existing, overrides: imported?.overrides ?? existing.overrides, id: this.#idTaken(existing.id) ? randomUUID() : existing.id, name, runtime }
       : newConfig(randomUUID(), name, runtime, now)
 
     if (input.mode === 'in-place') {
@@ -775,6 +795,13 @@ export class InstanceManager {
       await rm(dir, { recursive: true, force: true })
       throw e
     }
+  }
+
+  /** True when an instance (or a registered external folder) already uses `id`, ignoring case. */
+  #idTaken(id: string): boolean {
+    const key = id.toLowerCase()
+    for (const other of this.#entries.keys()) if (other.toLowerCase() === key) return true
+    return this.#registry.value.external.some((r) => r.id.toLowerCase() === key)
   }
 
   async repair(id: string, runtime: Partial<InstanceRuntime> & { minecraft: string }): Promise<InstanceDetail> {

@@ -23,6 +23,7 @@ import {
   planModpackUpdate,
   readModpack,
   readModpackLock,
+  recoverInterruptedCommits,
   resolveModpackFiles,
   rollbackModpackUpdate,
   watchForManualFiles,
@@ -67,6 +68,7 @@ import type { ResourceManager } from '../resources/service'
 import type { TaskRegistry } from '../tasks/registry'
 import type { TelemetryHooks } from '../telemetry'
 import { AppError, errorCode, errorMessage, invalid, isAbortError } from '../util/errors'
+import { recoverModpackCommits } from './recover'
 
 const log = logger('modpacks')
 
@@ -84,6 +86,7 @@ export interface ModpackApi {
   exportCurseForge: typeof exportCurseForge
   readModpackLock: typeof readModpackLock
   listIncompleteOperations: typeof listIncompleteOperations
+  recoverInterruptedCommits: typeof recoverInterruptedCommits
 }
 
 const defaultApi: ModpackApi = {
@@ -99,6 +102,7 @@ const defaultApi: ModpackApi = {
   exportCurseForge,
   readModpackLock,
   listIncompleteOperations,
+  recoverInterruptedCommits,
 }
 
 export interface ModpackDeps {
@@ -119,6 +123,10 @@ export interface ModpackDeps {
   watchTimeoutMs?: number
   /** The SQLite index: installed pack files are recorded as attributed to their platform. */
   db?: Pick<DbClient, 'query'>
+  /** True while the game launches or runs from the instance: pack files are never changed under it. */
+  isRunning?: (instanceId: string) => boolean
+  /** True while "Change Version…" works on the instance (its world backup, then the install). */
+  isChangingVersion?: (instanceId: string) => boolean
 }
 
 /** Attribution of the pack's Modrinth/CurseForge files, so content tabs show their source. */
@@ -182,6 +190,7 @@ export class ModpackManager {
   readonly #plans = new Map<string, StoredPlan>()
   readonly #busy = new Set<string>()
   readonly #previews = new Map<string, Promise<ModpackManifest>>()
+  readonly #recovered = new Map<string, Promise<void>>()
 
   constructor(deps: ModpackDeps) {
     this.#d = deps
@@ -191,6 +200,30 @@ export class ModpackManager {
   /** An import or update writes into this instance. */
   isBusy(instanceId: string): boolean {
     return this.#busy.has(instanceId)
+  }
+
+  /** Refuse work on an instance the game or another operation uses. */
+  #checkFree(instanceId: string): void {
+    if (this.#d.isRunning?.(instanceId)) throw new AppError('EBUSY', 'Quit the game before changing the modpack files of this instance')
+    if (this.#d.isChangingVersion?.(instanceId)) throw new AppError('EBUSY', 'Wait for the version change of this instance to finish')
+    if (this.#busy.has(instanceId)) throw new AppError('EBUSY', 'An import or update of this instance is running')
+  }
+
+  /** Mark the instance busy (launch refuses while it is). Checked and marked synchronously. */
+  #claim(instanceId: string): void {
+    this.#checkFree(instanceId)
+    this.#busy.add(instanceId)
+  }
+
+  /** First use of an instance in this session: undo a commit the last session was killed in. */
+  #prepare(instanceId: string, dir: string): Promise<void> {
+    let p = this.#recovered.get(instanceId)
+    if (!p) {
+      p = recoverModpackCommits(dir, this.#api)
+      p.catch(() => this.#recovered.delete(instanceId))
+      this.#recovered.set(instanceId, p)
+    }
+    return p
   }
 
   #clients(): { modrinth: ModrinthClient; curseforge: CurseForgeClient | undefined } {
@@ -326,6 +359,7 @@ export class ModpackManager {
     if (!input || typeof input !== 'object' || !input.source) throw invalid('A modpack source is required')
     const sourceKind: 'file' | 'modrinth' | 'curseforge' = origin.upstream?.kind ?? 'file'
     let instanceId = input.instanceId
+    if (instanceId) this.#checkFree(instanceId)
     try {
       return await this.#d.tasks.runAndWait({ name: 'modpack.import', params: { name: input.name ?? '' }, ...(instanceId ? { instanceId } : {}) }, async (ctx) => {
         const archive = await this.#archive(input.source, ctx, origin.expected)
@@ -354,9 +388,10 @@ export class ModpackManager {
           instanceId = created.id
         }
         const id = instanceId
-        this.#busy.add(id)
+        this.#claim(id)
         try {
           const dir = this.#d.instances.resolve(id).dir
+          await this.#prepare(id, dir)
           const client = await this.#d.http()
           // The game version and the files are independent: install both at once.
           const [runtime, files] = await Promise.allSettled([
@@ -453,20 +488,27 @@ export class ModpackManager {
     const pending = this.#pending.get(instanceId)
     if (!pending) return []
     const dir = this.#d.instances.resolve(instanceId).dir
-    const client = await this.#d.http()
-    const result = await this.#d.tasks.runAndWait({ name: 'modpack.manual', params: { files: files.length }, instanceId }, (ctx) =>
-      this.#api.installModpack(pending.manifest, pending.resolved, {
-        instanceDir: dir,
-        store: this.#d.resources.store,
-        download: { client },
-        ctx,
-        manualFiles: files,
-        // Only the missing files: configs the user changed since (or rows excluded from an update) stay as they are.
-        only: pending.manual.map((m) => m.path),
-        ...(pending.selectedOptional ? { selectedOptional: pending.selectedOptional } : {}),
-        ...(pending.upstream ? { upstream: pending.upstream } : {}),
-      }),
-    )
+    this.#claim(instanceId)
+    let result: Awaited<ReturnType<ModpackApi['installModpack']>>
+    try {
+      await this.#prepare(instanceId, dir)
+      const client = await this.#d.http()
+      result = await this.#d.tasks.runAndWait({ name: 'modpack.manual', params: { files: files.length }, instanceId }, (ctx) =>
+        this.#api.installModpack(pending.manifest, pending.resolved, {
+          instanceDir: dir,
+          store: this.#d.resources.store,
+          download: { client },
+          ctx,
+          manualFiles: files,
+          // Only the missing files: configs the user changed since (or rows excluded from an update) stay as they are.
+          only: pending.manual.map((m) => m.path),
+          ...(pending.selectedOptional ? { selectedOptional: pending.selectedOptional } : {}),
+          ...(pending.upstream ? { upstream: pending.upstream } : {}),
+        }),
+      )
+    } finally {
+      this.#busy.delete(instanceId)
+    }
     pending.manual = result.unresolved
     if (pending.manual.length === 0) this.#pending.delete(instanceId)
     return pending.manual
@@ -598,6 +640,7 @@ export class ModpackManager {
         const manifest = await this.#read(target.archive)
         const { modrinth, curseforge } = this.#clients()
         const resolved = await ctx.child('modpack.resolve', (c) => this.#api.resolveModpackFiles(manifest, { modrinth, ...(curseforge ? { curseforge } : {}), ctx: c }))
+        await this.#prepare(instanceId, inst.dir)
         const lock = await this.#api.readModpackLock(inst.dir)
         const plan = await this.#api.planModpackUpdate(lock, manifest, resolved, inst.dir, { signal: ctx.signal })
         const planId = randomUUID()
@@ -635,10 +678,10 @@ export class ModpackManager {
     if (!stored) throw new AppError('ENOT_FOUND', 'The update plan expired; check for updates again')
     const { plan, instanceId, upstream } = stored
     const inst = this.#d.instances.resolve(instanceId)
-    if (this.#busy.has(instanceId)) throw new AppError('EBUSY', 'An import or update of this instance is running')
-    this.#busy.add(instanceId)
+    this.#claim(instanceId)
     try {
       const result = await this.#d.tasks.runAndWait({ name: 'modpack.update', params: { name: inst.config.name, version: stored.target.name }, instanceId }, async (ctx) => {
+        await this.#prepare(instanceId, inst.dir)
         await ctx.child('modpack.backup-worlds', (c) => this.#d.resources.autoBackupWorlds(instanceId, 'pre-modpack-update', c))
         const client = await this.#d.http()
         const applied = await ctx.child('modpack.apply', (c) =>
@@ -668,10 +711,10 @@ export class ModpackManager {
   async rollback(instanceId: string, backupId: string): Promise<void> {
     if (typeof backupId !== 'string' || !/^[\w.-]+$/.test(backupId)) throw invalid('Invalid backup id')
     const inst = this.#d.instances.resolve(instanceId)
-    if (this.#busy.has(instanceId)) throw new AppError('EBUSY', 'An import or update of this instance is running')
-    this.#busy.add(instanceId)
+    this.#claim(instanceId)
     try {
       await this.#d.tasks.runAndWait({ name: 'modpack.rollback', params: { name: inst.config.name }, instanceId }, async (ctx) => {
+        await this.#prepare(instanceId, inst.dir)
         await this.#api.rollbackModpackUpdate(inst.dir, backupId, { signal: ctx.signal })
         // Follow the restored lock: its pack version and runtime are what the files now are.
         const lock = await this.#api.readModpackLock(inst.dir)

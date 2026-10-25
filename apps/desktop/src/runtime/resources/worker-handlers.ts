@@ -7,7 +7,7 @@
  */
 import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { copyFile, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import {
   ContentStore,
@@ -18,6 +18,7 @@ import {
   listSaves,
   pathKey,
   readPackFile,
+  readRegularFile,
   scanCacheKey,
   type ContentEntry,
   type ContentKind,
@@ -146,13 +147,18 @@ export function createResourceWorkerHandlers(): ResourceWorkerHandlers & Record<
       for (const save of saves) {
         const item: ScanSavesResult['saves'][number] = { ...save }
         if (save.iconPath) {
-          const st = await stat(save.iconPath).catch(() => undefined)
-          if (st && st.size <= ICON_MAX_BYTES) {
+          // lstat, and a no-follow read: a symlinked icon.png could point at any file on disk.
+          const st = await lstat(save.iconPath).catch(() => undefined)
+          if (st?.isFile() && st.size <= ICON_MAX_BYTES) {
             const name = `w-${createHash('sha1').update(`${pathKey(save.path)}:${st.mtimeMs}:${st.size}`).digest('hex')}.png`
             const target = path.join(iconsDir, name)
             if (!(await stat(target).catch(() => undefined))) {
-              await mkdir(iconsDir, { recursive: true })
-              await copyFile(save.iconPath, `${target}.tmp`).then(() => rename(`${target}.tmp`, target)).catch(() => undefined)
+              await readRegularFile(save.iconPath, { maxBytes: ICON_MAX_BYTES, root: save.path })
+                .then(async (bytes) => {
+                  await mkdir(iconsDir, { recursive: true })
+                  await writeAtomic(target, bytes)
+                })
+                .catch(() => undefined)
             }
             if (await stat(target).catch(() => undefined)) item.iconFile = name
           }

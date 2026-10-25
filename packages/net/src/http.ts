@@ -1,6 +1,7 @@
 /* oxlint-disable no-await-in-loop -- redirects and body chunks are processed sequentially by design */
 import type { IncomingHttpHeaders } from 'node:http'
-import { Agent, type Dispatcher } from 'undici'
+import type { Dispatcher } from 'undici'
+import { buildDispatcher, LiveDispatcher, type PoolOptions, type ProxyConfig } from './dispatcher'
 import { abortReason, HttpError, NetError, sanitizeUrl } from './errors'
 import { DEFAULT_RETRY, parseRetryAfter, type RetryOptions, withRetry } from './retry'
 
@@ -24,7 +25,35 @@ export interface HttpClientOptions {
   maxRedirects?: number
   /** Default retry policy for every request made through this client. */
   retry?: Partial<RetryOptions>
+  /** Route requests through this proxy (loopback and `noProxy` hosts go direct). Default: none. */
+  proxy?: ProxyConfig | null
+  /**
+   * Max buffered API reads ({@link HttpClient.json}, {@link HttpClient.text}) in flight at once,
+   * clamped to 1–64 (default 16). Streaming requests and downloads are not counted.
+   */
+  apiConcurrency?: number
 }
+
+/** The settings {@link HttpClient.configure} can change while the client is in use. */
+export type NetworkOptions = Pick<HttpClientOptions, 'connectionsPerHost' | 'proxy' | 'apiConcurrency'>
+
+/**
+ * Request headers that may follow a redirect to another origin. Everything else (credentials,
+ * cookies, API keys such as CurseForge's `x-api-key`, custom tokens) is dropped, because the
+ * new host must not receive it. Add names per request with {@link RequestOptions.crossOriginHeaders}.
+ */
+export const CROSS_ORIGIN_SAFE_HEADERS: ReadonlySet<string> = new Set([
+  'accept',
+  'accept-encoding',
+  'accept-language',
+  'cache-control',
+  'content-type',
+  'if-modified-since',
+  'if-none-match',
+  'if-range',
+  'range',
+  'user-agent',
+])
 
 /** Per-request options. */
 export interface RequestOptions {
@@ -41,6 +70,16 @@ export interface RequestOptions {
    * `POST` and `PATCH` are not retried unless this is set.
    */
   retry?: Partial<RetryOptions> | false
+  /**
+   * Extra header names (case-insensitive) that are still sent after a redirect to another
+   * origin. By default only {@link CROSS_ORIGIN_SAFE_HEADERS} are; every other header, including
+   * `authorization`, `cookie` and API keys, is stripped.
+   */
+  crossOriginHeaders?: readonly string[]
+  /** Called whenever response headers arrive (including redirects and error statuses). */
+  onResponse?: (status: number) => void
+  /** Called before each retry wait with its length (in addition to the policy's `onRetry`). */
+  onRetryWait?: (delayMs: number) => void
 }
 
 /** Options for the buffered helpers ({@link HttpClient.json}, {@link HttpClient.text}, {@link HttpClient.bytes}). */
@@ -87,6 +126,16 @@ export interface HttpClient {
   text(url: string, options?: ReadOptions): Promise<string>
   /** Request and buffer a binary body. */
   bytes(url: string, options?: ReadOptions): Promise<Buffer>
+  /**
+   * The client's connection pool. It stays the same object when {@link configure} replaces the
+   * pools behind it, so it can be installed as the global dispatcher for `fetch`.
+   */
+  readonly dispatcher: Dispatcher
+  /**
+   * Apply new network settings (proxy, connection limits) to later requests. Requests already
+   * running finish on the old pool. Throws `TypeError` for an unusable proxy URL (nothing changes).
+   */
+  configure(options: NetworkOptions): void
   /** Close all pooled connections. Further requests fail. */
   close(): Promise<void>
 }
@@ -112,17 +161,16 @@ function clamp(n: number, min: number, max: number): number {
 
 /** Create an HTTP client with its own connection pool. TLS certificates are always verified. */
 export function createHttpClient(options: HttpClientOptions = {}): HttpClient {
-  const agent = new Agent({
-    connections: clamp(options.connectionsPerHost ?? 16, 1, 64),
+  let network: NetworkOptions = { connectionsPerHost: options.connectionsPerHost, proxy: options.proxy ?? null, apiConcurrency: options.apiConcurrency }
+  const poolOptions = (): PoolOptions => ({
+    connections: clamp(network.connectionsPerHost ?? 16, 1, 64),
     allowH2: options.allowH2 ?? true,
     connectTimeout: options.connectTimeoutMs ?? 25_000,
     headersTimeout: options.headersTimeoutMs ?? 25_000,
     bodyTimeout: options.bodyTimeoutMs ?? 10_000,
-    keepAliveTimeout: 10_000,
-    autoSelectFamily: true,
-    // Never configurable: certificate verification stays on for every connection.
-    connect: { rejectUnauthorized: true },
   })
+  const agent = new LiveDispatcher(buildDispatcher(poolOptions(), network.proxy))
+  const api = new Gate(clamp(network.apiConcurrency ?? 16, 1, 64))
   const ua = options.userAgent ?? userAgent(options.version ?? '0.0.0')
   const maxRedirects = options.maxRedirects ?? 5
   const basePolicy: RetryOptions = { ...DEFAULT_RETRY, ...options.retry }
@@ -132,7 +180,17 @@ export function createHttpClient(options: HttpClientOptions = {}): HttpClient {
     // Non-idempotent requests could be applied twice, so they only retry when the caller opts in.
     const method = o.method ?? (o.body === undefined && o.json === undefined ? 'GET' : 'POST')
     if ((method === 'POST' || method === 'PATCH') && o.retry === undefined) return { ...basePolicy, retries: 0 }
-    return { ...basePolicy, ...o.retry }
+    const policy = { ...basePolicy, ...o.retry }
+    const wait = o.onRetryWait
+    if (!wait) return policy
+    const onRetry = policy.onRetry
+    return {
+      ...policy,
+      onRetry: (info) => {
+        wait(info.delayMs)
+        onRetry?.(info)
+      },
+    }
   }
 
   async function requestOnce(url: string, o: RequestOptions): Promise<HttpResponse> {
@@ -160,6 +218,7 @@ export function createHttpClient(options: HttpClientOptions = {}): HttpClient {
         signal: o.signal ?? null,
       })
       const status = res.statusCode
+      o.onResponse?.(status)
 
       if (REDIRECT_STATUSES.has(status) && res.headers.location) {
         await res.body.dump().catch(() => {})
@@ -170,8 +229,8 @@ export function createHttpClient(options: HttpClientOptions = {}): HttpClient {
           throw new NetError('EBADRESPONSE', `refusing HTTPS to HTTP redirect to ${sanitizeUrl(next.href)}`, sanitizeUrl(url))
         }
         if (next.origin !== current.origin) {
-          delete headers.authorization
-          delete headers.cookie
+          const keep = new Set((o.crossOriginHeaders ?? []).map((h) => h.toLowerCase()))
+          for (const name of Object.keys(headers)) if (!CROSS_ORIGIN_SAFE_HEADERS.has(name) && !keep.has(name)) delete headers[name]
         }
         if (status === 303 || ((status === 301 || status === 302) && method === 'POST')) {
           method = 'GET'
@@ -232,7 +291,7 @@ export function createHttpClient(options: HttpClientOptions = {}): HttpClient {
     userAgent: ua,
     request,
     async json<T>(url: string, o: JsonOptions<T> = {}): Promise<T> {
-      const buf = await readAll(url, { ...o, headers: { accept: 'application/json', ...o.headers } })
+      const buf = await api.run(o.signal, () => readAll(url, { ...o, headers: { accept: 'application/json', ...o.headers } }))
       let value: unknown
       try {
         value = JSON.parse(buf.toString('utf8'))
@@ -248,10 +307,73 @@ export function createHttpClient(options: HttpClientOptions = {}): HttpClient {
       }
     },
     async text(url, o = {}) {
-      return (await readAll(url, o)).toString('utf8')
+      return (await api.run(o.signal, () => readAll(url, o))).toString('utf8')
     },
     bytes: readAll,
+    dispatcher: agent,
+    configure(next) {
+      const merged: NetworkOptions = { ...network, ...next }
+      const pool = poolOptions()
+      const rebuild =
+        clamp(merged.connectionsPerHost ?? 16, 1, 64) !== pool.connections ||
+        (merged.proxy?.url ?? '') !== (network.proxy?.url ?? '') ||
+        (merged.proxy?.noProxy ?? '') !== (network.proxy?.noProxy ?? '')
+      if (rebuild) {
+        const built = buildDispatcher({ ...pool, connections: clamp(merged.connectionsPerHost ?? 16, 1, 64) }, merged.proxy)
+        agent.replace(built)
+      }
+      network = merged
+      api.limit = clamp(merged.apiConcurrency ?? 16, 1, 64)
+    },
     close: () => agent.close(),
+  }
+}
+
+/** A counting semaphore whose limit can change at any time. */
+class Gate {
+  #active = 0
+  readonly #queue: (() => void)[] = []
+  #limit: number
+
+  constructor(limit: number) {
+    this.#limit = limit
+  }
+
+  set limit(n: number) {
+    this.#limit = n
+    this.#pump()
+  }
+
+  async run<T>(signal: AbortSignal | undefined, fn: () => Promise<T>): Promise<T> {
+    if (this.#active >= this.#limit) {
+      await new Promise<void>((resolve, reject) => {
+        const go = () => {
+          signal?.removeEventListener('abort', onAbort)
+          resolve()
+        }
+        const onAbort = () => {
+          const i = this.#queue.indexOf(go)
+          if (i >= 0) this.#queue.splice(i, 1)
+          reject(abortReason(signal as AbortSignal))
+        }
+        if (signal?.aborted) return onAbort()
+        signal?.addEventListener('abort', onAbort, { once: true })
+        this.#queue.push(go)
+      })
+    } else this.#active++
+    try {
+      return await fn()
+    } finally {
+      this.#active--
+      this.#pump()
+    }
+  }
+
+  #pump(): void {
+    while (this.#active < this.#limit && this.#queue.length > 0) {
+      this.#active++
+      this.#queue.shift()?.()
+    }
   }
 }
 

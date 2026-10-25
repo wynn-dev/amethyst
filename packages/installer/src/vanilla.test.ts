@@ -6,7 +6,7 @@ import { CancelledError, createTask } from '@amethyst/task'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { fixture, sha1, startServer, tempDir, type TestServer } from './__fixtures__/helpers'
 import { publishMiniVersion } from './__fixtures__/mini'
-import { createMetadataClient, installMissing, type MetadataClient, planInstall, runInstall } from './index'
+import { createMetadataClient, ensureFiles, installMissing, type MetadataClient, planInstall, runInstall } from './index'
 
 let server: TestServer
 let http: HttpClient
@@ -161,3 +161,18 @@ describe('installMissing', () => {
     expect(result.repaired).toEqual([])
   })
 })
+
+describe('ensureFiles transport policy', () => {
+  it('refuses plain-HTTP downloads (client jar, asset index, repairs) except to loopback mirrors', async () => {
+    const before = server.requests.length
+    for (const url of ['http://piston-data.mojang.com/v1/objects/x/client.jar', 'ftp://example.com/x.jar', 'not a url']) {
+      // oxlint-disable-next-line no-await-in-loop -- one URL at a time
+      await expect(ensureFiles([{ path: join(root, 'x.jar'), urls: [url], sha1: 'a'.repeat(40), name: 'x.jar' }], { http })).rejects.toMatchObject({
+        code: 'EINSTALL_BAD_METADATA',
+      })
+    }
+    expect(server.requests.length).toBe(before)
+    expect(await exists(join(root, 'x.jar'))).toBe(false)
+  })
+})
+

@@ -1,4 +1,5 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { spawn, type ChildProcess } from 'node:child_process'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -452,5 +453,145 @@ describe('busy hooks', () => {
     h.game.current?.exit()
     await vi.waitFor(() => expect(h.launch.isActive(inst.id)).toBe(false))
     await expect(h.instances.rename(inst.id, 'Other')).resolves.toMatchObject({ name: 'Other' })
+  })
+
+  it('refuses to launch while a modpack operation or a version change writes into the instance, and undoes an interrupted commit first', async () => {
+    let changing = true
+    const recovered: string[] = []
+    let recoverError: Error | undefined
+    const h = await harness({
+      isChanging: () => changing,
+      recoverModpack: async (dir) => {
+        if (recoverError) throw recoverError
+        recovered.push(dir)
+      },
+    })
+    await writeVersion(modernJson('1.21.1'))
+    const inst = await h.instances.create({ name: 'Pack', runtime: { minecraft: '1.21.1' } })
+    await h.instances.update(inst.id, { versionId: '1.21.1' })
+    await expect(h.launch.launch(inst.id)).rejects.toMatchObject({ code: 'EBUSY' })
+    expect(h.calls).not.toContain('spawn')
+    expect(h.launch.isActive(inst.id)).toBe(false)
+
+    changing = false
+    recoverError = Object.assign(new Error('could not be undone'), { code: 'EMODPACK_INTERRUPTED' })
+    await expect(h.launch.launch(inst.id)).rejects.toMatchObject({ code: 'EMODPACK_INTERRUPTED' })
+    expect(h.calls).not.toContain('spawn')
+
+    recoverError = undefined
+    await h.launch.launch(inst.id)
+    expect(recovered).toEqual([h.instances.resolve(inst.id).dir])
+    h.game.current?.exit()
+    await vi.waitFor(() => expect(h.launch.isActive(inst.id)).toBe(false))
+  })
+})
+
+describe('launch arguments', () => {
+  it('passes a stable per-install client id, and never a code-injecting env variable', async () => {
+    const seen: { clientId?: string; env?: Record<string, string> }[] = []
+    const h = await harness({}, {
+      buildLaunchCommand: (async (_v: unknown, o: { auth: { clientId?: string }; env?: Record<string, string> }) => {
+        seen.push({ ...(o.auth.clientId ? { clientId: o.auth.clientId } : {}), ...(o.env ? { env: o.env } : {}) })
+        return { java: JAVA.path, args: [], wrapper: [], cwd: root, env: {}, secrets: [], warnings: [], classpath: [], features: {} }
+      }) as never,
+    })
+    h.deps.settings.value.game.env = { DYLD_INSERT_LIBRARIES: '/tmp/x.dylib', MESA_DEBUG: '1' }
+    await writeVersion(modernJson('1.21.1'))
+    const inst = await h.instances.create({ name: 'Cid', runtime: { minecraft: '1.21.1' } })
+    await h.instances.update(inst.id, { versionId: '1.21.1' })
+    await h.launch.launch(inst.id)
+    h.game.current?.exit()
+    await vi.waitFor(() => expect(h.launch.isActive(inst.id)).toBe(false))
+
+    const first = seen[0]?.clientId
+    expect(first).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
+    expect(seen[0]?.env).toEqual({ MESA_DEBUG: '1' })
+    expect(JSON.parse(await readFile(layout.clientId, 'utf8')).clientId).toBe(first)
+
+    // A new runtime (and the next launch) passes the same id.
+    const h2 = await harness({}, { buildLaunchCommand: h.deps.game?.buildLaunchCommand as never })
+    await h2.launch.launch(inst.id)
+    h2.game.current?.exit()
+    expect(seen[1]?.clientId).toBe(first)
+  })
+})
+
+describe('games that outlive the runtime', () => {
+  let children: ChildProcess[] = []
+  afterEach(() => {
+    for (const c of children) {
+      try {
+        process.kill(-(c.pid as number), 'SIGKILL')
+      } catch {
+        // Gone.
+      }
+    }
+    children = []
+  })
+
+  /** A detached real process standing in for the game; its `exited` never settles (the old runtime "dies"). */
+  const realGame = (): GameApi['launch'] =>
+    (async () => {
+      const child = spawn('/bin/sleep', ['30'], { detached: true, stdio: 'ignore' })
+      children.push(child)
+      await new Promise((r) => child.once('spawn', r))
+      return { pid: child.pid as number, startedAt: Date.now(), ready: false, exited: new Promise<LaunchResult>(() => {}), kill: async () => new Promise<LaunchResult>(() => {}) }
+    }) as never
+
+  it('records running games and adopts the live ones after a restart; they count as running and can be stopped', async () => {
+    const h = await harness({}, { launch: realGame() })
+    await writeVersion(modernJson('1.21.1'))
+    const inst = await h.instances.create({ name: 'Survivor', runtime: { minecraft: '1.21.1' } })
+    await h.instances.update(inst.id, { versionId: '1.21.1' })
+    const started = await h.launch.launch(inst.id)
+    await h.launch.flushRunning()
+    const saved = JSON.parse(await readFile(layout.runningGames, 'utf8')).games
+    expect(saved).toMatchObject([{ instanceId: inst.id, pid: started.pid, versionId: '1.21.1' }])
+    expect(saved[0].processStart).toMatch(/\d{2}:\d{2}:\d{2}/)
+
+    // The runtime restarts: a fresh manager knows nothing until it adopts.
+    events = []
+    const h2 = await harness({ adoptPollMs: 20 })
+    h2.instances.addHooks({ isBusy: (id) => h2.launch.isActive(id) })
+    expect(h2.launch.isActive(inst.id)).toBe(false)
+    expect(await h2.launch.adoptRunning()).toBe(1)
+    expect(h2.launch.isActive(inst.id)).toBe(true)
+    expect(h2.launch.isVersionRunning('1.21.1')).toBe(true)
+    expect(h2.launch.listRunning()).toMatchObject([{ instanceId: inst.id, phase: 'running', pid: started.pid }])
+    expect(h2.instances.get(inst.id).activity).toBe('running')
+    expect(states(inst.id).at(-1)).toMatchObject({ state: 'running', pid: started.pid })
+    await expect(h2.instances.delete(inst.id)).rejects.toMatchObject({ code: 'EBUSY' })
+    await expect(h2.launch.launch(inst.id)).rejects.toMatchObject({ code: 'EBUSY' })
+
+    await h2.launch.kill(inst.id)
+    await vi.waitFor(() => expect(states(inst.id).at(-1)).toMatchObject({ state: 'exited', killed: true }), { timeout: 5_000 })
+    expect(h2.launch.isActive(inst.id)).toBe(false)
+    expect(h2.instances.get(inst.id).activity).toBe('idle')
+    await h2.launch.flushRunning()
+    expect(JSON.parse(await readFile(layout.runningGames, 'utf8')).games).toEqual([])
+  })
+
+  it('drops records whose pid is gone or was reused by another process (start time differs)', async () => {
+    const h = await harness({}, { launch: realGame() })
+    await writeVersion(modernJson('1.21.1'))
+    const inst = await h.instances.create({ name: 'Reused', runtime: { minecraft: '1.21.1' } })
+    const other = await h.instances.create({ name: 'Gone', runtime: { minecraft: '1.21.1' } })
+    await h.instances.update(inst.id, { versionId: '1.21.1' })
+    const started = await h.launch.launch(inst.id)
+    await h.launch.flushRunning()
+    const file = JSON.parse(await readFile(layout.runningGames, 'utf8'))
+    // Same pid, but the process started at another time: a reused pid, not our game.
+    file.games[0].processStart = 'Thu Jan  1 00:00:00 1970'
+    file.games.push({ instanceId: other.id, launchId: 'x', pid: 999_999, startedAt: 1, processStart: 'Thu Jan  1 00:00:00 1970' })
+    await writeFile(layout.runningGames, JSON.stringify(file))
+
+    const h2 = await harness()
+    expect(await h2.launch.adoptRunning()).toBe(0)
+    expect(h2.launch.isActive(inst.id)).toBe(false)
+    expect(h2.launch.isActive(other.id)).toBe(false)
+    await h2.launch.flushRunning()
+    expect(JSON.parse(await readFile(layout.runningGames, 'utf8')).games).toEqual([])
+    // The unrelated process was never signalled.
+    expect(() => process.kill(started.pid, 0)).not.toThrow()
   })
 })

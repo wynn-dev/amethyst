@@ -113,6 +113,7 @@ async function main(): Promise<void> {
     clearAuthSession: async () => {},
     openExternal: async () => {},
     setLauncherHidden: async (hidden) => out(`host: launcher ${hidden ? 'hidden' : 'shown'}`),
+    setProxy: async () => {},
   }
 
   const instances = new InstanceManager({ layout, emit, host, tasks, fetchBytes })

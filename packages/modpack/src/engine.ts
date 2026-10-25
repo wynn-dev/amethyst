@@ -24,7 +24,7 @@ import type { TaskContext } from '@amethyst/task'
 import { openZip, type ZipReader } from '@amethyst/zip'
 import { isAbortError, messageOf, ModpackError, throwIfAborted } from './errors'
 import { lockPath, writeModpackLock, type ModpackLock, type ModpackLockFile } from './lock'
-import { pathKey, resolveInside } from './paths'
+import { Containment, pathKey, resolveInside } from './paths'
 import type { FileHashes, FileOrigin, ManualDownload, ModpackManifest, ResolvedFile, ResolvedModpack } from './types'
 import { compareHashes, fileTimestamp, hashFor, hashLocal, lstatOrUndefined, pruneEmptyParents, readJsonFile, writeJsonAtomic, type LocalHashes } from './util'
 
@@ -236,11 +236,114 @@ export async function cleanupOperation(instanceDir: string, id: string): Promise
   await pruneEmptyParents(instanceDir, path.join(instanceDir, ...STAGING.split('/'), 'x'))
 }
 
+/** The backup folder a record names, only when it is one of ours (the record is read from disk). */
+function recordBackupDir(instanceDir: string, r: OperationRecord): string | undefined {
+  if (typeof r.backupDir !== 'string' || !/^\.amethyst\/backups\/[\w.-]+$/.test(r.backupDir)) return undefined
+  return resolveInside(instanceDir, r.backupDir)
+}
+
+/** Caller holds the instance mutex. */
+async function recoverUnlocked(instanceDir: string): Promise<string[]> {
+  const recovered: string[] = []
+  for (const op of await listIncompleteOperations(instanceDir)) {
+    if (op.state !== 'committing') continue
+    const r = await readRecord(instanceDir, op.id)
+    if (!r) continue
+    await track(async () => {
+      const backupDir = recordBackupDir(instanceDir, r)
+      const journal = backupDir ? await readJournal(backupDir) : undefined
+      if (backupDir && journal && journal.rolledBackAt === undefined) {
+        // Every file was moved and the journal written; the lock may or may not be the new one.
+        // Undo through the journal, which also puts the previous lock back.
+        await rollbackJournal(instanceDir, backupDir, journal)
+        await cleanupOperation(instanceDir, op.id)
+        return
+      }
+      if (backupDir && Array.isArray(r.changes)) {
+        await rollbackFromDisk(instanceDir, workspacePath(instanceDir, op.id), backupDir, r.changes)
+        for (const c of r.changes) await pruneEmptyParents(instanceDir, resolveInside(instanceDir, c.path))
+        await rm(backupDir, { recursive: true, force: true })
+      }
+      // Nothing is committed any more: Resume re-stages what the rollback consumed.
+      await writeRecord(instanceDir, { ...r, state: 'staging', backupDir: undefined, changes: undefined })
+    })
+    recovered.push(op.id)
+  }
+  return recovered
+}
+
+/**
+ * Undo every commit that was interrupted (the runtime crashed or was killed while files were
+ * being moved), so the instance is exactly as it was before that operation. Call before the
+ * first use of an instance. Interrupted operations stay listed as `staging` (resumable); a
+ * commit that had already finished moving files is undone through its backup journal.
+ *
+ * @returns the ids of the operations that were rolled back.
+ */
+export function recoverInterruptedCommits(instanceDir: string): Promise<string[]> {
+  const dir = path.resolve(instanceDir)
+  return withInstanceMutex(dir, () => recoverUnlocked(dir))
+}
+
+/**
+ * Start (or resume) an operation: refuse a `.amethyst/` that links out of the instance, roll
+ * back any interrupted commit first (a `committing` record is the only way to undo that commit,
+ * so it is never overwritten), then write the `staging` record. Caller holds the instance mutex.
+ */
+export async function beginOperation(instanceDir: string, record: OperationRecord): Promise<void> {
+  await new Containment(instanceDir).check(recordPath(instanceDir, record.id))
+  await recoverUnlocked(instanceDir)
+  const existing = await readRecord(instanceDir, record.id)
+  if (existing?.state === 'committing') throw new ModpackError('ECOMMIT', 'An interrupted modpack change of this instance could not be undone; nothing was changed')
+  await writeRecord(instanceDir, record)
+}
+
 // ---------------------------------------------------------------------------------------------
-// Mutex and instance identity
+// Mutex, critical sections and instance identity
 // ---------------------------------------------------------------------------------------------
 
 const mutexes = new Map<string, Promise<unknown>>()
+const critical = new Set<Promise<void>>()
+
+/**
+ * Enter a critical section (moving files in or out of an instance) that shutdown waits for.
+ * Call the returned function when it ends.
+ */
+export function enterCritical(): () => void {
+  const { promise, resolve } = Promise.withResolvers<void>()
+  critical.add(promise)
+  return () => {
+    critical.delete(promise)
+    resolve()
+  }
+}
+
+/** Run `fn` as a critical section ({@link enterCritical}). */
+export async function track<T>(fn: () => Promise<T>): Promise<T> {
+  const leave = enterCritical()
+  try {
+    return await fn()
+  } finally {
+    leave()
+  }
+}
+
+/**
+ * Wait until no commit, rollback or recovery is moving files, at most `timeoutMs`. Resolves true
+ * when everything finished. A section cut off anyway is undone by {@link recoverInterruptedCommits}.
+ */
+export async function waitForCommits(timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  while (critical.size > 0) {
+    const left = deadline - Date.now()
+    if (left <= 0) return false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    // oxlint-disable-next-line no-await-in-loop -- sections may start while waiting
+    await Promise.race([Promise.all(critical), new Promise((r) => (timer = setTimeout(r, left)))])
+    clearTimeout(timer)
+  }
+  return true
+}
 
 /** Run `fn` while holding the per-instance modpack mutex (in-process). Calls queue in order. */
 export async function withInstanceMutex<T>(instanceDir: string, fn: () => Promise<T>): Promise<T> {
@@ -332,6 +435,7 @@ export async function stageTargets(
     if (isAbortError(e)) throw e
     failed.push({ path: t.path, reason: typeof e === 'string' ? e : messageOf(e) })
   }
+  await new Containment(instanceDir).check(path.join(workspace, 'files'))
   await mkdir(path.join(workspace, 'files'), { recursive: true })
 
   // 1. Archive entries, grouped per archive so each zip is opened once.
@@ -525,8 +629,9 @@ export async function newBackupDir(instanceDir: string): Promise<string> {
  * exists was placed, so the target is removed; a backed-up file is moved back.
  */
 async function rollbackFromDisk(instanceDir: string, workspace: string, backupDir: string, changes: readonly PlannedChange[]): Promise<void> {
+  const guard = new Containment(instanceDir)
   for (const c of changes.toReversed()) {
-    const target = resolveInside(instanceDir, c.path)
+    const target = await guard.resolve(c.path)
     const backup = resolveInside(backupDir, c.path)
     if (c.action === 'place') {
       const stagedGone = !(await lstatOrUndefined(stagedPath(workspace, c.path)))
@@ -557,6 +662,18 @@ export async function commitChanges(
   const backupDir = path.join(instanceDir, ...backupRel.split('/'))
   const backedUp: string[] = []
   let done = 0
+  // Nothing may be written through a folder that links out of the instance (a symlinked mods/).
+  const guard = new Containment(instanceDir)
+  try {
+    for (const c of changes) {
+      await guard.check(resolveInside(instanceDir, c.path))
+      await guard.check(resolveInside(backupDir, c.path))
+    }
+  } catch (e) {
+    const record = await readRecord(instanceDir, opId)
+    if (record) await writeRecord(instanceDir, { ...record, state: 'staging', backupDir: undefined, changes: undefined })
+    throw e
+  }
   try {
     for (const c of changes) {
       await hooks?.beforeCommitFile?.(c.path)
@@ -607,6 +724,11 @@ export async function writeJournal(backupDir: string, journal: BackupJournal): P
   await writeJsonAtomic(path.join(backupDir, 'backup.json'), journal)
 }
 
+async function readJournal(backupDir: string): Promise<BackupJournal | undefined> {
+  const journal = (await readJsonFile(path.join(backupDir, 'backup.json')).catch(() => undefined)) as BackupJournal | undefined
+  return journal && journal.schemaVersion === 1 && Array.isArray(journal.changes) ? journal : undefined
+}
+
 /** Result of {@link rollbackModpackOperation}. */
 export interface RollbackResult {
   /** Paths restored from the backup. */
@@ -627,46 +749,55 @@ export interface RollbackResult {
 export async function rollbackModpackOperation(instanceDir: string, backupId: string, options: { signal?: AbortSignal } = {}): Promise<RollbackResult> {
   return withInstanceMutex(instanceDir, async () => {
     const backupDir = resolveInside(path.join(instanceDir, ...BACKUPS.split('/')), backupId)
-    const journal = (await readJsonFile(path.join(backupDir, 'backup.json')).catch(() => undefined)) as BackupJournal | undefined
-    if (!journal || journal.schemaVersion !== 1 || !Array.isArray(journal.changes)) {
-      throw new ModpackError('EINVALID_ARGUMENT', `No modpack backup named ${backupId}`)
-    }
-    const result: RollbackResult = { restored: [], removed: [], displaced: [] }
-    for (const c of journal.changes.toReversed()) {
-      throwIfAborted(options.signal)
-      const target = resolveInside(instanceDir, c.path)
-      if (c.action === 'place') {
-        const st = await lstatOrUndefined(target)
-        if (st) {
-          const unchanged = st.isFile() && c.placedSha1 !== undefined && (await hashLocal(target, {}, options.signal)).sha1 === c.placedSha1
-          if (unchanged) {
-            await rm(target, { force: true })
-            result.removed.push(c.path)
-          } else {
-            const aside = resolveInside(path.join(backupDir, 'rollback-displaced'), c.path)
-            await mkdir(path.dirname(aside), { recursive: true })
-            await rm(aside, { recursive: true, force: true })
-            await rename(target, aside)
-            result.displaced.push(c.path)
-          }
-        }
-      }
-      if (c.hadPrevious) {
-        const backup = resolveInside(backupDir, c.path)
-        if (await lstatOrUndefined(backup)) {
-          await mkdir(path.dirname(target), { recursive: true })
-          await cp(backup, target, { recursive: true, force: true })
-          result.restored.push(c.path)
-        }
-      } else {
-        await pruneEmptyParents(instanceDir, target)
-      }
-    }
-    if (journal.previousLock) await writeModpackLock(instanceDir, journal.previousLock)
-    else await rm(lockPath(instanceDir), { force: true })
-    await writeJournal(backupDir, { ...journal, rolledBackAt: Date.now() })
-    return result
+    const journal = await readJournal(backupDir)
+    if (!journal) throw new ModpackError('EINVALID_ARGUMENT', `No modpack backup named ${backupId}`)
+    // A second restore would take what the user did since for the pack's files.
+    if (journal.rolledBackAt !== undefined) throw new ModpackError('EALREADY_ROLLED_BACK', `The backup ${backupId} was already restored`)
+    return track(() => rollbackJournal(instanceDir, backupDir, journal, options.signal))
   })
+}
+
+/** Reverse a journal and mark it rolled back. Never deletes a set-aside file. Caller holds the mutex. */
+async function rollbackJournal(instanceDir: string, backupDir: string, journal: BackupJournal, signal?: AbortSignal): Promise<RollbackResult> {
+  const guard = new Containment(instanceDir)
+  // Check every target first, so a refusal leaves the instance as it is.
+  for (const c of journal.changes) await guard.check(resolveInside(instanceDir, c.path))
+  let displacedRoot = path.join(backupDir, 'rollback-displaced')
+  for (let n = 2; await lstatOrUndefined(displacedRoot); n++) displacedRoot = path.join(backupDir, `rollback-displaced-${n}`)
+  const result: RollbackResult = { restored: [], removed: [], displaced: [] }
+  for (const c of journal.changes.toReversed()) {
+    throwIfAborted(signal)
+    const target = resolveInside(instanceDir, c.path)
+    if (c.action === 'place') {
+      const st = await lstatOrUndefined(target)
+      if (st) {
+        const unchanged = st.isFile() && c.placedSha1 !== undefined && (await hashLocal(target, {}, signal)).sha1 === c.placedSha1
+        if (unchanged) {
+          await rm(target, { force: true })
+          result.removed.push(c.path)
+        } else {
+          const aside = resolveInside(displacedRoot, c.path)
+          await mkdir(path.dirname(aside), { recursive: true })
+          await rename(target, aside)
+          result.displaced.push(c.path)
+        }
+      }
+    }
+    if (c.hadPrevious) {
+      const backup = resolveInside(backupDir, c.path)
+      if (await lstatOrUndefined(backup)) {
+        await mkdir(path.dirname(target), { recursive: true })
+        await cp(backup, target, { recursive: true, force: true })
+        result.restored.push(c.path)
+      }
+    } else {
+      await pruneEmptyParents(instanceDir, target)
+    }
+  }
+  if (journal.previousLock) await writeModpackLock(instanceDir, journal.previousLock)
+  else await rm(lockPath(instanceDir), { force: true })
+  await writeJournal(backupDir, { ...journal, rolledBackAt: Date.now() })
+  return result
 }
 
 // ---------------------------------------------------------------------------------------------

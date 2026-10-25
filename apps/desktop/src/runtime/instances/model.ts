@@ -6,6 +6,7 @@
 import path from 'node:path'
 import { sanitizeFileName } from '@amethyst/content'
 import type { AutoJoinServer, InstanceOverrides, InstancePatch, InstanceRuntime, InstanceUpstream, LoaderKind } from '@shared/services'
+import { isUnsafeEnvKey } from '../util/env'
 import { AppError, invalid } from '../util/errors'
 import { asRecord, isRecord, readBool, readInt, readOneOf, readString, readStringArray, readStringRecord } from '../util/parse'
 
@@ -114,16 +115,26 @@ const argList = (v: unknown) => {
 }
 const command = (v: unknown) => (typeof v === 'string' && v.length <= 4096 && !v.includes('\0') ? v : undefined)
 
+const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/
+
+/**
+ * An override env. Keys that inject code ({@link isUnsafeEnvKey}: `DYLD_*`, `JAVA_TOOL_OPTIONS`…)
+ * make it invalid; `lenient` (reading a file) drops just those keys instead.
+ */
+function readEnv(v: unknown, lenient: boolean): Record<string, string> | undefined {
+  const r = readStringRecord(v)
+  if (!r || !Object.keys(r).every((k) => ENV_KEY.test(k))) return undefined
+  if (lenient) return Object.fromEntries(Object.entries(r).filter(([k]) => !isUnsafeEnvKey(k)))
+  return Object.keys(r).some(isUnsafeEnvKey) ? undefined : r
+}
+
 /** Validators for each override; `undefined` means invalid. */
 const OVERRIDES: { [K in keyof InstanceOverrides]-?: (v: unknown) => InstanceOverrides[K] | undefined } = {
   javaPath: (v) => (typeof v === 'string' && path.isAbsolute(v) && !v.includes('\0') ? v : undefined),
   memory: readMemory,
   jvmArgs: argList,
   gameArgs: argList,
-  env: (v) => {
-    const r = readStringRecord(v)
-    return r && Object.keys(r).every((k) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) ? r : undefined
-  },
+  env: (v) => readEnv(v, false),
   wrapperCommand: command,
   preLaunchCommand: command,
   window: readWindow,
@@ -137,10 +148,52 @@ export function parseOverrides(raw: unknown): InstanceOverrides {
   const o = asRecord(raw)
   const out: Record<string, unknown> = {}
   for (const [k, read] of Object.entries(OVERRIDES)) {
-    const v = (read as (x: unknown) => unknown)(o[k])
+    const v = k === 'env' ? readEnv(o[k], true) : (read as (x: unknown) => unknown)(o[k])
     if (v !== undefined) out[k] = v
   }
   return out as InstanceOverrides
+}
+
+/** JVM arguments an imported folder may keep: heap sizes, plain `-XX` flags and simple `-D` switches. */
+const SAFE_IMPORTED_JVM_ARG = [/^-X(?:mx|ms|ss|mn)\d+[kKmMgGtT]?$/, /^-XX:[+-][A-Za-z0-9]+$/, /^-XX:[A-Za-z0-9]+=[\w.+-]+$/, /^-D[\w.-]+=(?:true|false|\d+)$/]
+/** `-XX:<name>=…` options that run commands or read and write files. */
+const UNSAFE_XX_NAME = /error|outofmemory|file|path|flags|command|agent|options|log|dump|dir/i
+
+function isSafeImportedJvmArg(arg: string): boolean {
+  if (!SAFE_IMPORTED_JVM_ARG.some((re) => re.test(arg))) return false
+  const xx = /^-XX:([A-Za-z0-9]+)=/.exec(arg)
+  return !xx || !UNSAFE_XX_NAME.test(xx[1] as string)
+}
+
+const clip = (s: string) => (s.length > 120 ? `${s.slice(0, 117)}…` : s)
+
+/**
+ * Launch overrides of an imported folder (`.amethyst/instance.json` written elsewhere) that are
+ * removed on import, because they run code: the pre-launch and wrapper commands, a pinned Java
+ * binary, JVM arguments other than heap/GC flags (`-javaagent`, `-XX:OnError`, `@argfiles`…)
+ * and code-injecting env keys (already dropped when the file is read). `removed` describes each
+ * removed setting for the import review.
+ */
+export function sanitizeImportedOverrides(overrides: InstanceOverrides, rawEnv?: unknown): { overrides: InstanceOverrides; removed: string[] } {
+  const out: InstanceOverrides = { ...overrides }
+  const removed: string[] = []
+  if (out.preLaunchCommand?.trim()) removed.push(`Pre-launch command: ${clip(out.preLaunchCommand.trim())}`)
+  if (out.wrapperCommand?.trim()) removed.push(`Wrapper command: ${clip(out.wrapperCommand.trim())}`)
+  if (out.javaPath) removed.push(`Java path: ${clip(out.javaPath)}`)
+  delete out.preLaunchCommand
+  delete out.wrapperCommand
+  delete out.javaPath
+  if (out.jvmArgs) {
+    const drop = out.jvmArgs.filter((a) => !isSafeImportedJvmArg(a))
+    if (drop.length > 0) {
+      removed.push(`Java arguments: ${clip(drop.join(' '))}`)
+      out.jvmArgs = out.jvmArgs.filter(isSafeImportedJvmArg)
+    }
+  }
+  if (out.env) out.env = Object.fromEntries(Object.entries(out.env).filter(([k]) => !isUnsafeEnvKey(k)))
+  const unsafeEnv = isRecord(rawEnv) ? Object.keys(rawEnv).filter(isUnsafeEnvKey) : []
+  if (unsafeEnv.length > 0) removed.push(`Environment variables: ${clip(unsafeEnv.join(', '))}`)
+  return { overrides: out, removed }
 }
 
 /** Validate an upstream; invalid ids are dropped. */
@@ -301,6 +354,10 @@ export function applyInstancePatch(config: InstanceConfig, patch: InstancePatch)
       if (v === null) {
         delete (next.overrides as Record<string, unknown>)[k]
         continue
+      }
+      if (k === 'env' && isRecord(v)) {
+        const unsafe = Object.keys(v).filter(isUnsafeEnvKey)
+        if (unsafe.length > 0) throw invalid(`${unsafe.join(', ')} cannot be set: it changes how Java or macOS loads code`, { keys: [`overrides.${k}`] })
       }
       const value = read(v)
       if (value === undefined) throw invalid(`Invalid value for ${k}`, { keys: [`overrides.${k}`] })

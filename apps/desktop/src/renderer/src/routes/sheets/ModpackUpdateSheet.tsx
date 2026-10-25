@@ -9,7 +9,7 @@ import { useMarketVersions } from '@/data/market'
 import { reportUpdateResult, useModpackUi, useModpackUpdateCheck } from '@/data/modpacks'
 import { useRunningTask } from '@/data/tasks'
 import { api } from '@/lib/rpc'
-import { errorMessage, reportError } from '@/lib/error-text'
+import { errorMessage, toastError } from '@/lib/error-messages'
 
 const ACTION: Record<ModpackChangeRow['action'], string> = { add: 'Added', update: 'Updated', remove: 'Removed', conflict: 'Conflict' }
 const CONFLICT: Record<NonNullable<ModpackChangeRow['conflict']>, string> = {
@@ -55,7 +55,7 @@ export default function ModpackUpdateSheet() {
       setPlan(await api.modpacks.planUpdate(instanceId, selected))
       setSkip(new Set())
     } catch (e) {
-      reportError('Couldn’t prepare the update', e)
+      toastError(e, 'Couldn’t prepare the update')
     } finally {
       setPlanning(false)
     }
@@ -68,7 +68,7 @@ export default function ModpackUpdateSheet() {
       reportUpdateResult(instanceId, target.name, plan.target.name, r)
       close()
     } catch (e) {
-      reportError(`Couldn’t update “${target.name}”`, e)
+      toastError(e, `Couldn’t update “${target.name}”`)
     } finally {
       setApplying(false)
     }

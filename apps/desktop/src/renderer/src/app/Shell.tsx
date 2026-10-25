@@ -5,7 +5,7 @@ import { api, subscribe } from '@/lib/rpc'
 import { ToastViewport, cn } from '@/ui'
 import { toast } from '@/ui/toast-store'
 import { reconcileFirstRun } from '@/data/firstRun'
-import { getInstanceSummary, instanceKeys } from '@/data/instances'
+import { getInstanceSummary, instanceKeys, useInstances } from '@/data/instances'
 import { setLaunchEventHandler } from '@/data/launch'
 import { queryClient } from '@/data/query'
 import { settingsKey, useAppSettings, useSettingsLoaded, type AppSettings } from '@/data/settings'
@@ -86,6 +86,21 @@ function useWindowReactions() {
   }, [updater])
 }
 
+/** Tells main which instance is selected, so the native Instance menu is enabled to match (B13). */
+function useMenuContext() {
+  const instanceId = useRouterState({ select: (s) => s.matches.map((m) => (m.params as { instanceId?: string }).instanceId).find(Boolean) })
+  const { data } = useInstances()
+  const inst = instanceId ? data?.find((i) => i.id === instanceId) : undefined
+  // Only the fields the menu shows, so list refreshes that change nothing else don't call main.
+  const id = inst?.id
+  const kind = inst?.state.kind
+  const pinned = inst?.pinned ?? false
+  useEffect(() => {
+    const instance = id && kind ? { id, canPlay: kind === 'idle', canStop: kind === 'running' || kind === 'launching', pinned } : null
+    void api.window.setMenuContext({ instance }).catch(() => {})
+  }, [id, kind, pinned])
+}
+
 /** Sends the window to first run when the runtime says consent was never asked (fresh data root). */
 function useFirstRunGate() {
   const loaded = useSettingsLoaded()
@@ -103,6 +118,7 @@ export function Shell() {
   // Native menu bar → the same command dispatcher the palette uses.
   useEffect(() => subscribe('menu:command', ({ command, arg }) => runCommand(command, arg)), [])
   useWindowReactions()
+  useMenuContext()
   useFirstRunGate()
 
   return (

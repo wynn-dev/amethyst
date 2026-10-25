@@ -15,7 +15,7 @@ import { existsSync, mkdtempSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { BrowserWindow, nativeTheme, type WebContents } from 'electron'
+import { BrowserWindow, Menu, nativeTheme, type WebContents } from 'electron'
 import type { MenuCommandEvent } from '@shared/menu'
 import { showHiddenWindows } from './runtime'
 import { openSettingsWindow, sendMenuCommand } from './windows'
@@ -167,6 +167,17 @@ export async function runE2eUi(main: BrowserWindow, dir: string, onDone: (ok: bo
 
   const menu = (command: MenuCommandEvent['command'], arg?: string) => sendMenuCommand(contents, { command, ...(arg ? { arg } : {}) })
 
+  /** Wait until the native menu item `id` matches (the menu follows the selection and accounts). */
+  async function waitMenu(what: string, id: string, check: (item: Electron.MenuItem) => boolean, timeoutMs = 10_000) {
+    const end = Date.now() + timeoutMs
+    while (Date.now() < end) {
+      const item = Menu.getApplicationMenu()?.getMenuItemById(id)
+      if (item && check(item)) return
+      await sleep(100)
+    }
+    throw new Error(`timed out waiting for the menu: ${what}`)
+  }
+
   let ok = true
   try {
     await inject()
@@ -215,6 +226,9 @@ export async function runE2eUi(main: BrowserWindow, dir: string, onDone: (ok: bo
       const accounts = await invoke<{ name: string; kind: string; selected: boolean }[]>('accounts', 'list')
       if (!accounts.some((a) => a.name === 'Tester' && a.kind === 'offline' && a.selected)) throw new Error(`account not added: ${JSON.stringify(accounts)}`)
       facts.account = accounts[0]
+      const account = accounts.find((a) => a.name === 'Tester') as { id?: string } | undefined
+      await waitMenu('the account as a checked radio item', `account:${account?.id}`, (i) => i.type === 'radio' && i.checked && i.label.startsWith('Tester'))
+      await waitMenu('Play disabled without a selected instance', 'instance.play', (i) => !i.enabled)
       await capture('account-added')
     })
 
@@ -251,6 +265,8 @@ export async function runE2eUi(main: BrowserWindow, dir: string, onDone: (ok: bo
         await sleep(1000)
       }
       await waitFor('the Play button', `window.__e2e.find('button[aria-keyshortcuts="Meta+Enter"]', 'Play', true)`, 30_000)
+      await waitMenu('Play enabled for the selected instance', 'instance.play', (i) => i.enabled)
+      await waitMenu('Stop disabled while idle', 'instance.stop', (i) => !i.enabled)
       await capture('instance-installed')
     })
 
@@ -272,6 +288,8 @@ export async function runE2eUi(main: BrowserWindow, dir: string, onDone: (ok: bo
       if (!game?.ready || !game.pid) throw new Error(`no running game: ${JSON.stringify(running)}`)
       process.kill(game.pid, 0)
       facts.game = { pid: game.pid, ready: game.ready }
+      await waitMenu('Stop enabled while running', 'instance.stop', (i) => i.enabled)
+      await waitMenu('Play disabled while running', 'instance.play', (i) => !i.enabled)
       // Give the game a moment to draw, then grab the screen (needs Screen Recording access; best effort).
       await sleep(4000)
       await new Promise<void>((r) => execFile('/usr/sbin/screencapture', ['-x', join(dir, 'game-window-screen.png')], () => r()))

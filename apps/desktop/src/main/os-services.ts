@@ -1,7 +1,9 @@
 import { stat } from 'node:fs/promises'
 import path from 'node:path'
 import { app, BrowserWindow, dialog, nativeTheme, shell, type OpenDialogOptions as ElectronOpenDialogOptions } from 'electron'
+import type { MenuContext } from '@shared/menu'
 import type { DialogService, FileFilter, ShellService, ThemeMode, WindowService } from '@shared/services'
+import { callingWebContents } from './rpc/server'
 import { showHiddenWindows } from './runtime'
 
 /**
@@ -32,7 +34,7 @@ export function queueDialogAnswer(answer: string[] | string | null): void {
   e2eAnswers.push(answer)
 }
 
-export function windowService(mainWindow: () => BrowserWindow | undefined): WindowService {
+export function windowService(mainWindow: () => BrowserWindow | undefined, onMenuContext: (context: MenuContext) => void): WindowService {
   return {
     async setThemeSource(theme: ThemeMode) {
       if (theme !== 'light' && theme !== 'dark' && theme !== 'system') throw fail('EINVALID_ARGUMENT', 'Unknown theme')
@@ -54,6 +56,12 @@ export function windowService(mainWindow: () => BrowserWindow | undefined): Wind
       if (win.isMinimized()) win.restore()
       win.show()
       win.focus()
+    },
+    async setMenuContext(context) {
+      // Only the main window has a selection; other windows' (stale or hostile) calls are ignored.
+      const caller = callingWebContents()
+      if (!caller || caller !== mainWindow()?.webContents) return
+      onMenuContext(context)
     },
   }
 }

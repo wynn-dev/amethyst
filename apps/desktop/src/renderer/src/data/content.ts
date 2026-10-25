@@ -4,7 +4,7 @@ import { create } from 'zustand'
 import type { Events } from '@shared/events'
 import type { BackupRow, ResourceKind, ResourcePage, ResourceQuery, ResourceRow } from '@shared/services'
 import { api, subscribe } from '@/lib/rpc'
-import { reportBulk, reportError } from '@/lib/error-text'
+import { reportBulk, toastError } from '@/lib/error-messages'
 import { revealInFinder } from '@/lib/files'
 import { toast } from '@/ui/toast-store'
 import { queryClient } from './query'
@@ -312,7 +312,7 @@ export async function setResourcesEnabled(instanceId: string, kind: ResourceKind
   } catch (e) {
     void queryClient.invalidateQueries({ queryKey: resourceKeys.pages(instanceId, kind) })
     if ((e as { code?: string }).code === 'ENO_SHADER_LOADER') throw e
-    reportError(`Couldn’t ${enabled ? 'enable' : 'disable'} ${ids.length === 1 ? KIND_NOUN[kind][0] : KIND_NOUN[kind][1]}`, e)
+    toastError(e, `Couldn’t ${enabled ? 'enable' : 'disable'} ${ids.length === 1 ? KIND_NOUN[kind][0] : KIND_NOUN[kind][1]}`)
     return false
   }
 }
@@ -340,14 +340,14 @@ export async function trashResources(instanceId: string, kind: ResourceKind, ids
                 api.resources
                   .undoDelete(instanceId, token)
                   .then((r) => reportBulk(r, { done: (n) => `Restored ${n === 1 && label ? `“${label}”` : noun(kind, n)}`, failed: 'Couldn’t restore the files' }))
-                  .catch((e: unknown) => reportError('Couldn’t undo', e))
+                  .catch((e: unknown) => toastError(e, 'Couldn’t undo'))
               },
             },
           ]
         : [],
     })
   } catch (e) {
-    reportError('Couldn’t move to the Trash', e)
+    toastError(e, 'Couldn’t move to the Trash')
   }
 }
 
@@ -358,7 +358,7 @@ export async function addResourceFiles(instanceId: string, kind: ResourceKind, p
     reportBulk(result, { done: (n) => `Added ${noun(kind, n)}`, failed: `Couldn’t add ${paths.length === 1 ? 'the file' : 'the files'}` })
     return result.done
   } catch (e) {
-    reportError(`Couldn’t add ${KIND_NOUN[kind][1]}`, e)
+    toastError(e, `Couldn’t add ${KIND_NOUN[kind][1]}`)
     return []
   }
 }
@@ -368,7 +368,7 @@ export async function addFromInstance(instanceId: string, kind: ResourceKind, fr
     const result = await api.resources.addFromInstance(instanceId, kind, fromInstanceId, ids)
     reportBulk(result, { done: (n) => `Added ${noun(kind, n)}`, failed: `Couldn’t add the ${KIND_NOUN[kind][1]}` })
   } catch (e) {
-    reportError(`Couldn’t add the ${KIND_NOUN[kind][1]}`, e)
+    toastError(e, `Couldn’t add the ${KIND_NOUN[kind][1]}`)
   }
 }
 
@@ -382,7 +382,7 @@ export async function setPackOrder(instanceId: string, ids: string[]): Promise<v
     await api.resources.setPackOrder(instanceId, ids)
   } catch (e) {
     void queryClient.invalidateQueries({ queryKey: resourceKeys.kind(instanceId, 'resourcepacks') })
-    reportError('Couldn’t change the load order', e)
+    toastError(e, 'Couldn’t change the load order')
   }
 }
 
@@ -393,7 +393,7 @@ export async function createBackup(instanceId: string, worldId: string, name: st
     toast({ kind: 'success', title: `Backed up “${name}”` })
     return backup
   } catch (e) {
-    reportError(`Couldn’t back up “${name}”`, e)
+    toastError(e, `Couldn’t back up “${name}”`)
     return undefined
   }
 }
@@ -405,7 +405,7 @@ export async function restoreBackup(instanceId: string, backup: BackupRow, mode:
     toast({ kind: 'success', title: mode === 'copy' ? `Restored “${backup.worldName}” as a copy` : `Restored “${backup.worldName}”`, message: mode === 'replace' ? 'The previous version is in the Trash.' : undefined })
     return worldId
   } catch (e) {
-    reportError('Couldn’t restore the backup', e)
+    toastError(e, 'Couldn’t restore the backup')
     return undefined
   }
 }
@@ -416,7 +416,7 @@ export async function deleteBackup(instanceId: string, backup: BackupRow): Promi
     void queryClient.invalidateQueries({ queryKey: [...resourceKeys.kind(instanceId, 'saves'), 'backups'] })
     toast({ kind: 'success', title: 'Deleted the backup' })
   } catch (e) {
-    reportError('Couldn’t delete the backup', e)
+    toastError(e, 'Couldn’t delete the backup')
   }
 }
 
@@ -426,7 +426,7 @@ export async function pruneBackups(instanceId: string): Promise<void> {
     void queryClient.invalidateQueries({ queryKey: [...resourceKeys.kind(instanceId, 'saves'), 'backups'] })
     toast({ kind: 'success', title: removed.length ? `Deleted ${removed.length} old automatic backup${removed.length === 1 ? '' : 's'}` : 'No old automatic backups to clean up' })
   } catch (e) {
-    reportError('Couldn’t clean up backups', e)
+    toastError(e, 'Couldn’t clean up backups')
   }
 }
 
@@ -435,6 +435,6 @@ export async function exportWorld(instanceId: string, worldId: string, name: str
     const result = await api.resources.exportWorld(instanceId, worldId, output)
     toast({ kind: 'success', title: `Exported “${name}”`, actions: [{ label: 'Show in Finder', onClick: () => revealInFinder(result.path) }] })
   } catch (e) {
-    reportError(`Couldn’t export “${name}”`, e)
+    toastError(e, `Couldn’t export “${name}”`)
   }
 }

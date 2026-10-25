@@ -1891,6 +1891,8 @@ export interface WindowService {
   setDockBadge(text: string): Promise<void>
   /** Show and focus the main window (e.g. when the game crashed while the launcher was hidden). */
   focusMain(): Promise<void>
+  /** The main window's selection, so the native Instance menu can be enabled to match (B13). Other windows' calls are ignored. */
+  setMenuContext(context: import('./menu').MenuContext): Promise<void>
 }
 
 /** Finder and browser integration (main process). Paths must be absolute. */

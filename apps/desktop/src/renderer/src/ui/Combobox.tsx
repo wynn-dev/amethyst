@@ -136,7 +136,7 @@ export function Combobox({
             disabled={disabled}
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => setOpen((o) => !o)}
-            className="absolute top-[3px] right-[3px] flex size-4 items-center justify-center rounded-[4px] bg-accent text-on-accent"
+            className="absolute top-[3px] right-[3px] flex size-4 items-center justify-center rounded-[4px] bg-accent-fill text-on-accent"
           >
             <ChevronDown className="size-3" strokeWidth={2.5} />
           </button>
@@ -174,7 +174,7 @@ export function Combobox({
                       style={{ position: 'absolute', top: 0, left: 0, right: 0, height: ROW, transform: `translateY(${row.start}px)` }}
                       className={cn(
                         'group flex items-center gap-2 rounded-[4px] pr-2.5 pl-[22px] text-body',
-                        'data-[active]:bg-accent data-[active]:text-on-accent aria-disabled:text-label-3',
+                        'data-[active]:bg-accent-fill data-[active]:text-on-accent aria-disabled:text-label-3',
                       )}
                     >
                       {o.value === value && <Check className="absolute left-1.5 size-3.5" strokeWidth={2.5} />}

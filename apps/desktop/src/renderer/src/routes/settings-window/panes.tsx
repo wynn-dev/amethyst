@@ -4,7 +4,7 @@ import { Compass } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { Alert, Button, EmptyState, Form, FormSection, Spinner, Stepper, Switch, TextField, toast } from '@/ui'
 import { api } from '@/lib/rpc'
-import { errorDetails, errorText, toastError } from '@/lib/error-messages'
+import { errorDetails, errorMessage, toastError } from '@/lib/error-messages'
 import { openDataFolder, openExternal } from '@/app/commands'
 import { copyToClipboard } from '@/app/clipboard'
 import { SETTINGS_PANES, type SettingsPaneId } from '@/app/settings-index'
@@ -101,7 +101,7 @@ function GeneralPane() {
         <SettingRow
           row="data-location"
           label="Data location"
-          description={<span className="selectable font-mono text-small">{paths.data?.dataRoot ?? (paths.isError ? errorText(paths.error) : '…')}</span>}
+          description={<span className="selectable font-mono text-small">{paths.data?.dataRoot ?? (paths.isError ? errorMessage(paths.error) : '…')}</span>}
         >
           <Button disabled={!paths.data} onClick={() => void openDataFolder('dataRoot')}>
             Show in Finder
@@ -168,7 +168,7 @@ async function patchSettingsQuiet(patch: Parameters<typeof patchSettings>[0]): P
     return undefined
   } catch (e) {
     const keys = errorDetails(e).keys
-    return Array.isArray(keys) && keys.length ? 'That address isn’t valid. Use scheme://host:port.' : errorText(e)
+    return Array.isArray(keys) && keys.length ? 'That address isn’t valid. Use scheme://host:port.' : errorMessage(e)
   }
 }
 

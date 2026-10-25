@@ -177,7 +177,7 @@ export function PaletteBody({ onClose, instancesOverride }: { onClose: () => voi
                 data-index={i}
                 onMouseMove={() => setActive(i)}
                 onClick={() => perform(r.item.run)}
-                className={cn('group flex h-9 items-center gap-2.5 rounded-lg px-2.5', i === active && 'bg-accent text-on-accent')}
+                className={cn('group flex h-9 items-center gap-2.5 rounded-lg px-2.5', i === active && 'bg-accent-fill text-on-accent')}
               >
                 <ItemIcon item={r.item} active={i === active} />
                 <span className="min-w-0 flex-1 truncate text-body">

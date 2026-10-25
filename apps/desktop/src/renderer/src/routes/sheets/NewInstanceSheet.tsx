@@ -3,7 +3,7 @@ import { ChevronRight, Compass, FileArchive, FolderOpen, Link2, SlidersHorizonta
 import type { ImportCandidate, InstanceOverrides, InstanceRuntime, LoaderKind as RuntimeLoader } from '@shared/services'
 import { Badge, Banner, Button, Checkbox, Combobox, Segmented, Select, Sheet, Spinner, Stepper, Switch, TextField, cn, type ComboboxOption } from '@/ui'
 import { api } from '@/lib/rpc'
-import { errorText, toastError } from '@/lib/error-messages'
+import { errorMessage, toastError } from '@/lib/error-messages'
 import { createInstance, loaderName, useInstances } from '@/data/instances'
 import { useJavaRuntimes } from '@/data/java'
 import { useGameVersions, useLoaderVersions } from '@/data/versions'
@@ -268,7 +268,7 @@ function useCustomForm(): { valid: boolean; busy: boolean; create: () => void; e
           className="relative rounded-[12px] outline-none focus-visible:ring-[3px] focus-visible:ring-[color-mix(in_srgb,var(--accent)_55%,transparent)]"
         >
           <BlockIcon hue={(effectiveName.length * 37) % 360} label={effectiveName} size={48} />
-          {icon && <span className="absolute -right-1 -bottom-1 rounded-full bg-accent px-1 text-caption font-semibold text-on-accent">✓</span>}
+          {icon && <span className="absolute -right-1 -bottom-1 rounded-full bg-accent-fill px-1 text-caption font-semibold text-on-accent">✓</span>}
         </button>
         <TextField label="Name" placeholder={placeholder} value={name} onChange={(e) => setName(e.target.value)} error={nameError} className="flex-1" autoFocus />
       </div>
@@ -277,7 +277,7 @@ function useCustomForm(): { valid: boolean; busy: boolean; create: () => void; e
         <h3 id="ni-version" className="text-body font-semibold">
           Version
         </h3>
-        {versions.isError && <Banner tone="error" title="Couldn’t load the version list">{errorText(versions.error)}</Banner>}
+        {versions.isError && <Banner tone="error" title="Couldn’t load the version list">{errorMessage(versions.error)}</Banner>}
         <div className="grid grid-cols-[120px_1fr] items-center gap-x-3 gap-y-3">
           <span className="text-right text-body text-label-2">Minecraft</span>
           <div className="flex items-center gap-3">
@@ -323,7 +323,7 @@ function useCustomForm(): { valid: boolean; busy: boolean; create: () => void; e
                   <Spinner size={12} /> Loading versions…
                 </span>
               ) : loaderQueries[loader].isError ? (
-                <p className="text-small text-red">{errorText(loaderQueries[loader].error)}</p>
+                <p className="text-small text-red">{errorMessage(loaderQueries[loader].error)}</p>
               ) : (
                 <Select
                   aria-label={`${loaderName(loader)} version`}

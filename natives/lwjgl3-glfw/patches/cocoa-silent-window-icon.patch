@@ -1,0 +1,30 @@
+Amethyst: make glfwSetWindowIcon a silent no-op on macOS again.
+
+macOS windows have no icon of their own (the Dock shows the application's icon), so GLFW has
+never done anything here on Cocoa. Up to GLFW 3.3 the call returned silently. Upstream commit
+9a87c2a4 ("Add feature available/implemented errors", GLFW 3.4 development) made it report
+GLFW_FEATURE_UNAVAILABLE (65548), "Cocoa: Regular windows do not have icons on macOS".
+LWJGL 3.3.1 is built from that development branch.
+
+Minecraft 1.13 to 1.18 were made for LWJGL 3.1/3.2 (GLFW 3.2/3.3). On an arm64 JVM they run on
+LWJGL 3.3.1 instead, the first LWJGL with arm64 macOS natives. They call glfwSetWindowIcon right
+after creating the window, while their start-up GLFW error callback still treats any error as
+fatal. The game then stops with "GLFW error 65548: Cocoa: Regular windows do not have icons on
+macOS" and never opens a window.
+
+The argument checks in glfwSetWindowIcon (window.c) are unchanged.
+
+--- a/src/cocoa_window.m
++++ b/src/cocoa_window.m
+@@ -990,8 +990,9 @@
+ void _glfwSetWindowIconCocoa(_GLFWwindow* window,
+                              int count, const GLFWimage* images)
+ {
+-    _glfwInputError(GLFW_FEATURE_UNAVAILABLE,
+-                    "Cocoa: Regular windows do not have icons on macOS");
++    // Amethyst: regular windows have no icon on macOS. Do nothing and report nothing, as GLFW
++    // 3.3 did: Minecraft 1.13-1.18 treat any GLFW error during window creation as fatal, and
++    // they call glfwSetWindowIcon then.
+ }
+
+ void _glfwGetWindowPosCocoa(_GLFWwindow* window, int* xpos, int* ypos)

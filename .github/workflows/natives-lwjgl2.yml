@@ -4,7 +4,8 @@
 # The app pins one release's manifest.json (sha256 + size per jar). Releases made here are
 # immutable inputs of shipped app builds: nothing may delete or overwrite them. In particular the
 # nightly app workflow, which replaces the `nightly` release on every push, must only ever touch
-# the `nightly` tag.
+# the `nightly` tag. They are pre-releases so that they never show as the repository's "Latest"
+# release.
 name: Natives (LWJGL 2, arm64)
 
 on:
@@ -89,5 +90,6 @@ jobs:
               --title "$NATIVES_TAG" \
               --notes-file "$RUNNER_TEMP/notes.md" \
               --target "$GITHUB_SHA" \
+              --prerelease \
               --latest=false
           fi

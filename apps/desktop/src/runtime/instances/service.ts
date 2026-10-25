@@ -337,6 +337,11 @@ export class InstanceManager {
     return this.#detail(this.#entry(id))
   }
 
+  /** True when an instance with this id is in the index (in any state). */
+  has(id: string): boolean {
+    return typeof id === 'string' && this.#entries.has(id)
+  }
+
   /** A usable instance, for other services. Rejects missing and broken ones with `EINSTANCE_UNAVAILABLE`. */
   resolve(id: string): ResolvedInstance {
     const e = this.#entry(id)
@@ -809,7 +814,7 @@ export class InstanceManager {
 }
 
 /** The RPC facade. */
-export function instancesService(manager: InstanceManager): InstancesService {
+export function instancesService(manager: InstanceManager): Omit<InstancesService, 'getLayout' | 'setPinned' | 'createFolder' | 'updateFolder' | 'deleteFolder' | 'moveToFolder'> {
   return {
     list: async () => manager.list(),
     get: async (id) => manager.get(id),

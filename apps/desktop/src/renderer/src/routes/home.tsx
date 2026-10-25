@@ -2,21 +2,29 @@ import { Link } from '@tanstack/react-router'
 import { ChevronRight, Clock, Compass, FolderInput, Package, Play, Plus, Square, Timer } from 'lucide-react'
 import { Badge, Button, EmptyState, IconButton, Skeleton, ToolbarTitle } from '@/ui'
 import { useInstanceActions, useInstances, versionLabel } from '@/data/instances'
-import { useAccounts, useHomeUpdates } from '@/data/misc'
+import { useAccounts } from '@/data/accounts'
+import { useHomeUpdates } from '@/data/home'
+import { STEP_LABELS } from '@/data/launch'
+import { useInstanceTask } from '@/data/tasks'
 import type { InstanceSummary } from '@/data/types'
 import { PageToolbar } from '@/app/PageToolbar'
 import { QueryError } from '@/app/RouteStates'
-import { notYetAvailable, runCommand } from '@/app/commands'
+import { openInstance, runCommand } from '@/app/commands'
 import { useUi } from '@/app/ui-store'
-import { BlockIcon, PlayerHead, formatDuration, formatRelative } from '@/app/visuals'
+import { BlockIcon, formatDuration, formatRelative } from '@/app/visuals'
+import { SkinHead } from '@/app/skin/SkinHead'
 import { InstanceStateIndicator } from '@/app/AppSidebar'
 
 /** Home (B3.1): continue playing, recent instances, updates. No dashboard grid. */
 export function HomePage() {
   const instances = useInstances()
   const list = instances.data ?? []
-  const recent = list.filter((i) => i.lastPlayedAt).toSorted((a, b) => (b.lastPlayedAt ?? 0) - (a.lastPlayedAt ?? 0))
-  const hero = recent[0]
+  const played = list.filter((i) => i.lastPlayedAt).toSorted((a, b) => (b.lastPlayedAt ?? 0) - (a.lastPlayedAt ?? 0))
+  const fresh = list.filter((i) => !i.lastPlayedAt).toSorted((a, b) => b.createdAt - a.createdAt)
+  // Never-played instances still get a hero and a card, newest first.
+  const ordered = [...played, ...fresh]
+  const hero = ordered[0]
+  const cards = ordered.slice(1, 9)
 
   return (
     <>
@@ -31,14 +39,16 @@ export function HomePage() {
         ) : (
           <div className="mx-auto flex max-w-[1040px] flex-col gap-8 px-8 pt-6 pb-10">
             {hero && <ContinuePlaying inst={hero} />}
-            <section aria-labelledby="recent-h">
-              <SectionHeader id="recent-h" title="Recent Instances" />
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3">
-                {recent.slice(hero ? 1 : 0, (hero ? 1 : 0) + 8).map((i) => (
-                  <InstanceCard key={i.id} inst={i} />
-                ))}
-              </div>
-            </section>
+            {cards.length > 0 && (
+              <section aria-labelledby="recent-h">
+                <SectionHeader id="recent-h" title={played.length > 1 ? 'Recent Instances' : 'Your Instances'} />
+                <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3">
+                  {cards.map((i) => (
+                    <InstanceCard key={i.id} inst={i} />
+                  ))}
+                </div>
+              </section>
+            )}
             <Updates />
           </div>
         )}
@@ -61,6 +71,7 @@ function SectionHeader({ id, title, action }: { id: string; title: string; actio
 function PlayButton({ inst, size = 'lg' }: { inst: InstanceSummary; size?: 'lg' | 'xl' | 'md' }) {
   const actions = useInstanceActions()
   const set = useUi((s) => s.set)
+  const progress = useInstanceTask(inst.state.kind === 'installing' ? inst.id : undefined)
   switch (inst.state.kind) {
     case 'running':
       return (
@@ -70,14 +81,20 @@ function PlayButton({ inst, size = 'lg' }: { inst: InstanceSummary; size?: 'lg' 
       )
     case 'launching':
       return (
-        <Button size={size} onClick={() => actions.cancel(inst)}>
-          Launching…
+        <Button size={size} onClick={() => actions.cancel(inst)} title="Click to cancel">
+          {inst.state.step ? `${STEP_LABELS[inst.state.step]}…` : 'Launching…'}
         </Button>
       )
     case 'installing':
       return (
-        <Button size={size} onClick={() => set({ activity: true })}>
-          Installing {Math.round(inst.state.progress * 100)}%
+        <Button size={size} className="tabular" onClick={() => set({ activity: true })}>
+          {progress === undefined ? 'Installing…' : `Installing ${Math.round(progress * 100)}%`}
+        </Button>
+      )
+    case 'problem':
+      return (
+        <Button size={size} onClick={() => openInstance(inst.id, 'overview')}>
+          Show Problem
         </Button>
       )
     default:
@@ -94,7 +111,7 @@ function ContinuePlaying({ inst }: { inst: InstanceSummary }) {
   const account = accounts.find((a) => a.active)
   return (
     <section aria-label="Continue playing" className="relative overflow-hidden rounded-2xl shadow-card">
-      {/* TODO(wire): use the instance's latest screenshot as the hero image when one exists. */}
+      {/* The contract has no screenshot listing yet; the hero uses the instance's colour. */}
       <div
         className="absolute inset-0"
         style={{
@@ -103,7 +120,7 @@ function ContinuePlaying({ inst }: { inst: InstanceSummary }) {
       />
       <div className="absolute inset-0 bg-linear-to-r from-black/35 to-transparent" />
       <div className="relative flex min-h-[200px] flex-col justify-end gap-4 p-6 text-white">
-        <p className="text-small font-semibold tracking-[0.06em] text-white/70 uppercase">Continue Playing</p>
+        <p className="text-small font-semibold tracking-[0.06em] text-white/70 uppercase">{inst.lastPlayedAt ? 'Continue Playing' : 'Ready to Play'}</p>
         <div className="flex items-center gap-4">
           <BlockIcon hue={inst.iconHue} label={inst.name} src={inst.iconUrl} size={64} className="shadow-lg" />
           <div className="min-w-0">
@@ -115,9 +132,11 @@ function ContinuePlaying({ inst }: { inst: InstanceSummary }) {
                   <Clock className="size-3.5" /> {formatRelative(inst.lastPlayedAt)}
                 </span>
               )}
-              <span className="flex items-center gap-1">
-                <Timer className="size-3.5" /> {formatDuration(inst.playTimeMs)} played
-              </span>
+              {inst.playTimeMs > 0 && (
+                <span className="flex items-center gap-1">
+                  <Timer className="size-3.5" /> {formatDuration(inst.playTimeMs)} played
+                </span>
+              )}
             </p>
           </div>
         </div>
@@ -126,13 +145,17 @@ function ContinuePlaying({ inst }: { inst: InstanceSummary }) {
           <Link
             to="/instances/$instanceId/overview"
             params={{ instanceId: inst.id }}
+            onClick={(e) => {
+              e.preventDefault()
+              openInstance(inst.id, 'overview')
+            }}
             className="flex h-9 items-center rounded-lg bg-white/15 px-4 text-title3 font-medium backdrop-blur-md hover:bg-white/25"
           >
             Open
           </Link>
           {account && (
             <span className="ml-auto flex items-center gap-2 rounded-full bg-black/25 py-1 pr-3 pl-1 text-callout backdrop-blur-md">
-              <PlayerHead hue={account.hue} size={20} /> Playing as {account.name}
+              <SkinHead skin={account.skinUrl} hue={account.hue} size={20} /> Playing as {account.name}
             </span>
           )}
         </div>
@@ -226,7 +249,7 @@ function FirstInstance() {
           <Button size="lg" onClick={() => runCommand('file.importModpack')}>
             Import Modpack…
           </Button>
-          <Button size="lg" icon={<FolderInput />} onClick={() => notYetAvailable('Add Existing Folder')}>
+          <Button size="lg" icon={<FolderInput />} onClick={() => set({ newInstance: true, newInstanceSource: 'folder' })}>
             Add Existing Folder…
           </Button>
           <Link to="/discover" search={{ type: 'modpack' }} className="flex h-7 items-center gap-1.5 rounded-[7px] px-3.5 text-body font-medium text-accent hover:bg-accent-soft">

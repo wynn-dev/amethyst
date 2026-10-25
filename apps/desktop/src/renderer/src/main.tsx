@@ -5,18 +5,21 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { TooltipProvider } from '@/ui'
 import { queryClient } from '@/data/query'
 import { useAppearanceSync } from '@/data/appearance'
+import { installEventBridge } from '@/data/events'
 import { applyTheme, readCachedTheme } from '@/lib/theme'
 import { router } from '@/app/router'
 import { installErrorReporting } from './lib/errors'
 import './styles.css'
 
 installErrorReporting()
+// Runtime and main-process events → cache invalidation and live stores (once per window).
+if (window.amethyst) installEventBridge()
 
 // Paint the first frame with the last known theme; settings replace it once they arrive.
 const cachedTheme = readCachedTheme()
 if (cachedTheme) applyTheme(cachedTheme)
 
-/** Applies the theme from settings to this window, and follows changes. */
+/** Applies the colour scheme and accent to this window and to the native chrome. */
 function AppearanceSync() {
   useAppearanceSync()
   return null

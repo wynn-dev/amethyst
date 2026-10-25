@@ -85,7 +85,7 @@ describe('skin editor', () => {
 
   it('explains offline accounts and offers no capes', () => {
     renderEditor(account({ kind: 'offline', id: 'offline:1', skin: null, capes: [] }))
-    expect(screen.getByText('Skins can only be uploaded for Microsoft accounts')).toBeTruthy()
+    expect(screen.getByText('Only shown in Amethyst; the game uses the default skin for offline accounts.')).toBeTruthy()
     expect(screen.getByText('Capes need a Microsoft account.')).toBeTruthy()
     expect(screen.queryByRole('radiogroup', { name: 'Cape' })).toBeNull()
   })

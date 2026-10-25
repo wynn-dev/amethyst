@@ -28,6 +28,12 @@ afterEach(async () => {
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c6360000002000154a24f5d0000000049454e44ae426082', 'hex')
 
 describe('settings schema', () => {
+  it('defaults to a translucent (vibrancy) sidebar, which can be turned off', () => {
+    expect(defaultSettings().appearance.vibrancy).toBe(true)
+    expect(parseSettings({ appearance: { vibrancy: 'yes' } }).appearance.vibrancy).toBe(true)
+    expect(applySettingsPatch(defaultSettings(), { appearance: { vibrancy: false } }).next.appearance.vibrancy).toBe(false)
+  })
+
   it('falls back per field when loading', () => {
     const s = parseSettings({
       appearance: { theme: 'neon', accentColor: '#ABC', blur: { card: 99, sidebar: 3 } },

@@ -1,30 +1,24 @@
-import { useEffect } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import type { AccountDetail, SkinSource } from '@shared/services'
-import { api, subscribe } from '@/lib/rpc'
+import { api } from '@/lib/rpc'
 import type { SkinModel } from '@/lib/skin'
 import { queryClient } from './query'
+import { accountKeys } from './accounts'
 
 /**
  * Skins and capes of one account (B9), for the skin editor. The account list itself (`['accounts']`)
  * belongs to the accounts data; mutations here invalidate it so avatars update everywhere.
  */
-export const accountDetailKey = (id: string) => ['accounts', 'detail', id] as const
+export const accountDetailKey = accountKeys.detail
 
+/** One account with its skins and capes; refreshed by `accounts:changed` through the event bridge. */
 export function useAccountDetail(id: string) {
-  useEffect(
-    () =>
-      subscribe('accounts:changed', ({ ids, removed }) => {
-        if (ids.includes(id) || removed.includes(id)) queryClient.invalidateQueries({ queryKey: accountDetailKey(id) })
-      }),
-    [id],
-  )
   return useQuery({ queryKey: accountDetailKey(id), queryFn: () => api.accounts.get(id) })
 }
 
 function settle(detail: AccountDetail) {
   queryClient.setQueryData(accountDetailKey(detail.id), detail)
-  queryClient.invalidateQueries({ queryKey: ['accounts'], exact: true })
+  queryClient.invalidateQueries({ queryKey: accountKeys.list })
 }
 
 /**

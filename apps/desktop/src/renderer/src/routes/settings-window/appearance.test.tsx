@@ -4,7 +4,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { QueryClientProvider } from '@tanstack/react-query'
 import type { AppearanceSettings } from '@shared/services'
 import type { Bridge } from '@shared/rpc'
-import { DEFAULT_APPEARANCE, mergeAppearance, useAppearanceSync } from '@/data/appearance'
+import { DEFAULT_APPEARANCE, useAppearanceSync } from '@/data/appearance'
+import { DEFAULT_APP_SETTINGS } from '@/data/settings'
 import { queryClient } from '@/data/query'
 import { AppearanceQuickRows } from './appearance'
 
@@ -14,10 +15,10 @@ const invoke = vi.fn<Bridge['invoke']>()
 beforeEach(() => {
   appearance = structuredClone(DEFAULT_APPEARANCE)
   invoke.mockImplementation(async (service, method, args) => {
-    if (service === 'settings' && method === 'get') return { ok: true, value: { appearance } }
+    if (service === 'settings' && method === 'get') return { ok: true, value: { ...DEFAULT_APP_SETTINGS, appearance } }
     if (service === 'settings' && method === 'patch') {
-      appearance = mergeAppearance(appearance, (args[0] as { appearance: Partial<AppearanceSettings> }).appearance)
-      return { ok: true, value: { appearance } }
+      appearance = { ...appearance, ...(args[0] as { appearance: Partial<AppearanceSettings> }).appearance }
+      return { ok: true, value: { ...DEFAULT_APP_SETTINGS, appearance } }
     }
     return { ok: false, error: { name: 'Error', message: 'unexpected call' } }
   })
@@ -51,7 +52,7 @@ const accentVar = () => document.documentElement.style.getPropertyValue('--accen
 describe('accent colour', () => {
   it('applies a swatch live through --accent and saves it to settings', async () => {
     renderRows()
-    await waitFor(() => expect(queryClient.getQueryData(['appearance'])).toBeDefined())
+    await waitFor(() => expect(queryClient.getQueryData(['settings'])).toBeDefined())
     await waitFor(() => expect(accentVar()).toBe(''))
 
     await act(async () => fireEvent.click(screen.getByRole('radio', { name: 'Blue' })))
@@ -75,7 +76,7 @@ describe('accent colour', () => {
 
   it('reverts the preview when saving fails', async () => {
     renderRows()
-    await waitFor(() => expect(queryClient.getQueryData(['appearance'])).toBeDefined())
+    await waitFor(() => expect(queryClient.getQueryData(['settings'])).toBeDefined())
     invoke.mockImplementation(async () => ({ ok: false, error: { name: 'Error', message: 'disk full', code: 'EIO' } }))
     await act(async () => fireEvent.click(screen.getByRole('radio', { name: 'Green' })))
     await waitFor(() => expect(accentVar()).toBe(''))

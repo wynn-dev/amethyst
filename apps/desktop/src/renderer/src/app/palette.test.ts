@@ -1,8 +1,33 @@
+// @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest'
 import { fuzzyMatch, rank } from './fuzzy'
 import { buildPaletteItems, searchPalette, type PaletteContext } from './palette-items'
-import { fixtureInstances } from '@/data/fixtures'
-import { defaultSettings } from '@/data/settings'
+import { DEFAULT_APP_SETTINGS, toViewSettings } from '@/data/settings'
+import type { InstanceSummary } from '@/data/types'
+
+const HOUR = 3_600_000
+const NOW = 1_760_000_000_000
+const inst = (id: string, name: string, playedHoursAgo?: number): InstanceSummary => ({
+  id,
+  name,
+  iconHue: 120,
+  minecraft: '1.21.1',
+  loader: { kind: 'fabric', version: '0.16.5' },
+  pinned: false,
+  state: { kind: 'idle' },
+  ...(playedHoursAgo === undefined ? {} : { lastPlayedAt: NOW - playedHoursAgo * HOUR }),
+  playTimeMs: 0,
+  createdAt: NOW - 1000 * HOUR,
+})
+const instances = [
+  inst('survival', 'Survival 1.21', 2),
+  inst('fabulously', 'Fabulously Optimized', 24),
+  inst('a', 'Alpha', 30),
+  inst('b', 'Beta', 40),
+  inst('c', 'Creative', 50),
+  inst('d', 'Delta', 60),
+  inst('never', 'Never Played'),
+]
 
 describe('fuzzyMatch', () => {
   it('matches subsequences and rejects out-of-order queries', () => {
@@ -25,7 +50,8 @@ describe('fuzzyMatch', () => {
 })
 
 describe('command palette search', () => {
-  const ctx: PaletteContext = { instances: fixtureInstances, currentInstanceId: 'survival', settings: defaultSettings }
+  const view = toViewSettings(DEFAULT_APP_SETTINGS)
+  const ctx: PaletteContext = { instances, currentInstanceId: 'survival', settings: { app: DEFAULT_APP_SETTINGS, view } }
   const items = buildPaletteItems(ctx)
 
   it('shows recent instances (most recent first) and suggestions for an empty query', () => {
@@ -55,7 +81,9 @@ describe('command palette search', () => {
 
   it('exposes settings toggles inline', () => {
     const streamer = searchPalette(items, 'streamer mode', ctx).find((r) => r.item.title === 'Streamer mode')
-    expect(streamer?.item.toggle).toEqual({ on: false, patch: { streamerMode: true } })
+    expect(streamer?.item.toggle).toEqual({ on: false, action: { settings: { general: { streamerMode: true } } } })
+    const usage = searchPalette(items, 'share usage', ctx).find((r) => r.item.title === 'Share usage data')
+    expect(usage?.item.toggle).toEqual({ on: false, action: { consent: { usage: true, crashes: false } } })
   })
 
   it('hides instance-only actions when no instance is selected', () => {

@@ -1,14 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDownToLine, ChevronDown, ChevronUp, Copy, FileText, FileWarning, FolderOpen, Radio, RotateCcw, Share, Trash2, XOctagon } from 'lucide-react'
-import { Badge, Button, Checkbox, EmptyState, IconButton, SearchField, SkeletonRows, Spinner, Switch, VirtualList, cn, toast, type VirtualListHandle } from '@/ui'
+import { useQuery } from '@tanstack/react-query'
+import { ArrowDownToLine, ChevronDown, ChevronUp, Copy, FileText, FileWarning, FolderOpen, Radio, RotateCcw, XOctagon } from 'lucide-react'
+import type { CrashReport } from '@shared/services'
+import { Badge, Button, Checkbox, EmptyState, IconButton, SearchField, Spinner, Switch, VirtualList, cn, type VirtualListHandle } from '@/ui'
+import { api } from '@/lib/rpc'
+import { toastError } from '@/lib/error-messages'
 import { QueryError } from '@/app/RouteStates'
-import { notYetAvailable, openInstance } from '@/app/commands'
+import { openInstance } from '@/app/commands'
+import { copyToClipboard } from '@/app/clipboard'
 import { findTargetRef } from '@/app/ui-store'
-import { formatBytes } from '@/app/visuals'
-import { instanceActions, useInstances } from '@/data/instances'
-import { useCrashReport, useLogFiles, useLogLines } from '@/data/misc'
-import type { LogFile, LogLevel, LogLine } from '@/data/types'
-import { copyText, useInstanceId } from './parts'
+import { formatDuration } from '@/app/visuals'
+import { instanceActions, useInstance, useInstances } from '@/data/instances'
+import { useLaunchEntry, type ExitInfo } from '@/data/launch'
+import { useGameLog } from '@/data/logs'
+import type { CrashSummary, LogLevel, LogLine } from '@/data/types'
+import { useInstanceId } from './parts'
 
 const LEVELS: { level: LogLevel; label: string }[] = [
   { level: 'info', label: 'Info' },
@@ -29,7 +35,7 @@ interface Row {
 }
 
 /** Collapses consecutive identical lines into one row with a ×N count. */
-export function collapse(lines: LogLine[]): Row[] {
+export function collapse(lines: readonly LogLine[]): Row[] {
   const out: Row[] = []
   for (const line of lines) {
     const prev = out[out.length - 1]
@@ -39,103 +45,110 @@ export function collapse(lines: LogLine[]): Row[] {
   return out
 }
 
-const dayFmt = new Intl.DateTimeFormat('en', { weekday: 'long', month: 'short', day: 'numeric' })
-function dayLabel(ts: number) {
-  const d = new Date(ts)
-  const today = new Date()
-  const y = new Date(today)
-  y.setDate(today.getDate() - 1)
-  if (d.toDateString() === today.toDateString()) return 'Today'
-  if (d.toDateString() === y.toDateString()) return 'Yesterday'
-  return dayFmt.format(d)
-}
+type View = 'session' | 'crash'
 
-/** Logs tab: live console and log/crash history (B3.3). */
+/** Logs tab: the live console (or the last session) and the crash report view (B3.3). */
 export default function LogsTab() {
   const id = useInstanceId()
-  const files = useLogFiles(id)
-  const [picked, setPicked] = useState<string | undefined>(undefined)
-  const list = useMemo(() => files.data ?? [], [files.data])
-  const fileId = picked && list.some((f) => f.id === picked) ? picked : list[0]?.id
-  const file = list.find((f) => f.id === fileId)
+  const log = useGameLog(id)
+  const launch = useLaunchEntry(id)
+  const exit = launch?.phase === 'exited' ? launch.exit : undefined
+  const crash = useQuery({
+    queryKey: ['crash', id, log.launchId, exit?.at ?? 0],
+    enabled: !!exit?.crashed || !!exit?.crashReportPath,
+    queryFn: async (): Promise<CrashReport | null> => {
+      try {
+        return await api.launch.openCrashReport(id)
+      } catch (e) {
+        if ((e as { code?: string }).code === 'ENOT_FOUND') return null
+        throw e
+      }
+    },
+  })
+  const hasCrash = !!exit?.crashed
+  // A new crash brings its report forward; a new run brings the live log forward.
+  const runKey = `${log.launchId}:${exit?.at ?? 0}`
+  const [pick, setPick] = useState<{ view: View; runKey: string }>()
+  const view: View = pick?.runKey === runKey ? pick.view : hasCrash ? 'crash' : 'session'
+  const setPicked = (v: View) => setPick({ view: v, runKey })
 
-  const groups = useMemo(() => {
-    const out: { label: string; files: LogFile[] }[] = []
-    for (const f of list) {
-      const label = f.kind === 'live' ? 'Running' : dayLabel(f.createdAt)
-      const g = out.find((x) => x.label === label)
-      if (g) g.files.push(f)
-      else out.push({ label, files: [f] })
-    }
-    return out
-  }, [list])
-
-  if (files.isError) return <QueryError error={files.error} onRetry={() => files.refetch()} what="logs" />
-
+  const sessionLabel = log.running ? 'Live' : log.launchId ? 'Last session' : 'Game output'
   return (
     <div className="flex min-h-0 flex-1">
-      <nav aria-label="Log files" className="flex w-[220px] shrink-0 flex-col overflow-y-auto border-r border-separator bg-window-2/60 px-2 py-2">
-        {files.isPending && <SkeletonRows rows={5} />}
-        {!files.isPending && list.length === 0 && <p className="px-2 py-3 text-small text-label-3">No logs yet. Launch the game to create one.</p>}
-        {groups.map((g) => (
-          <section key={g.label} aria-label={g.label} className="mb-2">
-            <h3 className="px-2 pt-1 pb-1 text-small font-semibold text-label-3">{g.label}</h3>
-            <ul className="flex flex-col gap-px">
-              {g.files.map((f) => (
-                <li key={f.id}>
-                  <button
-                    type="button"
-                    aria-current={f.id === fileId ? 'true' : undefined}
-                    onClick={() => setPicked(f.id)}
-                    className={cn(
-                      'flex w-full items-center gap-2 rounded-md px-2 py-1 text-left hover:bg-fill',
-                      f.id === fileId && 'bg-selection',
-                    )}
-                  >
-                    {f.kind === 'live' ? (
-                      <Radio className="size-4 shrink-0 text-green" />
-                    ) : f.kind === 'crash' ? (
-                      <FileWarning className="size-4 shrink-0 text-red" />
-                    ) : (
-                      <FileText className="size-4 shrink-0 text-label-2" />
-                    )}
-                    <span className="flex min-w-0 flex-col">
-                      <span className="truncate text-body">{f.kind === 'live' ? 'Live' : f.kind === 'crash' ? 'Crash report' : f.name}</span>
-                      <span className="truncate text-small text-label-2">
-                        {f.kind === 'live' ? 'Current session' : f.kind === 'crash' ? f.name.replace(/^crash-/, '').replace(/-client\.txt$/, '') : formatBytes(f.sizeBytes)}
-                      </span>
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </section>
-        ))}
+      <nav aria-label="Logs" className="flex w-[220px] shrink-0 flex-col overflow-y-auto border-r border-separator bg-window-2/60 px-2 py-2">
+        <h3 className="px-2 pt-1 pb-1 text-small font-semibold text-label-3">{log.running ? 'Running' : 'This session'}</h3>
+        <ul className="flex flex-col gap-px">
+          <li>
+            <NavButton current={view === 'session'} onClick={() => setPicked('session')} icon={log.running ? <Radio className="size-4 shrink-0 text-green" /> : <FileText className="size-4 shrink-0 text-label-2" />}>
+              <span className="truncate text-body">{sessionLabel}</span>
+              <span className="truncate text-small text-label-2">
+                {log.running ? 'Current session' : exit ? exitText(exit) : log.launchId ? 'Output of the last run' : 'Play to see output'}
+              </span>
+            </NavButton>
+          </li>
+          {hasCrash && (
+            <li>
+              <NavButton current={view === 'crash'} onClick={() => setPicked('crash')} icon={<FileWarning className="size-4 shrink-0 text-red" />}>
+                <span className="truncate text-body">Crash report</span>
+                <span className="truncate text-small text-label-2">{crash.data?.kind === 'jvm' ? 'Java crash log' : crash.data ? 'Minecraft crash report' : 'Crash summary'}</span>
+              </NavButton>
+            </li>
+          )}
+        </ul>
+        <p className="mt-auto px-2 pt-3 text-small text-label-3">Older logs are in the instance’s logs folder.</p>
       </nav>
       <div className="flex min-w-0 flex-1 flex-col">
-        {!file ? (
-          files.isPending ? null : <EmptyState icon={<FileText />} title="No log selected" />
-        ) : file.kind === 'crash' ? (
-          <CrashView key={file.id} instanceId={id} file={file} />
+        {view === 'crash' && hasCrash && exit ? (
+          <CrashView instanceId={id} exit={exit} report={crash.data} loading={crash.isPending && crash.fetchStatus !== 'idle'} error={crash.isError ? crash.error : undefined} retry={() => void crash.refetch()} />
         ) : (
-          <LogViewer key={file.id} instanceId={id} file={file} />
+          <LogViewer instanceId={id} key={log.launchId ?? 'none'} />
         )}
       </div>
     </div>
   )
 }
 
-function LogViewer({ instanceId, file }: { instanceId: string; file: LogFile }) {
-  const lines = useLogLines(instanceId, file.id)
+function exitText(exit: ExitInfo): string {
+  if (exit.killed) return 'Stopped'
+  if (exit.crashed) return `Crashed${exit.code !== null ? ` (code ${exit.code})` : ''}`
+  return `Exited${exit.code !== null ? ` (code ${exit.code})` : ''} after ${formatDuration(exit.durationMs)}`
+}
+
+function NavButton({ current, onClick, icon, children }: { current: boolean; onClick: () => void; icon: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      aria-current={current ? 'true' : undefined}
+      onClick={onClick}
+      className={cn('flex w-full items-center gap-2 rounded-md px-2 py-1 text-left hover:bg-fill', current && 'bg-selection')}
+    >
+      {icon}
+      <span className="flex min-w-0 flex-col">{children}</span>
+    </button>
+  )
+}
+
+async function revealLatestLog(instanceId: string) {
+  try {
+    const d = await api.instances.get(instanceId)
+    await api.shell.showItemInFolder(`${d.path}/logs/latest.log`).catch(() => api.shell.openFolder(d.path))
+  } catch (e) {
+    toastError(e, 'Couldn’t show the log in Finder')
+  }
+}
+
+function LogViewer({ instanceId }: { instanceId: string }) {
+  const log = useGameLog(instanceId)
+  const launch = useLaunchEntry(instanceId)
   const [query, setQuery] = useState('')
   const [levels, setLevels] = useState<Set<LogLevel>>(() => new Set(['info', 'warn', 'error']))
-  const [follow, setFollow] = useState(file.kind === 'live')
+  const [follow, setFollow] = useState(true)
   const [timestamps, setTimestamps] = useState(true)
   const [atBottom, setAtBottom] = useState(true)
   const [matchIndex, setMatchIndex] = useState(0)
   const list = useRef<VirtualListHandle>(null)
 
-  const rows = useMemo(() => collapse((lines.data ?? []).filter((l) => levels.has(l.level))), [lines.data, levels])
+  const rows = useMemo(() => collapse(log.rows.filter((l) => levels.has(l.level))), [log.rows, levels])
   const q = query.trim().toLowerCase()
   const matches = useMemo(() => (q ? rows.flatMap((r, i) => (r.line.text.toLowerCase().includes(q) || r.line.source.toLowerCase().includes(q) ? [i] : [])) : []), [rows, q])
   const current = matches.length ? Math.min(matchIndex, matches.length - 1) : -1
@@ -163,9 +176,10 @@ function LogViewer({ instanceId, file }: { instanceId: string; file: LogFile }) 
 
   const copyAll = () => {
     const text = rows.map((r) => `[${r.line.time}] [${r.line.thread}/${r.line.level.toUpperCase()}] (${r.line.source}) ${r.line.text}${r.count > 1 ? ` ×${r.count}` : ''}`).join('\n')
-    copyText(text, `Copied ${rows.length} lines`)
+    copyToClipboard(text, `Copied ${rows.length} lines`)
   }
 
+  const exit = launch?.phase === 'exited' && launch.launchId === log.launchId ? launch.exit : undefined
   return (
     <>
       <div className="flex h-11 shrink-0 items-center gap-2 border-b border-separator px-3">
@@ -210,40 +224,39 @@ function LogViewer({ instanceId, file }: { instanceId: string; file: LogFile }) 
           </label>
           <Checkbox checked={timestamps} onCheckedChange={setTimestamps} label="Time" />
           <span className="mx-1 h-5 w-px bg-separator" aria-hidden />
-          <IconButton label="Copy All" onClick={copyAll}>
+          <IconButton label="Copy All" disabled={!rows.length} onClick={copyAll}>
             <Copy />
           </IconButton>
-          <IconButton label="Reveal in Finder" onClick={() => notYetAvailable('Reveal in Finder')}>
+          <IconButton label="Reveal in Finder" onClick={() => void revealLatestLog(instanceId)}>
             <FolderOpen />
-          </IconButton>
-          <IconButton label="Share…" onClick={() => notYetAvailable('Sharing logs')}>
-            <Share />
-          </IconButton>
-          <IconButton label="Move to Trash" disabled={file.kind === 'live'} onClick={() => notYetAvailable('Moving logs to the Trash')}>
-            <Trash2 />
           </IconButton>
         </div>
       </div>
+      {log.dropped > 0 && <p className="shrink-0 border-b border-separator bg-fill px-3 py-1 text-small text-label-2">{log.dropped.toLocaleString()} earlier lines aren’t shown. The full log is in the logs folder.</p>}
       <div className="relative flex min-h-0 flex-1 flex-col bg-window">
-        {lines.isPending ? (
+        {log.loading && !log.rows.length ? (
           <div className="flex flex-1 items-center justify-center">
             <Spinner size={20} label="Loading log" />
           </div>
-        ) : lines.isError ? (
-          <QueryError error={lines.error} onRetry={() => lines.refetch()} what="this log" />
+        ) : log.error && !log.rows.length ? (
+          <QueryError error={log.error} onRetry={() => openInstance(instanceId, 'logs')} what="the log" />
         ) : rows.length === 0 ? (
-          <EmptyState title={lines.data?.length ? 'No lines at these levels' : file.kind === 'live' ? 'Waiting for output…' : 'This log is empty'} />
+          <EmptyState
+            icon={<FileText />}
+            title={log.rows.length ? 'No lines at these levels' : log.running ? 'Waiting for output…' : 'No output yet'}
+            description={log.rows.length || log.running ? undefined : 'Play this instance to see the game’s output here.'}
+          />
         ) : (
           <VirtualList
             ref={list}
             role="log"
-            aria-label={`${file.name} log`}
+            aria-label="Game log"
             items={rows}
             rowHeight={18}
             paddingY={6}
             followTail={follow}
             onAtBottomChange={setAtBottom}
-            getKey={(r) => String(r.line.n)}
+            getKey={(r) => r.line.id}
             className="selectable flex-1 font-mono text-callout"
             renderRow={(r, i) => <LogRow row={r} timestamps={timestamps} query={q} current={matches[current] === i} />}
           />
@@ -254,26 +267,33 @@ function LogViewer({ instanceId, file }: { instanceId: string; file: LogFile }) 
             icon={<ArrowDownToLine />}
             onClick={() => {
               list.current?.scrollToBottom()
-              if (file.kind === 'live') setFollow(true)
+              setFollow(true)
             }}
           >
             Jump to Bottom
           </Button>
         )}
       </div>
+      {exit && (
+        <p className={cn('shrink-0 border-t border-separator px-3 py-1.5 text-small', exit.crashed ? 'text-red' : 'text-label-2')} data-log-exit>
+          {exit.killed ? 'Stopped by you' : exit.crashed ? `Game crashed${exit.code !== null ? ` (code ${exit.code})` : ''}` : `Game exited${exit.code !== null ? ` (code ${exit.code})` : ''}`} after{' '}
+          {formatDuration(exit.durationMs)}
+        </p>
+      )}
     </>
   )
 }
 
 function LogRow({ row, timestamps, query, current }: { row: Row; timestamps: boolean; query: string; current: boolean }) {
   const s = levelStyle[row.line.level]
+  const continuation = row.line.id !== String(row.line.n)
   return (
     <div className={cn('flex h-[18px] items-center gap-2 px-3 leading-[18px] whitespace-pre', s.row, current && 'bg-[color-mix(in_srgb,var(--color-yellow)_30%,transparent)]')}>
-      {timestamps && <span className="shrink-0 text-label-3">{row.line.time}</span>}
-      <span className={cn('w-3 shrink-0 text-center', s.text)} aria-label={row.line.level}>
+      {timestamps && <span className={cn('shrink-0 text-label-3', continuation && 'invisible')}>{row.line.time}</span>}
+      <span className={cn('w-3 shrink-0 text-center', s.text, continuation && 'invisible')} aria-label={row.line.level}>
         {s.glyph}
       </span>
-      <span className="w-[112px] shrink-0 truncate text-label-3">{row.line.source}</span>
+      <span className={cn('w-[112px] shrink-0 truncate text-label-3', continuation && 'invisible')}>{row.line.source}</span>
       <span className={cn('min-w-0 truncate', row.line.level === 'error' ? 'text-red' : row.line.level === 'warn' ? 'text-orange' : 'text-label')}>
         <Mark text={row.line.text} query={query} />
       </span>
@@ -299,27 +319,39 @@ function Mark({ text, query }: { text: string; query: string }) {
   )
 }
 
-function CrashView({ instanceId, file }: { instanceId: string; file: LogFile }) {
-  const report = useCrashReport(instanceId, file.id)
+/** A heuristic headline and suspects from a crash report (best effort; the raw text is below). */
+export function summarizeCrash(text: string, exit: ExitInfo): CrashSummary {
+  const lines = text.split('\n')
+  const description = lines.find((l) => l.startsWith('Description:'))?.slice('Description:'.length).trim()
+  const exception = lines.find((l) => /^\S+(Exception|Error)(:|$)/.test(l.trim()))?.trim()
+  let headline = description ?? exception ?? ''
+  if (/OutOfMemoryError/.test(text)) headline = 'Out of memory. Give the game more memory in the instance’s Settings tab.'
+  else if (exit.nativeLoadError === 'architecture') headline = 'A native library was built for a different processor.'
+  else if (exit.nativeLoadError === 'unsatisfied-link') headline = 'A native library couldn’t be loaded.'
+  const suspects: CrashSummary['suspects'] = []
+  for (const m of text.matchAll(/(?:Mod ID|modid):?\s*'?([a-z0-9_-]{2,64})'?/gi)) {
+    const modId = m[1]!.toLowerCase()
+    if (!['minecraft', 'forge', 'neoforge', 'fabricloader', 'java'].includes(modId) && !suspects.some((s) => s.modId === modId)) suspects.push({ modId, name: modId })
+    if (suspects.length >= 3) break
+  }
+  return { exitCode: exit.code ?? -1, headline, suspects }
+}
+
+function CrashView({ instanceId, exit, report, loading, error, retry }: { instanceId: string; exit: ExitInfo; report: CrashReport | null | undefined; loading: boolean; error?: unknown; retry: () => void }) {
   const { data: instances } = useInstances()
+  const { data: detail } = useInstance(instanceId)
   const inst = instances?.find((i) => i.id === instanceId)
-  if (report.isPending)
-    return (
-      <div className="flex flex-1 items-center justify-center">
-        <Spinner size={20} label="Loading crash report" />
-      </div>
-    )
-  if (report.isError) return <QueryError error={report.error} onRetry={() => report.refetch()} what="the crash report" />
-  const { text, summary } = report.data
+  const text = report?.text ?? ''
+  const summary = summarizeCrash(text, exit)
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto" data-crash-view>
       <section aria-label="Crash summary" className="m-4 mb-0 rounded-xl bg-[color-mix(in_srgb,var(--color-red)_7%,transparent)] p-4 shadow-[inset_0_0_0_0.5px_color-mix(in_srgb,var(--color-red)_25%,transparent)]">
         <div className="flex items-start gap-3">
           <XOctagon className="mt-0.5 size-5 shrink-0 text-red" />
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <h2 className="text-title3 font-semibold">Minecraft crashed</h2>
-              <Badge tone="error">Exit code {summary.exitCode}</Badge>
+              {exit.code !== null && <Badge tone="error">Exit code {exit.code}</Badge>}
             </div>
             {summary.headline && <p className="mt-1 text-body">{summary.headline}</p>}
             {summary.suspects.length > 0 && (
@@ -336,16 +368,17 @@ function CrashView({ instanceId, file }: { instanceId: string; file: LogFile }) 
               </p>
             )}
             <div className="mt-3 flex flex-wrap gap-2">
-              <Button onClick={() => notYetAvailable('Opening the crash report')}>Open Crash Report</Button>
-              <Button
-                onClick={() => {
-                  navigator.clipboard?.writeText(text)
-                  toast({ kind: 'success', title: 'Copied crash report' })
-                }}
-              >
+              <Button disabled={!text} onClick={() => copyToClipboard(text, 'Copied crash report')}>
                 Copy Report
               </Button>
-              <Button onClick={() => notYetAvailable('Reveal in Finder')}>Reveal in Finder</Button>
+              <Button
+                disabled={!report?.path && !detail}
+                onClick={() =>
+                  void (report?.path ? api.shell.showItemInFolder(report.path) : detail ? api.shell.openFolder(detail.path) : Promise.resolve()).catch((e: unknown) => toastError(e, 'Couldn’t show it in Finder'))
+                }
+              >
+                Reveal in Finder
+              </Button>
               <Button variant="primary" icon={<RotateCcw />} disabled={!inst || inst.state.kind !== 'idle'} onClick={() => inst && instanceActions.launch(inst)}>
                 Relaunch
               </Button>
@@ -353,9 +386,20 @@ function CrashView({ instanceId, file }: { instanceId: string; file: LogFile }) 
           </div>
         </div>
       </section>
-      <pre className="selectable m-4 rounded-lg bg-surface p-3 font-mono text-callout leading-[18px] whitespace-pre-wrap text-label shadow-[inset_0_0_0_0.5px_var(--color-surface-border)]">
-        {text}
-      </pre>
+      {loading ? (
+        <div className="flex flex-1 items-center justify-center p-8">
+          <Spinner size={20} label="Loading crash report" />
+        </div>
+      ) : error ? (
+        <QueryError error={error} onRetry={retry} what="the crash report" />
+      ) : report ? (
+        <pre className="selectable m-4 rounded-lg bg-surface p-3 font-mono text-callout leading-[18px] whitespace-pre-wrap text-label shadow-[inset_0_0_0_0.5px_var(--color-surface-border)]">
+          {text}
+          {report.truncated && '\n… (truncated; the full report is in the instance folder)'}
+        </pre>
+      ) : (
+        <p className="m-4 text-body text-label-2">The game left no crash report. Check the session log for the last lines it printed.</p>
+      )}
     </div>
   )
 }

@@ -139,7 +139,7 @@ const SHOTS: Shot[] = [
   { name: 'firstrun-appearance', hash: '#/welcome', setup: firstRun('appearance'), reload: true },
   { name: 'firstrun-privacy', hash: '#/welcome', setup: firstRun('privacy'), reload: true },
   { name: 'firstrun-done', hash: '#/welcome', setup: firstRun('done'), reload: true },
-  { name: 'home', hash: '#/', setup: `${firstRun('done', true)}; localStorage.removeItem('amethyst:fixtures')`, reload: true },
+  { name: 'home', hash: '#/', setup: `${firstRun('done', true)}; localStorage.removeItem('amethyst:fixtures')`, reload: true, invoke: [['settings', 'patch', [{ privacy: { prompted: true } }]]] },
   { name: 'discover', hash: '#/discover?type=modpack' },
   { name: 'discover-target', hash: '#/discover?type=mod&target=survival' },
   { name: 'project', hash: '#/discover/modpack-0' },

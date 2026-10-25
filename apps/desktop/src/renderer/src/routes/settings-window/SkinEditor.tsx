@@ -208,8 +208,8 @@ export function SkinEditorView({ account }: { account: AccountDetail }) {
             </div>
 
             {offline && (
-              <Banner tone="info" title="Skins can only be uploaded for Microsoft accounts">
-                This offline skin is saved on this Mac and shown only in Amethyst. Other players and servers won’t see it.
+              <Banner tone="info" title="Launcher-only skin">
+                Only shown in Amethyst; the game uses the default skin for offline accounts.
               </Banner>
             )}
             {needsSignIn && (

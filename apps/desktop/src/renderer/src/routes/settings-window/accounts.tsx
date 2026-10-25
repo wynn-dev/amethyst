@@ -1,20 +1,15 @@
 import { useState } from 'react'
 import { AlertTriangle, Minus, Plus, UserRound } from 'lucide-react'
-import { Alert, Button, EmptyState, Form, Skeleton, cn, toast } from '@/ui'
-import { useAccounts } from '@/data/misc'
-import { queryClient } from '@/data/query'
+import { Alert, Button, EmptyState, Form, Skeleton, cn } from '@/ui'
+import { accountActions, useAccounts } from '@/data/accounts'
 import { useSettings } from '@/data/settings'
 import type { Account } from '@/data/types'
 import { displayName } from '@/app/AccountChip'
 import { useUi } from '@/app/ui-store'
-import { PlayerHead } from '@/app/visuals'
+import { SkinHead } from '@/app/skin/SkinHead'
 import { QueryError } from '@/app/RouteStates'
 import { useRowHighlight } from './context'
 import { SkinEditor } from './SkinEditor'
-
-function setAccounts(fn: (list: Account[]) => Account[]) {
-  queryClient.setQueryData<Account[]>(['accounts'], (list) => (list ? fn(list) : list))
-}
 
 export function AccountsPane() {
   const { data: accounts, isPending, isError, error, refetch } = useAccounts()
@@ -76,7 +71,7 @@ export function AccountsPane() {
                 }}
                 className={cn('flex h-12 items-center gap-3 px-3 outline-none focus-visible:bg-fill', isSel && 'bg-selection')}
               >
-                <PlayerHead hue={a.hue} size={30} />
+                <SkinHead skin={a.skinUrl} hue={a.hue} size={30} />
                 <div className="flex min-w-0 flex-1 flex-col">
                   <span className="truncate text-body font-medium">
                     {displayName(a.name, streamer)}
@@ -84,17 +79,17 @@ export function AccountsPane() {
                   </span>
                   <span className="text-small text-label-2">{a.kind === 'microsoft' ? 'Microsoft' : 'Offline'}</span>
                 </div>
-                {a.status === 'expired' ? (
+                {a.status === 'needs-sign-in' ? (
                   <span className="flex items-center gap-2">
                     <span className="flex items-center gap-1 text-small text-orange">
                       <AlertTriangle className="size-3.5" /> Session expired
                     </span>
-                    <Button size="sm" onClick={() => setUi({ addAccount: true })}>
+                    <Button size="sm" onClick={() => setUi({ addAccount: true, reauth: a.id })}>
                       Sign In
                     </Button>
                   </span>
                 ) : (
-                  <span className="text-small text-label-2">Signed in</span>
+                  <span className="text-small text-label-2">{a.kind === 'offline' ? 'Ready' : 'Signed in'}</span>
                 )}
               </div>
             )
@@ -127,10 +122,7 @@ export function AccountsPane() {
             <Button
               size="sm"
               variant="borderless"
-              onClick={() => {
-                // TODO(wire): api.accounts.select(id)
-                setAccounts((l) => l.map((x) => ({ ...x, active: x.id === selected.id })))
-              }}
+              onClick={() => void accountActions.select(selected)}
             >
               Use This Account
             </Button>
@@ -144,14 +136,12 @@ export function AccountsPane() {
         open={!!removing}
         onOpenChange={(o) => !o && setRemoving(null)}
         title={`Remove “${removing ? displayName(removing.name, streamer) : ''}”?`}
-        message="You can add the account again later. Its saved skins stay in your library."
+        message={removing?.kind === 'microsoft' ? 'Its sign-in is deleted from this Mac. You can add the account again later.' : 'You can add it again later.'}
         confirmLabel="Remove"
         destructive
         onConfirm={() => {
           if (!removing) return
-          // TODO(wire): api.accounts.remove(id)
-          setAccounts((l) => l.filter((x) => x.id !== removing.id))
-          toast({ kind: 'success', title: `Removed ${displayName(removing.name, streamer)}` })
+          void accountActions.remove(removing, displayName(removing.name, streamer))
           setSelectedId(undefined)
         }}
       />

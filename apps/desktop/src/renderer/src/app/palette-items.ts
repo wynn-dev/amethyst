@@ -2,9 +2,8 @@ import type { MenuCommand, InstanceTab } from '@shared/menu'
 import { INSTANCE_TABS } from '@shared/menu'
 import type { InstanceSummary } from '@/data/types'
 import { versionLabel } from '@/data/instances'
-import type { Settings } from '@/data/settings'
 import { rank, type FuzzyMatch } from './fuzzy'
-import { SETTINGS_INDEX, SETTINGS_PANES } from './settings-index'
+import { SETTINGS_INDEX, SETTINGS_PANES, type ToggleAction, type ToggleSource } from './settings-index'
 
 export type PaletteGroup = 'Recent Instances' | 'Suggested' | 'Instances' | 'Actions' | 'Navigation' | 'Settings' | 'Discover'
 
@@ -31,13 +30,13 @@ export interface PaletteItem {
   /** → / Tab drills into these. */
   children?: PaletteItem[]
   /** Inline toggle (Space). */
-  toggle?: { on: boolean; patch: Partial<Settings> }
+  toggle?: { on: boolean; action: ToggleAction }
 }
 
 export interface PaletteContext {
   instances: InstanceSummary[]
   currentInstanceId?: string
-  settings: Settings
+  settings: ToggleSource
 }
 
 const TAB_TITLES: Record<InstanceTab, string> = {
@@ -70,6 +69,10 @@ const ACTIONS: { title: string; command: MenuCommand; shortcut?: string; keyword
   { title: 'Repair Files', command: 'instance.repair', needsInstance: true, keywords: ['verify', 'integrity'] },
   { title: 'Open Logs', command: 'instance.openLogs', shortcut: 'mod+l', needsInstance: true, keywords: ['console', 'crash'] },
   { title: 'Pin/Unpin Instance', command: 'instance.togglePin', needsInstance: true },
+  { title: 'Rename Instance…', command: 'instance.rename', needsInstance: true },
+  { title: 'Change Icon…', command: 'instance.changeIcon', needsInstance: true },
+  { title: 'Reveal Launcher Logs', command: 'help.openLauncherLogs', keywords: ['log folder'] },
+  { title: 'Release Notes', command: 'help.releaseNotes', keywords: ['changelog', 'what’s new'] },
   { title: 'Add Account…', command: 'account.add', keywords: ['sign in', 'login', 'microsoft'] },
   { title: 'Manage Accounts…', command: 'account.manage', keywords: ['skin'] },
   { title: 'Show Activity', command: 'view.activity', shortcut: 'alt+mod+a', keywords: ['downloads', 'tasks', 'progress'] },
@@ -146,7 +149,7 @@ export function buildPaletteItems(ctx: PaletteContext): PaletteItem[] {
       keywords: row.keywords,
       icon: { kind: 'glyph', name: 'settings' },
       run: { kind: 'settings', pane: row.pane, row: row.row },
-      toggle: row.toggle ? { on: row.toggle.get(ctx.settings), patch: row.toggle.patch(ctx.settings, !row.toggle.get(ctx.settings)) } : undefined,
+      toggle: row.toggle ? { on: row.toggle.get(ctx.settings), action: row.toggle.action(ctx.settings, !row.toggle.get(ctx.settings)) } : undefined,
     })
   }
   return items

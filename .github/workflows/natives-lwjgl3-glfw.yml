@@ -1,0 +1,102 @@
+# Builds the patched arm64 libglfw.dylib that Minecraft 1.13-1.18 need on LWJGL 3.3.1, from
+# upstream source (natives/lwjgl3-glfw/build.sh), and publishes it on its own GitHub release,
+# `natives-lwjgl3-glfw-v<N>`.
+#
+# The app pins one release's manifest.json (sha256 + size). Releases made here are immutable
+# inputs of shipped app builds: nothing may delete or overwrite them. They are pre-releases so
+# that they never show as the repository's "Latest" release.
+name: Natives (LWJGL 3 GLFW, arm64)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'natives/lwjgl3-glfw/**'
+      - '.github/workflows/natives-lwjgl3-glfw.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: natives-lwjgl3-glfw
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      # One release per workflow run; a re-run of the same run re-uploads to the same tag.
+      NATIVES_TAG: natives-lwjgl3-glfw-v${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          xcrun --sdk macosx --show-sdk-version
+          cmake --version | head -n 1
+          python3 --version
+
+      - name: Build
+        env:
+          NATIVES_BASE_URL: https://github.com/${{ github.repository }}/releases/download/${{ env.NATIVES_TAG }}/
+        run: natives/lwjgl3-glfw/build.sh
+
+      - name: Check artifacts
+        run: |
+          cd natives/lwjgl3-glfw/dist
+          cat manifest.json
+          for jar in *.jar; do
+            dir="$RUNNER_TEMP/check/${jar%.jar}"
+            mkdir -p "$dir"
+            unzip -q "$jar" -d "$dir"
+            lib="$dir/macos/arm64/org/lwjgl/glfw/libglfw.dylib"
+            [ -f "$lib" ] || { echo "::error::$jar has no macos/arm64/org/lwjgl/glfw/libglfw.dylib"; exit 1; }
+            archs="$(lipo -archs "$lib")"
+            echo "$jar: libglfw.dylib: $archs"
+            [ "$archs" = arm64 ] || { echo "::error::$lib is $archs"; exit 1; }
+            # The in-jar sha1 sidecar must match the library (LWJGL's Library.checkHash reads it).
+            [ "$(tr -d '\r\n' < "$lib.sha1")" = "$(shasum -a 1 "$lib" | cut -d' ' -f1)" ] || { echo "::error::$jar: stale libglfw.dylib.sha1"; exit 1; }
+          done
+
+      - name: Smoke test
+        # Opens two small windows with OpenGL contexts and fails on any GLFW error. Hosted macOS
+        # runners are VMs without a guaranteed accelerated OpenGL renderer, so a failure here is
+        # reported but does not block the release; run test/run.sh locally before pinning.
+        continue-on-error: true
+        run: natives/lwjgl3-glfw/test/run.sh "$(/usr/libexec/java_home -v 17 -a arm64)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.NATIVES_TAG }}
+          path: natives/lwjgl3-glfw/dist/
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd natives/lwjgl3-glfw/dist
+          files=(*.jar manifest.json licenses/*.txt)
+          if gh release view "$NATIVES_TAG" > /dev/null 2>&1; then
+            gh release upload "$NATIVES_TAG" "${files[@]}" --clobber
+          else
+            {
+              echo "Patched GLFW for LWJGL 3.3.1 (Apple Silicon, arm64, macOS 13+), for Minecraft 1.13-1.18, built from upstream source by"
+              echo "[natives/lwjgl3-glfw/build.sh](https://github.com/${GITHUB_REPOSITORY}/tree/${GITHUB_SHA}/natives/lwjgl3-glfw) at ${GITHUB_SHA}."
+              echo
+              echo "The launcher pins \`manifest.json\` of this release. Do not delete or edit it."
+              echo
+              echo '```json'
+              cat manifest.json
+              echo '```'
+            } > "$RUNNER_TEMP/notes.md"
+            gh release create "$NATIVES_TAG" "${files[@]}" \
+              --title "$NATIVES_TAG" \
+              --notes-file "$RUNNER_TEMP/notes.md" \
+              --target "$GITHUB_SHA" \
+              --prerelease \
+              --latest=false
+          fi

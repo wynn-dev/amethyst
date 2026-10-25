@@ -1,8 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { InstancePatch } from '@shared/services'
 import { changeVersion, targetRuntime, type ChangeVersionDeps } from './change-version'
 
-function deps(overrides: Partial<{ running: boolean; installing: boolean }> = {}) {
+function deps(overrides: Partial<{ running: boolean; installing: boolean; modpack: boolean }> = {}) {
   const calls: string[] = []
   const d: ChangeVersionDeps = {
     instances: {
@@ -23,6 +23,8 @@ function deps(overrides: Partial<{ running: boolean; installing: boolean }> = {}
       },
     },
     isRunning: () => overrides.running ?? false,
+    isModpackBusy: () => overrides.modpack ?? false,
+    changing: new Set(),
     backupWorlds: async (id) => {
       calls.push(`backup ${id}`)
       return 2
@@ -40,11 +42,42 @@ describe('changeVersion', () => {
   })
 
   it('refuses while the game runs or installs, before touching anything', async () => {
-    for (const o of [{ running: true }, { installing: true }]) {
+    for (const o of [{ running: true }, { installing: true }, { modpack: true }]) {
       const { d, calls } = deps(o)
       await expect(changeVersion(d, 'i1', { minecraft: '1.20.1' })).rejects.toMatchObject({ code: 'EBUSY' })
       expect(calls).toEqual(['resolve i1'])
     }
+  })
+
+  it('holds the instance busy across the slow world backup, so a launch cannot start in that window', async () => {
+    const { d, calls } = deps()
+    let finishBackup!: () => void
+    d.backupWorlds = async (id) => {
+      calls.push(`backup ${id}`)
+      await new Promise<void>((r) => (finishBackup = r))
+      return 1
+    }
+    const running = changeVersion(d, 'i1', { minecraft: '1.21.1' })
+    await vi.waitFor(() => expect(calls).toContain('backup i1'))
+    // What launch (and a second change) checks while the backup runs.
+    expect(d.changing?.has('i1')).toBe(true)
+    await expect(changeVersion(d, 'i1', { minecraft: '1.20.1' })).rejects.toMatchObject({ code: 'EBUSY' })
+    finishBackup()
+    await running
+    expect(d.changing?.has('i1')).toBe(false)
+  })
+
+  it('stops before switching when the game was started during the backup anyway', async () => {
+    const { d, calls } = deps()
+    let running = false
+    d.isRunning = () => running
+    d.backupWorlds = async () => {
+      running = true
+      return 1
+    }
+    await expect(changeVersion(d, 'i1', { minecraft: '1.21.1' })).rejects.toMatchObject({ code: 'EBUSY' })
+    expect(calls.some((c) => c.startsWith('update') || c.startsWith('install'))).toBe(false)
+    expect(d.changing?.has('i1')).toBe(false)
   })
 
   it('validates the runtime', () => {

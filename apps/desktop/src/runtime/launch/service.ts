@@ -71,9 +71,12 @@ import type { DataLayout } from '../layout'
 import { logger } from '../log'
 import type { TaskRegistry } from '../tasks/registry'
 import type { TelemetryHooks } from '../telemetry'
+import { withoutUnsafeEnv } from '../util/env'
 import { AppError, errorCode, errorMessage, isAbortError } from '../util/errors'
+import { loadClientId } from './client-id'
 import { LogRing } from './log-buffer'
 import type { Lwjgl2NativesSource } from './natives-source'
+import { adoptedProcess, isAlive, processStartTime, RunningGamesStore, type ProcessStartReader, type RunningRecord } from './running'
 
 const log = logger('launch')
 
@@ -121,6 +124,16 @@ export interface LaunchDeps {
   totalMemoryMB?: () => number
   /** Bound for the `account` step (default 90 s). */
   accountTimeoutMs?: number
+  /** True while a modpack import/update/rollback or a version change writes into the instance. */
+  isChanging?: (instanceId: string) => boolean
+  /** Undo a modpack commit an earlier session was killed in, before the instance is used. */
+  recoverModpack?: (instanceDir: string) => Promise<void>
+  /** Process start time by pid (default `ps -o lstart=`), to recognise games after a restart. */
+  processStart?: ProcessStartReader
+  /** Whether a pid exists (default `kill(pid, 0)`). */
+  isAlive?: (pid: number) => boolean
+  /** How often an adopted game (started before a runtime restart) is checked for exit (default 2 s). */
+  adoptPollMs?: number
 }
 
 interface Run {
@@ -262,10 +275,35 @@ export class LaunchManager {
   readonly #hiddenBy = new Set<string>()
   /** The version id each active run launches. */
   readonly #versionOf = new Map<string, string>()
+  /** Running games on disk, so a restarted runtime adopts them again. */
+  readonly #running: RunningGamesStore
+  /** Serialises the running-games bookkeeping (add after spawn, remove on exit, adoption). */
+  #runningQueue: Promise<unknown> = Promise.resolve()
+  #clientId: Promise<string | undefined> | undefined
 
   constructor(deps: LaunchDeps) {
     this.#d = deps
     this.#game = { ...defaultGame, ...deps.game }
+    this.#running = new RunningGamesStore(deps.layout.runningGames)
+  }
+
+  #queueRunning<T>(fn: () => Promise<T>): Promise<T | undefined> {
+    const next = this.#runningQueue.then(fn).catch((e: unknown) => {
+      log.warn('cannot update the running-games record', e)
+      return undefined
+    })
+    this.#runningQueue = next
+    return next
+  }
+
+  /** The per-install `${clientid}`; a storage failure never blocks a launch. */
+  #getClientId(): Promise<string | undefined> {
+    this.#clientId ??= loadClientId(this.#d.layout.clientId).catch((e: unknown) => {
+      log.warn('cannot read or store the launcher client id', e)
+      this.#clientId = undefined
+      return undefined
+    })
+    return this.#clientId
   }
 
   /** True while the instance is launching or running (instances use this to refuse rename/delete). */
@@ -292,6 +330,7 @@ export class LaunchManager {
     const clickAt = performance.now()
     if (this.isActive(instanceId)) throw new AppError('EBUSY', 'This instance is already running')
     if (this.#d.install.isBusy(instanceId)) throw new AppError('EBUSY', 'Wait for the install to finish')
+    if (this.#d.isChanging?.(instanceId)) throw new AppError('EBUSY', 'Wait for the modpack or version change to finish')
     const inst = this.#d.instances.resolve(instanceId)
     const run: Run = {
       instanceId,
@@ -364,6 +403,7 @@ export class LaunchManager {
     // 1. Resolve (install first when needed).
     let versionId = config.versionId
     let resolved = await step('resolve', async () => {
+      await this.#d.recoverModpack?.(inst.dir)
       if (!versionId || !(await isInstalled(root, versionId))) return undefined
       try {
         const r = await game.resolveVersion(versionsDir, versionId, { signal })
@@ -434,7 +474,8 @@ export class LaunchManager {
     })
 
     // 6. Pre-launch command.
-    const env = { ...g.env, ...overrides.env }
+    // Never pass code-injecting variables (DYLD_*, JAVA_TOOL_OPTIONS…), even from an older file.
+    const env = withoutUnsafeEnv({ ...g.env, ...overrides.env })
     const preLaunch = (overrides.preLaunchCommand ?? g.preLaunchCommand).trim()
     if (preLaunch) {
       await step('prelaunch', async () => {
@@ -484,6 +525,7 @@ export class LaunchManager {
     this.#d.telemetry.capture('launch_started')
     this.#d.telemetry.capture('perf_launch', { clickToSpawnMs })
     void proc.exited.then((result) => this.#onExit(run, inst, result))
+    this.#remember(run, versionId)
     // Cancelling after the spawn stops the game.
     signal.addEventListener('abort', () => void proc.kill(), { once: true })
     return { launchId: run.launchId, pid: proc.pid, startedAt: proc.startedAt, clickToSpawnMs }
@@ -533,6 +575,7 @@ export class LaunchManager {
   ): Promise<BuildLaunchOptions> {
     const g = this.#d.settings.value.game
     const o = inst.config.overrides
+    const clientId = await this.#getClientId()
     const memory = o.memory ?? (g.memory.mode === 'unassigned' ? undefined : { mode: g.memory.mode, minMB: g.memory.minMB, maxMB: g.memory.maxMB })
     let heap: { minMB?: number; maxMB?: number } | undefined
     if (memory?.mode === 'auto') heap = autoMemory(await this.#modCount(inst.dir), this.#d.totalMemoryMB?.() ?? Math.round(totalmem() / 1048576))
@@ -561,6 +604,7 @@ export class LaunchManager {
         accessToken: session.accessToken,
         userType: session.kind === 'microsoft' ? 'msa' : 'legacy',
         ...(session.kind === 'microsoft' && session.xuid ? { xuid: session.xuid } : {}),
+        ...(clientId ? { clientId } : {}),
       },
       natives: plan,
       nativesDir,
@@ -600,6 +644,7 @@ export class LaunchManager {
     run.result = result
     run.ready = false
     this.#versionOf.delete(run.launchId)
+    void this.#queueRunning(() => this.#running.remove(run.launchId))
     const endedAt = Date.now()
     void this.#d.instances.recordPlaySession(inst.id, run.startedAt, endedAt).catch((e: unknown) => log.warn('cannot record the play session', e))
     try {
@@ -626,6 +671,88 @@ export class LaunchManager {
     const exitKind = result.killed ? 'killed' : result.crashed ? 'crash' : 'normal'
     this.#d.telemetry.capture('launch_exited', { exitKind, durationMs: Math.min(result.durationMs, 86_400_000) })
     log.info(`“${inst.config.name}” exited (${exitKind}, code ${result.exitCode ?? result.signal}) after ${Math.round(result.durationMs / 1000)} s${crashReportPath ? `; report ${crashReportPath}` : ''}`)
+  }
+
+  // -------------------------------------------------------------------------------------------
+  // Games that outlive the runtime
+  // -------------------------------------------------------------------------------------------
+
+  /** Record a spawned game (pid plus the kernel's start time for it) so a restarted runtime finds it. */
+  #remember(run: Run, versionId: string): void {
+    const readStart = this.#d.processStart ?? processStartTime
+    void this.#queueRunning(async () => {
+      const processStart = await readStart(run.pid)
+      if (!processStart || run.phase === 'exited') return
+      await this.#running.add({ instanceId: run.instanceId, launchId: run.launchId, pid: run.pid, startedAt: run.startedAt, processStart, versionId })
+    })
+  }
+
+  /**
+   * Adopt the games an earlier runtime started that are still running: same pid **and** same
+   * process start time (a reused pid is not ours). They count as running (busy checks, the
+   * Play/Stop UI) and can be stopped; their exit is noticed by polling. Stale records are dropped.
+   */
+  async adoptRunning(): Promise<number> {
+    const readStart = this.#d.processStart ?? processStartTime
+    const alive = this.#d.isAlive ?? isAlive
+    const adopted = await this.#queueRunning(async () => {
+      const records = await this.#running.list()
+      const keep: RunningRecord[] = []
+      let count = 0
+      for (const r of records) {
+        const current = this.#runs.get(r.instanceId)
+        if (current && current.phase !== 'exited') {
+          if (current.launchId === r.launchId) keep.push(r)
+          continue
+        }
+        // oxlint-disable-next-line no-await-in-loop -- a handful of records, checked one by one
+        if (!alive(r.pid) || (await readStart(r.pid)) !== r.processStart) continue
+        let inst: ResolvedInstance
+        try {
+          inst = this.#d.instances.resolve(r.instanceId)
+        } catch {
+          continue
+        }
+        keep.push(r)
+        this.#adopt(r, inst)
+        count++
+      }
+      if (keep.length !== records.length) await this.#running.replace(keep)
+      return count
+    })
+    return adopted ?? 0
+  }
+
+  #adopt(r: RunningRecord, inst: ResolvedInstance): void {
+    const proc = adoptedProcess(r, { pollMs: this.#d.adoptPollMs ?? 2_000, ...(this.#d.isAlive ? { alive: this.#d.isAlive } : {}), ...(this.#d.processStart ? { processStart: this.#d.processStart } : {}) })
+    const run: Run = {
+      instanceId: r.instanceId,
+      launchId: r.launchId,
+      phase: 'running',
+      step: null,
+      controller: new AbortController(),
+      pid: r.pid,
+      startedAt: r.startedAt,
+      ready: true,
+      hidLauncher: false,
+      process: proc,
+      log: new LogRing(this.#d.logCapacity),
+      gameDir: inst.dir,
+    }
+    run.log.push({ time: Date.now(), level: 'INFO', stream: 'stdout', thread: null, logger: null, text: 'Amethyst restarted while the game was running. Earlier output is not available.' })
+    this.#runs.delete(r.instanceId)
+    this.#runs.set(r.instanceId, run)
+    if (r.versionId) this.#versionOf.set(r.launchId, r.versionId)
+    this.#d.instances.setActivity(inst.id, 'running')
+    this.#emitState(run, { state: 'running', pid: r.pid, startedAt: r.startedAt, ready: true })
+    void proc.exited.then((result) => this.#onExit(run, inst, result))
+    log.info(`adopted “${inst.config.name}” (pid ${r.pid}), started ${new Date(r.startedAt).toISOString()} before a runtime restart`)
+  }
+
+  /** Wait for pending running-games writes (tests and shutdown). */
+  async flushRunning(): Promise<void> {
+    await this.#runningQueue
+    await this.#running.flush()
   }
 
   #onLog(run: Run, events: readonly LogEvent[]): void {

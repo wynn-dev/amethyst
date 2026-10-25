@@ -18,7 +18,7 @@ import { pipeline } from 'node:stream/promises'
 import type { TaskContext } from '@amethyst/task'
 import { openZip } from '@amethyst/zip'
 import { abortError, GameError, throwIfAborted } from '../errors'
-import type { ResolvedLibrary } from '../libraries'
+import { libraryFile, type ResolvedLibrary } from '../libraries'
 import { hashFile } from '../hash'
 import type { NativesPlan } from './plan'
 
@@ -168,7 +168,7 @@ export async function extractNatives(plan: Pick<NativesPlan, 'extract' | 'jvmArc
     let done = 0
     for (const lib of plan.extract) {
       throwIfAborted(signal)
-      const jar = path.join(librariesDir, lib.download.path)
+      const jar = libraryFile(librariesDir, lib)
       try {
         await extractJar(lib, jar, tmp, plan.jvmArch, signal, entries)
       } catch (e) {

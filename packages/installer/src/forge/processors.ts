@@ -15,6 +15,7 @@
 import { spawn } from 'node:child_process'
 import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
+import { sanitizeEnv } from '@amethyst/game'
 import type { TaskContext } from '@amethyst/task'
 import { openZip } from '@amethyst/zip'
 import { abortReason } from '../abort'
@@ -219,6 +220,8 @@ export interface ProcessorRunOptions {
   timeoutMs?: number
   /** Live output, for showing progress in the UI. */
   onOutput?: (text: string) => void
+  /** Base environment (default `process.env`). It is sanitised like the game's (`sanitizeEnv`). */
+  baseEnv?: Record<string, string | undefined>
 }
 
 /** Runs one processor. Injectable so tests (and alternative strategies) can replace the JVM. */
@@ -232,7 +235,10 @@ const PIPE_DRAIN_MS = 1500
  * The default {@link ProcessorRunner}: `java [jvmArgs] -cp <classpath> <mainClass> <args...>` in its
  * own process group. Output is kept in a 64 KiB ring. On abort or timeout the group gets SIGTERM,
  * then SIGKILL after 5 s; the promise settles only once the process has exited (rejecting with the
- * abort reason when aborted).
+ * abort reason when aborted). The environment is the game's sanitised one: no `ELECTRON_*`
+ * (`ELECTRON_RUN_AS_NODE`), `NODE_OPTIONS`, `DYLD_*` or JVM-injection variables (`JAVA_TOOL_OPTIONS`,
+ * `_JAVA_OPTIONS`, `JDK_JAVA_OPTIONS`), so nothing in the launcher's environment can load an agent
+ * or a dylib into a processor JVM.
  */
 export const spawnProcessor: ProcessorRunner = (inv, options) =>
   new Promise((resolve, reject) => {
@@ -242,6 +248,7 @@ export const spawnProcessor: ProcessorRunner = (inv, options) =>
     }
     const child = spawn(inv.java, [...inv.jvmArgs, '-cp', inv.classpath.join(':'), inv.mainClass, ...inv.args], {
       cwd: inv.cwd,
+      env: sanitizeEnv(options.baseEnv ?? process.env),
       stdio: ['ignore', 'pipe', 'pipe'],
       // Own process group, so a timeout or cancel also stops anything the tool forked.
       detached: true,

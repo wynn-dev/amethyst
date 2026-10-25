@@ -149,4 +149,15 @@ describe('diagnose', { timeout: 30_000 }, () => {
     const bad = await diagnose(v, root, { jvmArch: 'arm64', lwjgl2: source, assets: false })
     expect(bad.find((i) => i.name.startsWith('dev.wynn.amethyst.natives'))).toMatchObject({ kind: 'native', problem: 'hash', expected: { sha256: sha256(jar) } })
   })
+  it('refuses a library artifact.path that escapes libraries/ (repair would write there)', async () => {
+    for (const bad of ['../../evil.jar', '/tmp/evil.jar', 'a/../../evil.jar']) {
+      const json: VersionJson = {
+        id: '1.0',
+        mainClass: 'M',
+        libraries: [{ name: 'a:b:1', downloads: { artifact: { path: bad, sha1: 'a'.repeat(40), size: 1, url: 'https://libraries.minecraft.net/x.jar' } } }],
+      }
+      const version = mergeVersionChain([json], { versionsDir: path.join(root, 'versions') })
+      await expect(diagnose(version, root, { jvmArch: 'arm64', assets: false })).rejects.toMatchObject({ code: 'ELIBRARY_PATH' })
+    }
+  })
 })

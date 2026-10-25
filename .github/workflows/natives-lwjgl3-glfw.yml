@@ -24,13 +24,17 @@ concurrency:
 
 jobs:
   build:
+    # Only main publishes natives that the app may pin: a manual run from another branch must not.
+    if: github.ref == 'refs/heads/main'
     runs-on: macos-15
     timeout-minutes: 30
     env:
-      # One release per workflow run; a re-run of the same run re-uploads to the same tag.
+      # One release per workflow run. A published release is never replaced: a re-run fails instead.
       NATIVES_TAG: natives-lwjgl3-glfw-v${{ github.run_number }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
       - name: Toolchain
         run: |
@@ -69,7 +73,7 @@ jobs:
         continue-on-error: true
         run: natives/lwjgl3-glfw/test/run.sh "$(/usr/libexec/java_home -v 17 -a arm64)"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ env.NATIVES_TAG }}
           path: natives/lwjgl3-glfw/dist/
@@ -80,23 +84,29 @@ jobs:
         run: |
           cd natives/lwjgl3-glfw/dist
           files=(*.jar manifest.json licenses/*.txt)
+          # Releases are immutable once published (the app pins their sha256s): never overwrite one.
           if gh release view "$NATIVES_TAG" > /dev/null 2>&1; then
-            gh release upload "$NATIVES_TAG" "${files[@]}" --clobber
-          else
-            {
-              echo "Patched GLFW for LWJGL 3.3.1 (Apple Silicon, arm64, macOS 13+), for Minecraft 1.13-1.18, built from upstream source by"
-              echo "[natives/lwjgl3-glfw/build.sh](https://github.com/${GITHUB_REPOSITORY}/tree/${GITHUB_SHA}/natives/lwjgl3-glfw) at ${GITHUB_SHA}."
-              echo
-              echo "The launcher pins \`manifest.json\` of this release. Do not delete or edit it."
-              echo
-              echo '```json'
-              cat manifest.json
-              echo '```'
-            } > "$RUNNER_TEMP/notes.md"
-            gh release create "$NATIVES_TAG" "${files[@]}" \
-              --title "$NATIVES_TAG" \
-              --notes-file "$RUNNER_TEMP/notes.md" \
-              --target "$GITHUB_SHA" \
-              --prerelease \
-              --latest=false
+            echo "::error::release $NATIVES_TAG already exists; it may be pinned, so it is never replaced. Re-run the workflow as a new run instead."
+            exit 1
           fi
+          # A leftover tag would make `gh release create` publish whatever commit it points at.
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$NATIVES_TAG" > /dev/null 2>&1; then
+            echo "::error::tag $NATIVES_TAG already exists without a release; delete it by hand after checking it."
+            exit 1
+          fi
+          {
+            echo "Patched GLFW for LWJGL 3.3.1 (Apple Silicon, arm64, macOS 13+), for Minecraft 1.13-1.18, built from upstream source by"
+            echo "[natives/lwjgl3-glfw/build.sh](https://github.com/${GITHUB_REPOSITORY}/tree/${GITHUB_SHA}/natives/lwjgl3-glfw) at ${GITHUB_SHA}."
+            echo
+            echo "The launcher pins \`manifest.json\` of this release. Do not delete or edit it."
+            echo
+            echo '```json'
+            cat manifest.json
+            echo '```'
+          } > "$RUNNER_TEMP/notes.md"
+          gh release create "$NATIVES_TAG" "${files[@]}" \
+            --title "$NATIVES_TAG" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            --target "$GITHUB_SHA" \
+            --prerelease \
+            --latest=false

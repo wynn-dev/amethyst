@@ -7,6 +7,8 @@ import { arm64Availability, resolveRuntimeFor } from './resolve'
 
 const json = async (name: string): Promise<unknown> => JSON.parse(await readFile(join(FIXTURES, name), 'utf8'))
 
+const fileAt = (url: string) => ({ type: 'file', downloads: { raw: { sha1: 'a'.repeat(40), size: 1, url } } })
+
 describe('runtime index', () => {
   it('parses the (trimmed) live index and builds the arm64 availability table', async () => {
     const index = parseRuntimeIndex(await json('mojang-all.json'))
@@ -92,5 +94,13 @@ describe('component manifest', () => {
     const m = parseRuntimeManifest({ files: { x: { ...file, downloads: { ...file.downloads, lzma: { sha1: 'bad' } } } } })
     expect(m.files.x).toMatchObject({ type: 'file', executable: false })
     expect((m.files.x as { lzma?: unknown }).lzma).toBeUndefined()
+  })
+
+  it('refuses plain-HTTP runtime files and manifests (loopback mirrors excepted)', () => {
+    expect(() => parseRuntimeManifest({ files: { x: fileAt('http://piston-data.mojang.com/x') } })).toThrow(/https required/)
+    expect(() => parseRuntimeManifest({ files: { x: fileAt('ftp://piston-data.mojang.com/x') } })).toThrow(/https required/)
+    expect(parseRuntimeManifest({ files: { x: fileAt('http://127.0.0.1:8080/x') } }).files.x).toMatchObject({ type: 'file' })
+    const index = parseRuntimeIndex({ 'mac-os-arm64': { a: [{ version: { name: '21.0.7' }, manifest: { sha1: 'a'.repeat(40), size: 1, url: 'http://piston-meta.mojang.com/m.json' } }] } })
+    expect(index['mac-os-arm64']).toEqual({ a: [] })
   })
 })

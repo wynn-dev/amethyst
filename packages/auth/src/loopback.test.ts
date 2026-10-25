@@ -1,4 +1,5 @@
 import { request } from 'node:http'
+import { networkInterfaces } from 'node:os'
 import { describe, expect, it } from 'vitest'
 import { startLoopbackServer } from './loopback'
 
@@ -74,12 +75,28 @@ describe('startLoopbackServer', () => {
     await expect(wait).rejects.toMatchObject({ code: 'ECANCELLED' })
   })
 
-  it('binds to 127.0.0.1 only', async () => {
+  it('answers on both loopback addresses localhost may resolve to (127.0.0.1 and [::1]), and on no other interface', async () => {
     const server = await startLoopbackServer()
     try {
-      await expect(get(server.port, '/', { address: '::1' })).rejects.toThrow(/ECONNREFUSED|ECONNRESET|EADDRNOTAVAIL/)
+      expect(server.redirectUri).toBe(`http://localhost:${server.port}`)
+      const code = server.waitForCode('s')
+      // Microsoft redirects to `localhost`; a browser that resolves it to ::1 must still reach us.
+      expect((await get(server.port, '/?code=v6&state=s', { address: '::1' })).status).toBe(200)
+      await expect(code).resolves.toEqual({ code: 'v6' })
     } finally {
       await server.close()
+    }
+    const again = await startLoopbackServer()
+    try {
+      // Every non-loopback IPv4 address of this machine (there may be none on a CI runner).
+      const external = Object.values(networkInterfaces())
+        .flat()
+        .filter((i) => i && !i.internal && i.family === 'IPv4')
+        .map((i) => i!.address)
+      const results = await Promise.all(external.map((address) => get(again.port, '/', { address }).then(() => 'answered', (e: Error) => e.message)))
+      for (const r of results) expect(r).toMatch(/ECONNREFUSED|ECONNRESET|EADDRNOTAVAIL/)
+    } finally {
+      await again.close()
     }
   })
 })

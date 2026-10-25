@@ -2,12 +2,33 @@
  * Resolving library entries against a platform (launch.md §4) and de-duplicating them across
  * layers (§2.4).
  */
+import path from 'node:path'
+import { GameError } from './errors'
 import { formatMavenName, libraryKey, mavenPath, parseMavenName, type MavenCoordinate } from './maven'
 import type { LayerLibrary, ResolvedVersion } from './resolve'
 import { evaluateRules, type Platform } from './rules'
 import type { Artifact, LibraryJson } from './schema'
 
 export const MOJANG_LIBRARIES = 'https://libraries.minecraft.net/'
+
+/**
+ * The absolute file of a library under `librariesDir`. `download.path` comes from version JSONs
+ * (an untrusted `artifact.path`), so an absolute path or a `..` escape is refused: diagnose hands
+ * this path to the repair step, which writes there.
+ *
+ * @throws {GameError} `ELIBRARY_PATH` when the path is empty or escapes `librariesDir`.
+ */
+export function libraryFile(librariesDir: string, lib: { name: string; download: { path: string } }): string {
+  const rel = lib.download.path
+  if (!rel) throw new GameError('ELIBRARY_PATH', `Library ${lib.name} has no path`, { library: lib.name })
+  const root = path.resolve(librariesDir)
+  const full = path.resolve(root, rel)
+  const inside = path.relative(root, full)
+  if (rel.includes('\0') || path.isAbsolute(rel) || inside === '' || inside.startsWith('..') || path.isAbsolute(inside)) {
+    throw new GameError('ELIBRARY_PATH', `Library ${lib.name} has an unsafe path ${JSON.stringify(rel)}`, { library: lib.name })
+  }
+  return full
+}
 export const FORGE_MAVEN = 'https://maven.minecraftforge.net/'
 
 /** Where a library comes from and how to verify it. */

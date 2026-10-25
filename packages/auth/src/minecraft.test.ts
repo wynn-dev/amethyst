@@ -79,6 +79,11 @@ describe('skins and capes', () => {
       code: 'ESKIN_REJECTED',
       message: 'Upload rejected: Too many changes',
     })
+    // A non-JSON rejection body goes into the message, but never a token it happens to echo.
+    const echoed = createFakeFetch({ [`POST ${SKINS_URL}`]: { status: 400, text: 'bad request for eyJhbGciOi.eyJzdWIiOiJ4In0.c2ln "accessToken":"secret-mc"' } })
+    const e = await uploadSkin({ accessToken: 't', png, variant: 'classic', fetch: echoed.fetch }).catch((err: Error) => err)
+    expect(e).toMatchObject({ code: 'ESKIN_REJECTED' })
+    expect(JSON.stringify({ m: (e as Error).message, e })).not.toMatch(/eyJ|secret-mc/)
     const unauthorized = createFakeFetch({ [`POST ${SKINS_URL}`]: json({ error: 'UNAUTHORIZED' }, 401) })
     await expect(uploadSkin({ accessToken: 't', png, variant: 'classic', fetch: unauthorized.fetch })).rejects.toMatchObject({
       code: 'EMC_UNAUTHORIZED',

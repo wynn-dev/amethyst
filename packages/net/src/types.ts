@@ -68,6 +68,11 @@ export interface DownloadOptions {
   resume?: { minBytes?: number } | false
   /** Retry policy for each HTTP request (defaults to the client's). */
   retry?: Partial<RetryOptions>
+  /**
+   * Give up on a URL (and move to the next one) after this many milliseconds without a response
+   * or a body byte, across all of its retries, with `ESTALLED` (default 30 000; `0` disables).
+   */
+  stallTimeoutMs?: number
 }
 
 /** Result of a single {@link download}. */

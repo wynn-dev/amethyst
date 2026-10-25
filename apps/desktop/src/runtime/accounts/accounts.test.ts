@@ -59,7 +59,7 @@ function fakeAuth(next: { id: string; refreshToken: string }[]): Partial<AuthApi
   }
 }
 
-function manager(auth: Partial<AuthApi>, options: { clientId?: string | null; developerMode?: boolean } = {}): AccountManager {
+function manager(auth: Partial<AuthApi>, options: { clientId?: string | null; developerMode?: boolean; redact?: (value: string) => void } = {}): AccountManager {
   const settings = options.developerMode ? applySettingsPatch(defaultSettings(), { general: { developerMode: true } }).next : defaultSettings()
   return new AccountManager({
     layout,
@@ -67,6 +67,7 @@ function manager(auth: Partial<AuthApi>, options: { clientId?: string | null; de
     host,
     settings: { value: settings },
     ...(options.clientId === null ? {} : { msaClientId: options.clientId ?? 'client-id' }),
+    ...(options.redact ? { redact: options.redact } : {}),
     auth,
   })
 }
@@ -84,6 +85,20 @@ afterEach(async () => {
 })
 
 describe('AccountManager', () => {
+  it('registers every player name and Xbox gamertag with the telemetry scrubber on load and on change', async () => {
+    const redacted = new Set<string>()
+    const auth: Partial<AuthApi> = { ...fakeAuth([]), loginMicrosoft: async () => ({ ...session('A', 'rt-A'), gamertag: 'Gamer Tag A' }) }
+    const m = manager(auth, { redact: (v) => redacted.add(v) })
+    await m.load()
+    expect(redacted.size).toBe(0)
+    await m.loginMicrosoft()
+    expect([...redacted].toSorted()).toEqual(['Gamer Tag A', 'PlayerA'])
+    // Next session: registered at load, before any launch.
+    const later = new Set<string>()
+    await manager(auth, { redact: (v) => later.add(v) }).load()
+    expect([...later].toSorted()).toEqual(['Gamer Tag A', 'PlayerA'])
+  })
+
   it('signs in through the embedded window and stores secrets only encrypted, one blob per account', async () => {
     const m = manager(fakeAuth([{ id: 'A', refreshToken: 'rt-A' }, { id: 'B', refreshToken: 'rt-B' }]))
     await m.load()

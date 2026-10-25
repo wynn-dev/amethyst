@@ -86,6 +86,50 @@ describe('HttpClient', () => {
     expect(await res.body.text()).toBe('moved')
   })
 
+  it('strips API keys and other credentials on a redirect to another origin (CurseForge x-api-key)', async () => {
+    const cdn = await startServer()
+    try {
+      cdn.route('/file.jar', (_req, res) => res.end('jar'))
+      server.route('/v1/mods/1/files/2/download', (_req, res) => {
+        res.statusCode = 302
+        res.setHeader('location', `${cdn.url}/file.jar`)
+        res.end()
+      })
+      const headers = { 'x-api-key': 'cf-secret', Authorization: 'Bearer t', cookie: 'c=1', 'x-custom-token': 'z', accept: 'application/java-archive', range: 'bytes=0-' }
+      const res = await client.request(`${server.url}/v1/mods/1/files/2/download`, { headers })
+      await res.body.text()
+      expect(server.hits('/v1/mods/1/files/2/download').at(-1)?.headers['x-api-key']).toBe('cf-secret')
+      const sent = cdn.hits('/file.jar')[0]?.headers ?? {}
+      expect(sent['x-api-key']).toBeUndefined()
+      expect(sent.authorization).toBeUndefined()
+      expect(sent.cookie).toBeUndefined()
+      expect(sent['x-custom-token']).toBeUndefined()
+      expect(sent.accept).toBe('application/java-archive')
+      expect(sent.range).toBe('bytes=0-')
+      expect(sent['user-agent']).toContain('Amethyst/')
+
+      // Per request, a caller can let a named header follow the redirect.
+      const again = await client.request(`${server.url}/v1/mods/1/files/2/download`, { headers, crossOriginHeaders: ['X-Custom-Token'] })
+      await again.body.text()
+      const second = cdn.hits('/file.jar')[1]?.headers ?? {}
+      expect(second['x-custom-token']).toBe('z')
+      expect(second['x-api-key']).toBeUndefined()
+    } finally {
+      await cdn.close()
+    }
+  })
+
+  it('keeps headers on a same-origin redirect', async () => {
+    server.route('/same-a', (_req, res) => {
+      res.statusCode = 307
+      res.setHeader('location', '/same-b')
+      res.end()
+    })
+    server.route('/same-b', (_req, res) => res.end('b'))
+    await (await client.request(`${server.url}/same-a`, { headers: { 'x-api-key': 'k' } })).body.text()
+    expect(server.hits('/same-b').at(-1)?.headers['x-api-key']).toBe('k')
+  })
+
   it('caps response size for buffered reads', async () => {
     server.route('/big', (_req, res) => res.end(Buffer.alloc(2048)))
     await expect(client.bytes(`${server.url}/big`, { maxBytes: 1024 })).rejects.toMatchObject({ code: 'EBADRESPONSE' })

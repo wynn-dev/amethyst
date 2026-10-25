@@ -1,15 +1,18 @@
 /**
  * One-shot loopback HTTP listener for the system-browser login fallback (RFC 8252 §7.3).
  *
- * The server binds to `127.0.0.1` only, on a random free port, and advertises
- * `http://localhost:<port>` as the redirect URI. Microsoft ignores the port when matching
- * `localhost` redirect URIs, so a registered `http://localhost` covers every run. The server
+ * The server binds to the loopback interfaces only (`127.0.0.1`, plus `[::1]` on the same port
+ * when IPv6 is available), on a random free port, and advertises `http://localhost:<port>` as the
+ * redirect URI. Microsoft ignores the port only for `localhost` redirect URIs, so a registered
+ * `http://localhost` covers every run. `http://127.0.0.1` would need its own registration (only
+ * possible through the app manifest) and `[::1]` is not supported by Microsoft at all, so we keep
+ * advertising `localhost` and listen on both loopback addresses it may resolve to. The server
  * accepts exactly one redirect carrying the expected `state`, answers it with a small
  * "you can close this window" page, and shuts down. Requests with a wrong `state` or a foreign
  * `Host` header are rejected without ending the wait.
  */
 
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { AuthError } from './errors'
 import { parseAuthorizationResponse } from './oauth'
@@ -69,6 +72,43 @@ function send(res: ServerResponse, status: number, html: string): void {
   res.end(html)
 }
 
+function listen(server: Server, port: number, host: string): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(port, host, () => {
+      server.off('error', reject)
+      resolve()
+    })
+  })
+}
+
+/**
+ * Listen on `127.0.0.1` at a random port, and on `[::1]` at the same port when the machine has
+ * IPv6 loopback (`localhost` may resolve to either). A port taken on `[::1]` picks a new one.
+ */
+async function listenLoopback(handler: (req: IncomingMessage, res: ServerResponse) => void): Promise<Server[]> {
+  // oxlint-disable no-await-in-loop -- each attempt depends on the previous one
+  for (let attempt = 0; ; attempt++) {
+    const v4 = createServer(handler)
+    await listen(v4, 0, '127.0.0.1')
+    const port = (v4.address() as AddressInfo).port
+    const v6 = createServer(handler)
+    try {
+      await listen(v6, port, '::1')
+      return [v4, v6]
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code
+      if (code === 'EADDRINUSE' && attempt < 5) {
+        await new Promise<void>((r) => v4.close(() => r()))
+        continue
+      }
+      // No IPv6 loopback (or a persistent clash): 127.0.0.1 alone still serves most browsers.
+      return [v4]
+    }
+  }
+  // oxlint-enable no-await-in-loop
+}
+
 /** Start the listener. The returned server is already accepting connections. */
 export async function startLoopbackServer(options: LoopbackOptions = {}): Promise<LoopbackServer> {
   const path = options.path ?? ''
@@ -87,7 +127,7 @@ export async function startLoopbackServer(options: LoopbackOptions = {}): Promis
   // The caller observes failures through waitForCode(); avoid unhandled rejections before that.
   result.catch(() => {})
 
-  const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+  const handler = (req: IncomingMessage, res: ServerResponse) => {
     // Reject DNS-rebinding style requests whose Host is not our loopback origin.
     let host: URL
     try {
@@ -119,16 +159,10 @@ export async function startLoopbackServer(options: LoopbackOptions = {}): Promis
       send(res, 400, options.failureHtml ?? FAILURE_HTML)
     }
     settled = true
-  })
+  }
 
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject)
-    server.listen(0, '127.0.0.1', () => {
-      server.off('error', reject)
-      resolve()
-    })
-  })
-  const port = (server.address() as AddressInfo).port
+  const servers = await listenLoopback(handler)
+  const port = (servers[0]!.address() as AddressInfo).port
   const redirectUri = `http://localhost:${port}${path}`
 
   let closed: Promise<void> | undefined
@@ -136,8 +170,13 @@ export async function startLoopbackServer(options: LoopbackOptions = {}): Promis
     closed ??= new Promise<void>((resolve) => {
       clearTimeout(timer)
       options.signal?.removeEventListener('abort', onAbort)
-      server.close(() => resolve())
-      server.closeAllConnections()
+      let open = servers.length
+      for (const server of servers) {
+        server.close(() => {
+          if (--open === 0) resolve()
+        })
+        server.closeAllConnections()
+      }
     })
     return closed
   }

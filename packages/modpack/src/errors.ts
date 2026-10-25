@@ -17,6 +17,10 @@
  * - `EBUSY`: another modpack operation holds this instance.
  * - `EINVALID_ARGUMENT`: the caller passed something the function cannot act on.
  * - `ECOMMIT`: moving staged files into the instance failed; every change was rolled back.
+ * - `EUNSAFE_PATH`: a folder on the way to a target is a symlink that leads out of the instance,
+ *   so writing there would change files elsewhere. Nothing was written through it.
+ * - `EALREADY_ROLLED_BACK`: the backup was already restored once; restoring it again would
+ *   throw away what the user changed since.
  *
  * These are expected, user-facing conditions; do not report them as crashes. Cancellation
  * surfaces as an `AbortError` / `CancelledError` instead.
@@ -34,6 +38,8 @@ export type ModpackErrorCode =
   | 'EBUSY'
   | 'EINVALID_ARGUMENT'
   | 'ECOMMIT'
+  | 'EUNSAFE_PATH'
+  | 'EALREADY_ROLLED_BACK'
 
 /** Extra details attached to a {@link ModpackError}. */
 export interface ModpackErrorDetails {

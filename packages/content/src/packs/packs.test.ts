@@ -1,4 +1,4 @@
-import { rm, writeFile } from 'node:fs/promises'
+import { rm, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { makeZip, tempDir, writeTree } from '../__fixtures__/build'
@@ -88,6 +88,21 @@ describe('resource packs', () => {
     await writeTree(dir, { 'pack.mcmeta': mcmeta })
     expect(await readResourcePack(dir)).toMatchObject({ format: 'folder', valid: true, descriptionPlain: 'Faithful 32x' })
     expect((await readResourcePack(dir)).icon).toBeUndefined()
+  })
+
+  it('never reads a folder pack’s files through a symlink that leaves the pack', async () => {
+    const secret = path.join(tmp, 'secret.png')
+    await writeFile(secret, PNG)
+    const dir = path.join(tmp, 'Linked Pack')
+    await writeTree(dir, { 'pack.mcmeta': mcmeta, 'real/pack.png': PNG })
+    await symlink(secret, path.join(dir, 'pack.png'))
+    await symlink(tmp, path.join(dir, 'up'))
+    await expect(readPackFile(dir, 'pack.png')).rejects.toMatchObject({ code: 'EINVALID_ARGUMENT' })
+    await expect(readPackFile(dir, 'up/secret.png')).rejects.toMatchObject({ code: 'EINVALID_ARGUMENT' })
+    // Real files, and a pack folder that is itself a symlink, still work.
+    expect(await readPackFile(dir, 'real/pack.png')).toEqual(PNG)
+    await symlink(dir, path.join(tmp, 'alias'))
+    expect(await readPackFile(path.join(tmp, 'alias'), 'real/pack.png')).toEqual(PNG)
   })
 
   it('flags packs nested one level too deep and packs without pack.mcmeta', async () => {

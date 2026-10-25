@@ -1,10 +1,11 @@
 import { join } from 'node:path'
-import { app, BrowserWindow, ipcMain, MessageChannelMain, safeStorage, shell, utilityProcess, type MessagePortMain, type UtilityProcess, type WebContents } from 'electron'
+import { app, BrowserWindow, ipcMain, MessageChannelMain, safeStorage, session, shell, utilityProcess, type MessagePortMain, type UtilityProcess, type WebContents } from 'electron'
 import { CONNECT_CHANNEL, PORT_CHANNEL, postResponse, RpcClient, ServiceRegistry, unwrap, type RpcMessage } from '@shared/rpc'
 import type { Events } from '@shared/events'
 import type { HostServices, ReportedError, RuntimeServices } from '@shared/services'
 import { RUNTIME_ENV } from '@shared/paths'
-import { clearAuthSession, closeAuthWindow, openAuthWindow } from './auth-window'
+import { authSession, clearAuthSession, closeAuthWindow, openAuthWindow } from './auth-window'
+import { applySessionProxy } from './proxy'
 import { emitMain } from './rpc/server'
 
 const SHUTDOWN_TIMEOUT_MS = 1_500
@@ -48,6 +49,7 @@ const host: HostServices = {
     }
     showHiddenWindows()
   },
+  setProxy: (url) => applySessionProxy([session.defaultSession, authSession()], url),
 }
 
 /** Show the windows hidden for a running game (also when the user clicks the Dock icon). */

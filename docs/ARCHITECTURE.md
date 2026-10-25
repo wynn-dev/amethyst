@@ -139,12 +139,23 @@ See [`docs/specs/performance.md`](specs/performance.md) for the full rules. The 
 Every push to `main` builds a signed and notarized arm64 build and replaces the rolling
 `nightly` GitHub release. `electron-updater` reads that release's `latest-mac.yml`.
 
-- `.github/workflows/nightly.yml` stamps the version `0.1.0-nightly.<run_number>`, runs the checks,
-  signs (Developer ID, hardened runtime), notarizes and staples the app and the dmg, verifies them
-  with `codesign`/`spctl`, smoke-tests the signed app, then deletes and recreates the `nightly`
-  release and tag. It never touches any other release.
-- `.github/workflows/ci.yml` checks PRs without secrets, including an unsigned `pnpm dist` and a
-  smoke test of the packaged app.
+- `.github/workflows/nightly.yml` has two jobs. `build` (read-only token, no git credentials on
+  disk) stamps the version `0.1.0-nightly.<run_number>`, runs the checks, signs (Developer ID,
+  hardened runtime), notarizes and staples the app and the dmg, verifies them with
+  `codesign`/`spctl` and the Electron fuses, smoke-tests the signed app and uploads the release
+  files as an artifact. `publish` (the only job with `contents: write`; its own concurrency group,
+  never cancelled) updates the `nightly` release in place, swaps `latest-mac.yml` in last without
+  a moment where it is missing, and moves the tag through the API. It never touches any other
+  release. Actions are pinned by commit SHA.
+- `.github/workflows/ci.yml` checks PRs without secrets, including an unsigned `pnpm dist`, a fuses
+  check and a smoke test of the packaged app.
+- The natives workflows (`natives-*.yml`) run only from `main` and never replace a published
+  release: the app pins those files' sha256s.
+- Electron fuses (`electronFuses` in `electron-builder.yml`) turn off `ELECTRON_RUN_AS_NODE`,
+  `NODE_OPTIONS` and `--inspect`, load only an integrity-checked `app.asar`, and encrypt cookies.
+- The smoke test (`AMETHYST_SMOKE=1`) and `AMETHYST_DISABLE_UPDATES=1` need a matching
+  command-line flag (`--amethyst-smoke`, `--amethyst-disable-updates`) in a packaged app, so an
+  environment variable alone never changes a user's build (`apps/desktop/src/main/flags.ts`).
 - Packaging config is `apps/desktop/electron-builder.yml`; entitlements and the icon live in
   `apps/desktop/build/` (regenerate the icon with `pnpm --filter @amethyst/desktop icon`).
 - `pnpm dist` builds an unsigned dmg and zip locally in `apps/desktop/release/`.

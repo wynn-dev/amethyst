@@ -11,6 +11,7 @@ import path from 'node:path'
 import { toArgv } from './argv'
 import { assetIndexCandidates, assetObjectPath, readAssetIndex } from './assets'
 import { GameError } from './errors'
+import { libraryFile } from './libraries'
 import { nativesDirectory } from './natives/extract'
 import type { GlfwArm64Source } from './natives/glfw'
 import type { Lwjgl2Arm64Source } from './natives/lwjgl2'
@@ -301,8 +302,7 @@ export async function buildLaunchCommand(version: ResolvedVersion, options: Buil
   const classpath: string[] = []
   const seen = new Set<string>()
   for (const lib of plan.classpath) {
-    if (!lib.download.path) throw new GameError('ELIBRARY_PATH', `Library ${lib.name} has no path`, { library: lib.name })
-    const p = path.join(dirs.libraries, lib.download.path)
+    const p = libraryFile(dirs.libraries, lib)
     if (!seen.has(p)) classpath.push(p)
     seen.add(p)
   }

@@ -1,39 +1,53 @@
 name: Nightly
 
-# Every push to main builds a signed, notarized arm64 app and replaces the rolling `nightly`
-# GitHub release, which is also the electron-updater feed (apps/desktop/electron-builder.yml).
+# Every push to main builds a signed, notarized arm64 app and replaces the contents of the rolling
+# `nightly` GitHub release, which is also the electron-updater feed (apps/desktop/electron-builder.yml).
 # This workflow only ever touches the `nightly` release and tag.
+#
+# Two jobs, so the token that can write releases never sits next to the build:
+# - `build` runs the checks, signs, notarizes and smoke-tests with a read-only token (and no git
+#   credentials on disk), then hands the release files over as an artifact.
+# - `publish` holds `contents: write`, checks out nothing and runs no repository code. It updates the
+#   release in place, so a run that stops half-way never leaves the feed without a release or
+#   without `latest-mac.yml`, and it is never cancelled by a newer push (its own concurrency group).
+#
+# Actions are pinned by commit SHA (this workflow holds the signing and notarization secrets).
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
-concurrency:
-  group: nightly
-  cancel-in-progress: true
-
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  nightly:
+  build:
     # A manual run from another branch must not publish over main's nightly.
     if: github.ref == 'refs/heads/main'
     runs-on: macos-15
     timeout-minutes: 60
+    # A newer push makes this build pointless: cancel it. (Publishing has its own group below.)
+    concurrency:
+      group: nightly-build
+      cancel-in-progress: true
+    permissions:
+      contents: read
     env:
       RELEASE_DIR: apps/desktop/release
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           fetch-depth: 0 # full history and tags, for "commits since the previous nightly"
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v5
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version-file: .nvmrc
           cache: pnpm
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/Library/Caches/electron
@@ -47,6 +61,7 @@ jobs:
       - run: pnpm test
 
       - name: Set version
+        id: version
         run: |
           # Monotonic semver prerelease: 0.1.0-nightly.9 < 0.1.0-nightly.10 (numeric identifiers).
           VERSION="0.1.0-nightly.${GITHUB_RUN_NUMBER}"
@@ -58,6 +73,7 @@ jobs:
             fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + "\n")
           ' "$VERSION"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Write the App Store Connect API key
         env:
@@ -80,8 +96,8 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         # forceCodeSigning fails the build instead of silently producing an unsigned app.
-        # electron-builder notarizes the .app with notarytool and staples the ticket.
-        # buildVersion becomes CFBundleVersion (a plain monotonic integer).
+        # electron-builder flips the Electron fuses, signs, notarizes the .app with notarytool and
+        # staples the ticket. buildVersion becomes CFBundleVersion (a plain monotonic integer).
         working-directory: apps/desktop
         run: node scripts/dist.mjs -c.forceCodeSigning=true -c.buildVersion="$GITHUB_RUN_NUMBER"
 
@@ -97,7 +113,11 @@ jobs:
             --wait --timeout 30m
           retry xcrun stapler staple "$RELEASE_DIR/Amethyst-arm64.dmg"
 
-      - name: Verify signature, notarization and Gatekeeper
+      - name: Remove the App Store Connect API key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/AuthKey_amethyst.p8"
+
+      - name: Verify signature, notarization, Gatekeeper and fuses
         run: |
           # Apple's notarization/ticket services (CloudKit) occasionally drop connections; retry them.
           retry() { for i in 1 2 3 4 5; do "$@" && return 0; echo "::warning::attempt $i failed: $*"; sleep $((i * 15)); done; return 1; }
@@ -114,12 +134,21 @@ jobs:
           ditto -x -k "$RELEASE_DIR/Amethyst-arm64-mac.zip" "$RUNNER_TEMP/zipcheck"
           codesign --verify --deep --strict "$RUNNER_TEMP/zipcheck/Amethyst.app"
           retry spctl -a -vv "$RUNNER_TEMP/zipcheck/Amethyst.app"
+          # The fuses electron-builder.yml asks for (RunAsNode off, asar-only with integrity…).
+          FUSES="$(pnpm dlx @electron/fuses@1.8.0 read --app "$PWD/$APP")"
+          echo "$FUSES"
+          for fuse in 'RunAsNode is Disabled' 'EnableNodeOptionsEnvironmentVariable is Disabled' \
+            'EnableNodeCliInspectArguments is Disabled' 'EnableEmbeddedAsarIntegrityValidation is Enabled' \
+            'OnlyLoadAppFromAsar is Enabled' 'EnableCookieEncryption is Enabled'; do
+            grep -qF "$fuse" <<<"$FUSES" || { echo "::error::expected fuse: $fuse"; exit 1; }
+          done
 
+      # A packaged app runs the smoke check only with --amethyst-smoke as well as the variable (main/flags.ts).
       - name: Smoke test the signed app
         timeout-minutes: 5
         env:
           AMETHYST_SMOKE: '1'
-        run: '"$RELEASE_DIR/mac-arm64/Amethyst.app/Contents/MacOS/Amethyst"'
+        run: '"$RELEASE_DIR/mac-arm64/Amethyst.app/Contents/MacOS/Amethyst" --amethyst-smoke'
 
       - name: Write release notes
         run: |
@@ -139,33 +168,98 @@ jobs:
               echo
               git log --no-merges -n 20 --pretty='- %s (%h)'
             fi
-          } > "$RUNNER_TEMP/notes.md"
-          cat "$RUNNER_TEMP/notes.md"
+          } > "$RELEASE_DIR/notes.md"
+          cat "$RELEASE_DIR/notes.md"
 
-      - name: Replace the nightly release
+      - name: Collect the release files
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/nightly"
+          cd "$RELEASE_DIR"
+          cp Amethyst-arm64.dmg Amethyst-arm64-mac.zip latest-mac.yml ./*.blockmap notes.md "$RUNNER_TEMP/nightly/"
+          ls -l "$RUNNER_TEMP/nightly"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: nightly-release
+          path: ${{ runner.temp }}/nightly/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Never cancelled half-way by a newer push. A newer run's publish waits for this one; a
+    # publish still waiting is replaced by the newest one.
+    concurrency:
+      group: nightly-publish
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: nightly-release
+          path: nightly
+
+      - name: Update the nightly release in place
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.build.outputs.version }}
+        working-directory: nightly
+        run: |
+          set -euo pipefail
+          # Hard-coded on purpose: this job must never touch any other release or tag
+          # (for example natives-lwjgl2-*).
+          TAG=nightly
+          FEED=latest-mac.yml
+          ASSETS=(Amethyst-arm64.dmg Amethyst-arm64-mac.zip ./*.blockmap)
+          ls -l "${ASSETS[@]}" "$FEED" notes.md
+
+          asset_id() { gh api "repos/$GH_REPO/releases/$RELEASE_ID/assets?per_page=100" --jq ".[] | select(.name == \"$1\") | .id"; }
+
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            # First run, or the release was deleted by hand. (If the tag outlived its release,
+            # gh reuses it; it is moved to this commit below.)
+            gh release create "$TAG" "${ASSETS[@]}" "$FEED" \
+              --target "$GITHUB_SHA" --prerelease --latest=false \
+              --title "Nightly $VERSION" --notes-file notes.md
+          else
+            RELEASE_ID="$(gh release view "$TAG" --json databaseId --jq .databaseId)"
+            # The binaries first; each replacement is a single asset, and the release stays up.
+            gh release upload "$TAG" "${ASSETS[@]}" --clobber
+            # The feed last, and without a moment where it is missing: upload the new one under a
+            # temporary name, then delete the old one and rename the new one into place.
+            cp "$FEED" "$FEED.next"
+            OLD_TMP="$(asset_id "$FEED.next")"
+            [ -z "$OLD_TMP" ] || gh api -X DELETE "repos/$GH_REPO/releases/assets/$OLD_TMP"
+            gh release upload "$TAG" "$FEED.next"
+            NEW_ID="$(asset_id "$FEED.next")"
+            OLD_ID="$(asset_id "$FEED")"
+            [ -z "$OLD_ID" ] || gh api -X DELETE "repos/$GH_REPO/releases/assets/$OLD_ID"
+            gh api -X PATCH "repos/$GH_REPO/releases/assets/$NEW_ID" -f name="$FEED" >/dev/null
+            gh release edit "$TAG" --title "Nightly $VERSION" --notes-file notes.md --prerelease --latest=false
+          fi
+
+          # Move the tag to this commit through the API (no git credentials anywhere).
+          if gh api "repos/$GH_REPO/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            gh api -X PATCH "repos/$GH_REPO/git/refs/tags/$TAG" -f sha="$GITHUB_SHA" -F force=true >/dev/null
+          else
+            gh api -X POST "repos/$GH_REPO/git/refs" -f ref="refs/tags/$TAG" -f sha="$GITHUB_SHA" >/dev/null
+          fi
+
+      - name: Check the updater feed
+        if: always()
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          # Hard-coded on purpose: this step must never touch any other release or tag
-          # (for example natives-lwjgl2-*).
-          TAG=nightly
-          cd "$RELEASE_DIR"
-          ASSETS=(Amethyst-arm64.dmg Amethyst-arm64-mac.zip latest-mac.yml *.blockmap)
-          ls -l "${ASSETS[@]}"
-
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release delete "$TAG" --yes --cleanup-tag
-          fi
-          # The tag can outlive its release (e.g. an interrupted run).
-          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
-            git push origin ":refs/tags/$TAG"
-          fi
-
-          gh release create "$TAG" "${ASSETS[@]}" \
-            --target "$GITHUB_SHA" \
-            --prerelease \
-            --latest=false \
-            --title "Nightly $VERSION" \
-            --notes-file "$RUNNER_TEMP/notes.md"
+          NAMES="$(gh release view nightly --json assets --jq '.assets[].name')"
+          echo "$NAMES"
+          for name in latest-mac.yml Amethyst-arm64-mac.zip Amethyst-arm64.dmg; do
+            grep -qx "$name" <<<"$NAMES" || { echo "::error::the nightly release has no $name"; exit 1; }
+          done

@@ -33,6 +33,27 @@ asar: true
 asarUnpack:
   - '**/*.node'
 
+# Electron fuses, flipped in the binary right before signing (so the signature covers them).
+# Nothing in production runs the Electron binary as Node: the runtime is a `utilityProcess`,
+# workers are `worker_threads`, and the game and Forge processors run Java. Checked by
+# `packaging.test.ts`; read a build back with `pnpm dlx @electron/fuses read --app <Amethyst.app>`.
+electronFuses:
+  runAsNode: false # ELECTRON_RUN_AS_NODE is ignored
+  enableNodeOptionsEnvironmentVariable: false # NODE_OPTIONS / NODE_EXTRA_CA_CERTS are ignored
+  enableNodeCliInspectArguments: false # --inspect and SIGUSR1 are ignored
+  # electron-builder embeds the asar's hash in Info.plist (ElectronAsarIntegrity); the app refuses
+  # to load an app.asar that doesn't match, and loads nothing but app.asar.
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
+  # Cookies on disk (the sign-in window's session) are encrypted with the same Keychain key as
+  # safeStorage. One-way: never turn this back off, or the cookie store becomes unreadable.
+  enableCookieEncryption: true
+  # grantFileProtocolExtraPrivileges stays on (the default): the renderer is loaded from file://
+  # and its module scripts don't load without it (the packaged smoke test checks React rendered).
+  # Unsigned local builds: re-apply the ad-hoc signature the fuse flip invalidates (arm64 refuses
+  # to run a binary with a broken signature). Signed builds are signed after the flip anyway.
+  resetAdHocDarwinSignature: true
+
 # English only (DECISIONS.md): drop Electron's other locale packs.
 electronLanguages:
   - en

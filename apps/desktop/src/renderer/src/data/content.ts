@@ -157,6 +157,14 @@ export function installResourceEvents(): void {
     useScanState.setState((s) => ({ scanning: { ...s.scanning, [`${instanceId}\u0000${kind}`]: scanning } }))
   })
   subscribe('runtime:restarted', () => void queryClient.invalidateQueries({ queryKey: ['res'] }))
+  subscribe('resources:trash-failed', ({ restored, kept, message }) => {
+    const n = restored.length + kept.length
+    toast({
+      kind: 'warning',
+      title: `Couldn’t move ${n === 1 ? 'a deleted file' : `${n} deleted files`} to the Trash`,
+      message: restored.length > 0 ? `${restored.join(', ')} ${restored.length === 1 ? 'was' : 'were'} put back. ${message}` : `Nothing was erased; Amethyst will try again next time. ${message}`,
+    })
+  })
 }
 installResourceEvents()
 

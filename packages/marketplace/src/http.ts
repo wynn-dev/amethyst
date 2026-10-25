@@ -127,6 +127,11 @@ function errorMessageFromBody(text: string): string | undefined {
   return undefined
 }
 
+const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308])
+const MAX_REDIRECTS = 5
+/** Request headers that may follow a redirect to another origin; everything else (API keys) is dropped. */
+const CROSS_ORIGIN_HEADERS = new Set(['accept', 'accept-language', 'content-type', 'user-agent'])
+
 export class Transport {
   readonly platform: MarketSource
   private readonly options: TransportOptions
@@ -208,6 +213,37 @@ export class Transport {
     })
   }
 
+  /**
+   * `fetch` that follows redirects itself, so credentials never reach another host: on a redirect
+   * to a different origin only {@link CROSS_ORIGIN_HEADERS} are kept (CurseForge's `x-api-key`
+   * is dropped; `fetch` itself would forward it). HTTPS to HTTP downgrades are refused.
+   */
+  private async fetchFollowing(url: string, init: { method: string; headers: Record<string, string>; body: string | undefined }, signal: AbortSignal): Promise<Response> {
+    let current = new URL(url)
+    let { method, body } = init
+    let headers = { ...init.headers }
+    for (let hop = 0; ; hop++) {
+      const res = await this.fetchImpl(current.href, { method, headers, body, redirect: 'manual', signal })
+      const location = res.headers.get('location')
+      if (!REDIRECT_STATUS.has(res.status) || !location) return res
+      await res.body?.cancel().catch(() => {})
+      const next = new URL(location, current)
+      const fail = (why: string) => new MarketplaceError('EBAD_RESPONSE', `${why}: ${url}`, { platform: this.platform, url, status: res.status })
+      if (hop >= MAX_REDIRECTS) throw fail('Too many redirects')
+      if (next.protocol !== 'https:' && next.protocol !== 'http:') throw fail('Unsupported redirect')
+      if (current.protocol === 'https:' && next.protocol !== 'https:') throw fail('Refusing an HTTPS to HTTP redirect')
+      if (next.origin !== current.origin) {
+        headers = Object.fromEntries(Object.entries(headers).filter(([k]) => CROSS_ORIGIN_HEADERS.has(k.toLowerCase())))
+      }
+      if (res.status === 303 || ((res.status === 301 || res.status === 302) && method === 'POST')) {
+        method = 'GET'
+        body = undefined
+        headers = Object.fromEntries(Object.entries(headers).filter(([k]) => k.toLowerCase() !== 'content-type'))
+      }
+      current = next
+    }
+  }
+
   private backoff(delays: readonly number[], attempt: number): number {
     const base = delays[Math.min(attempt, delays.length - 1)] ?? 1000
     const jitter = 1 + ((this.options.random ?? Math.random)() * 0.5 - 0.25)
@@ -241,15 +277,10 @@ export class Transport {
         if (body !== undefined) headers['content-type'] = 'application/json'
         let res: Response
         try {
-          res = await this.fetchImpl(url, {
-            method,
-            headers,
-            body,
-            redirect: 'follow',
-            signal: AbortSignal.any([signal, timeout.signal]),
-          })
+          res = await this.fetchFollowing(url, { method, headers, body }, AbortSignal.any([signal, timeout.signal]))
         } catch (e) {
           if (signal.aborted) throw signal.reason
+          if (e instanceof MarketplaceError) throw e
           throw timeout.signal.aborted
             ? new MarketplaceError('ETIMEOUT', `Request timed out: ${url}`, { platform, url, retryable: true, cause: e })
             : new MarketplaceError('ENETWORK', `Network error: ${url}`, { platform, url, retryable: true, cause: e })

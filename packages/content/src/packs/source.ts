@@ -1,7 +1,8 @@
-import { readdir, readFile, stat } from 'node:fs/promises'
+import { readdir, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { openZip, type ZipReader } from '@amethyst/zip'
 import { ContentError, wrapFsError } from '../errors'
+import { readRegularFile } from '../util/fs'
 
 /** Read-only view over a pack that is either a zip archive or an unpacked folder. */
 export interface PackSource {
@@ -48,10 +49,8 @@ class FolderSource implements PackSource {
     return entries.filter((e) => e.isFile()).map((e) => e.name)
   }
   async readBuffer(rel: string, maxBytes = DEFAULT_MAX) {
-    const file = path.join(this.root, ...safeRel(rel))
-    const st = await stat(file)
-    if (st.size > maxBytes) throw new ContentError('EINVALID_ARGUMENT', `${rel} is ${st.size} bytes (limit ${maxBytes})`)
-    return readFile(file)
+    // Never through a symlink out of the pack: its files (icons) are copied into the app's cache.
+    return readRegularFile(path.join(this.root, ...safeRel(rel)), { maxBytes, root: this.root })
   }
   async close() {}
 }

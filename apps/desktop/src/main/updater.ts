@@ -13,6 +13,7 @@
 import { app } from 'electron'
 import type { AppUpdater } from 'electron-updater'
 import type { UpdaterService, UpdaterState } from '@shared/services'
+import { updatesDisabled, isSmokeRun } from './flags'
 import { emitMain } from './rpc/server'
 
 const FIRST_CHECK_DELAY_MS = 10_000
@@ -20,14 +21,20 @@ const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000
 const PROGRESS_MIN_INTERVAL_MS = 250
 
 export class Updater implements UpdaterService {
-  /** Updates only make sense for a packaged, signed build; never in dev or smoke runs. */
-  readonly enabled = app.isPackaged && !process.env.AMETHYST_SMOKE && process.env.AMETHYST_DISABLE_UPDATES !== '1'
+  /**
+   * Updates only make sense for a packaged, signed build; never in dev or smoke runs. In a packaged
+   * build the test switches need their command-line flag too (flags.ts), so an environment
+   * variable alone can't turn updates off.
+   */
+  readonly enabled = app.isPackaged && !isSmokeRun(flagSource()) && !updatesDisabled(flagSource())
 
   #state: UpdaterState = { status: 'idle' }
   #updater?: Promise<AppUpdater>
   #firstCheck?: NodeJS.Timeout
   #interval?: NodeJS.Timeout
   #lastProgressAt = 0
+  /** Between start() and stop() (app quit). A downloaded update only pauses the periodic check. */
+  #started = false
   readonly #listeners = new Set<(state: UpdaterState) => void>()
 
   /** The current state, synchronously (for the menu bar). */
@@ -44,15 +51,27 @@ export class Updater implements UpdaterService {
   /** Schedule the first check and the periodic check. */
   start(): void {
     if (!this.enabled || this.#firstCheck) return
+    this.#started = true
     this.#firstCheck = setTimeout(() => {
       void this.check()
-      this.#interval = setInterval(() => void this.check(), CHECK_INTERVAL_MS)
+      this.#schedule()
     }, FIRST_CHECK_DELAY_MS)
   }
 
   stop(): void {
+    this.#started = false
     clearTimeout(this.#firstCheck)
+    this.#pause()
+  }
+
+  /** The periodic check, if it isn't running. */
+  #schedule(): void {
+    this.#interval ??= setInterval(() => void this.check(), CHECK_INTERVAL_MS)
+  }
+
+  #pause(): void {
     clearInterval(this.#interval)
+    this.#interval = undefined
   }
 
   async getState(): Promise<UpdaterState> {
@@ -109,10 +128,16 @@ export class Updater implements UpdaterService {
         this.#set({ status: 'downloading', percent: Math.min(100, Math.floor(progress.percent)), version })
       })
       updater.on('update-downloaded', (info) => {
-        this.stop() // Nothing more to check until the user restarts.
+        this.#pause() // Nothing more to check until the user restarts, unless the install fails.
         this.#set({ status: 'ready', version: info.version })
       })
-      updater.on('error', (e) => this.#set({ status: 'error', message: errorMessage(e) }))
+      updater.on('error', (e) => {
+        this.#set({ status: 'error', message: errorMessage(e) })
+        // A failed download or install (Squirrel.Mac rejecting the update, or quitAndInstall
+        // failing) must not end automatic checks for the rest of the session: resume them, so a
+        // fixed nightly is still picked up.
+        if (this.#started) this.#schedule()
+      })
       return updater
     })
     return this.#updater
@@ -131,4 +156,8 @@ function errorMessage(e: unknown): string {
   const message = e instanceof Error ? e.message : String(e)
   // electron-updater errors can embed whole HTTP responses; keep the first line.
   return message.split('\n')[0]!.slice(0, 300)
+}
+
+function flagSource() {
+  return { env: process.env, argv: process.argv, packaged: app.isPackaged }
 }

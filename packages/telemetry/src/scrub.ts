@@ -40,6 +40,13 @@ const USER_CONTENT_DIRS = [
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 // Order matters: the most specific patterns run first.
+function isOpaqueToken(m: string): boolean {
+  if (!/[0-9]/.test(m) || !/[A-Za-z]/.test(m)) return false
+  if (!m.includes('/')) return true
+  if (/\+/.test(m) || /[A-Za-z0-9]=+$/.test(m)) return true
+  return m.split(/[/.]/).some((seg) => seg.length >= 16 && /[A-Z]/.test(seg) && /[a-z]/.test(seg) && /[0-9]/.test(seg))
+}
+
 const RULES: [RegExp, string | ((match: string, ...groups: string[]) => string)][] = [
   // Home directories of any user, including inside file:// URLs.
   [/\/(?:Users|home)\/[^/\s'"`:)]+/g, '~'],
@@ -65,8 +72,11 @@ const RULES: [RegExp, string | ((match: string, ...groups: string[]) => string)]
   [/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, '<uuid>'],
   [/\b[0-9a-f]{32}\b/gi, '<uuid>'],
   [/\b[0-9a-f]{24,}\b/gi, '<hex>'],
-  // Long opaque tokens (Microsoft/Xbox tokens, API keys): 32+ base64url-ish chars mixing letters and digits.
-  [/[A-Za-z0-9_\-+/=.!*$]{32,}/g, (m) => (/[0-9]/.test(m) && /[A-Za-z]/.test(m) && !m.includes('/') ? '<token>' : m)],
+  // Long opaque tokens (Microsoft `EwA…` access tokens, Xbox tokens, API keys): 32+ base64-ish
+  // chars mixing letters and digits. Standard base64 also uses `/`, so a run with `/` is a token
+  // unless it looks like a path: it is one when it has `+` or `=` padding, or a `/`-separated piece
+  // of 16+ chars mixing upper case, lower case and digits (path and class-name segments don't).
+  [/[A-Za-z0-9_\-+/=.!*$]{32,}/g, (m) => (isOpaqueToken(m) ? '<token>' : m)],
   // IPv4 and IPv6 addresses.
   [/\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b/g, '<ip>'],
   [/\b(?:[0-9a-f]{1,4}:){7}[0-9a-f]{1,4}\b/gi, '<ip>'],

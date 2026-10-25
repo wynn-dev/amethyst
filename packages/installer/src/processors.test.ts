@@ -294,6 +294,23 @@ describe('spawnProcessor', () => {
     expect(result.log).toContain('oops')
   })
 
+  it('runs processors with the sanitised game environment (no JVM agents, dylibs or ELECTRON_RUN_AS_NODE)', async () => {
+    const java = await fakeJava('env')
+    const baseEnv = { PATH: process.env.PATH, HOME: '/home/x', JAVA_TOOL_OPTIONS: '-javaagent:/evil.jar', _JAVA_OPTIONS: '-Dx', JDK_JAVA_OPTIONS: '-Dy', ELECTRON_RUN_AS_NODE: '1', DYLD_INSERT_LIBRARIES: '/evil.dylib', NODE_OPTIONS: '--require x' }
+    const { log } = await spawnProcessor({ java, jvmArgs: [], classpath: [], mainClass: 'M', args: [], cwd: root }, { baseEnv })
+    expect(log).toContain('HOME=/home/x')
+    for (const k of ['JAVA_TOOL_OPTIONS', '_JAVA_OPTIONS', 'JDK_JAVA_OPTIONS', 'ELECTRON_RUN_AS_NODE', 'DYLD_INSERT_LIBRARIES', 'NODE_OPTIONS']) expect(log).not.toMatch(new RegExp(`^${k}=`, 'm'))
+    // The default is process.env, sanitised the same way.
+    const before = process.env.JAVA_TOOL_OPTIONS
+    process.env.JAVA_TOOL_OPTIONS = '-javaagent:/evil.jar'
+    try {
+      expect((await spawnProcessor({ java, jvmArgs: [], classpath: [], mainClass: 'M', args: [], cwd: root }, {})).log).not.toContain('JAVA_TOOL_OPTIONS')
+    } finally {
+      if (before === undefined) delete process.env.JAVA_TOOL_OPTIONS
+      else process.env.JAVA_TOOL_OPTIONS = before
+    }
+  })
+
   it('reports exit codes and stops on abort', async () => {
     const failing = await fakeJava('echo boom; exit 3')
     expect(await spawnProcessor({ java: failing, jvmArgs: [], classpath: [], mainClass: 'M', args: [], cwd: root }, {})).toMatchObject({ exitCode: 3, log: 'boom\n' })

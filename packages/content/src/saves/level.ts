@@ -1,5 +1,5 @@
 /* oxlint-disable no-await-in-loop -- directory walks are sequential to bound open file handles */
-import { lstat, readdir, readFile, stat } from 'node:fs/promises'
+import { lstat, readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { readNbt, type NbtCompound, type NbtTag } from '@amethyst/nbt'
 import { ContentError, isAbortError, throwIfAborted, wrapFsError } from '../errors'
@@ -223,7 +223,8 @@ export async function readSave(saveDir: string, options: ReadSaveOptions = {}): 
     throw e
   }
   const icon = path.join(saveDir, 'icon.png')
-  const hasIcon = (await stat(icon).catch(() => undefined))?.isFile() ?? false
+  // lstat: a symlinked icon.png is ignored (icons are copied into the app's cache).
+  const hasIcon = (await lstat(icon).catch(() => undefined))?.isFile() ?? false
   const linked = (await lstat(saveDir).catch(() => undefined))?.isSymbolicLink() ?? false
   const info: SaveInfo = { folderName: path.basename(saveDir), path: saveDir, level, linked }
   if (hasIcon) info.iconPath = icon

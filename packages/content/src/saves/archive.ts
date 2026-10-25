@@ -75,6 +75,21 @@ async function listTree(root: string, signal: AbortSignal | undefined): Promise<
   return out.toSorted((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0))
 }
 
+/** Remove every entry below `root` that is not a regular file or a directory (symlinks, FIFOs, sockets). */
+async function removeSpecialEntries(root: string, signal: AbortSignal | undefined): Promise<void> {
+  const stack = [root]
+  while (stack.length > 0) {
+    throwIfAborted(signal)
+    const dir = stack.pop() as string
+    const entries = await readdir(dir, { withFileTypes: true }).catch(() => [])
+    for (const e of entries) {
+      const p = path.join(dir, e.name)
+      if (e.isDirectory()) stack.push(p)
+      else if (!e.isFile()) await rm(p, { force: true })
+    }
+  }
+}
+
 /**
  * Copy a world into `dest` as a point-in-time snapshot. On APFS the tree is cloned (instant,
  * no extra space); elsewhere files are copied. Only files in the initial listing are reported,
@@ -92,7 +107,11 @@ async function snapshotWorld(src: string, dest: string, options: WorldOperationO
   let done = 0
   // One `cp -c -R` clones the whole tree on APFS; anything it missed is copied file by file below.
   const cloned = await cloneTree(src, dest)
-  if (cloned) await rm(path.join(dest, 'session.lock'), { force: true })
+  if (cloned) {
+    await rm(path.join(dest, 'session.lock'), { force: true })
+    // `cp -R` copies symlinks as symlinks: a world must only ever contain real files and folders.
+    await removeSpecialEntries(dest, signal)
+  }
   for (const file of listed) {
     throwIfAborted(signal)
     const target = path.join(dest, ...file.rel.split('/'))

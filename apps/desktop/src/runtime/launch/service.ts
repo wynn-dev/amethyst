@@ -33,6 +33,7 @@ import {
   nativesDirectory,
   planNatives,
   prepareLegacyAssets,
+  redactArgs,
   redactCommand,
   resolveVersion,
   sanitizeEnv,
@@ -118,6 +119,8 @@ export interface LaunchDeps {
   /** Minimum time between two `launch:log` batches per instance (default 100 ms). */
   logBatchMs?: number
   totalMemoryMB?: () => number
+  /** Bound for the `account` step (default 90 s). */
+  accountTimeoutMs?: number
 }
 
 interface Run {
@@ -134,44 +137,110 @@ interface Run {
   log: LogRing
   gameDir: string
   result?: LaunchResult
+  /** Values redacted from every game output line (the game or a mod may print its arguments). */
+  secrets?: readonly string[]
+  /** LWJGL generation of the launched version (from the natives plan). */
+  lwjgl?: 2 | 3
+}
+
+/**
+ * LWJGL 2 era games (Minecraft ≤ 1.12.2, old Forge) often quit with a non-zero exit code after a
+ * normal shutdown (LWJGL/OpenAL teardown). Such an exit is not a crash when the game came up and
+ * left no crash evidence: no crash report, no JVM `hs_err` log, no native load error, no signal.
+ */
+export function isBenignLegacyExit(result: LaunchResult, lwjgl: 2 | 3 | undefined, crashPrinted = false): boolean {
+  return (
+    lwjgl === 2 &&
+    !crashPrinted &&
+    result.crashed &&
+    !result.killed &&
+    result.ready &&
+    result.exitCode !== null &&
+    result.signal === null &&
+    !result.crashReportPath &&
+    !result.hsErrPath &&
+    !result.nativeLoadError
+  )
 }
 
 const MAX_BATCH_LINES = 500
 const MAX_CRASH_BYTES = 512 * 1024
 const PRELAUNCH_TIMEOUT_MS = 5 * 60_000
+/** Upper bound for the `account` step (the token refresh), so Play never spins forever on it. */
+const ACCOUNT_TIMEOUT_MS = 90_000
 /** Exited runs whose logs are kept (beyond the running ones). */
 const MAX_FINISHED_RUNS = 16
 
-/** `sh -c` in the instance folder (the command is user-authored; see launch.md §11.2). */
+/** After the pre-launch shell exits, how long its pipes may stay open (a backgrounded `cmd &` keeps them). */
+const PRELAUNCH_DRAIN_MS = 1_000
+
+/**
+ * `sh -c` in the instance folder (the command is user-authored; see launch.md §11.2), in its own
+ * process group. Resolves when the shell exits (output still held open by a backgrounded
+ * grandchild is dropped after {@link PRELAUNCH_DRAIN_MS}); on timeout or abort the whole group is
+ * killed, so the launch never hangs on it.
+ */
 export const runPreLaunchCommand: PreLaunchRunner = (command, { cwd, env, signal, timeoutMs }) =>
   new Promise((resolve, reject) => {
-    const child = spawn('/bin/sh', ['-c', command], { cwd, env, stdio: ['ignore', 'pipe', 'pipe'], signal })
+    if (signal.aborted) {
+      reject(signal.reason)
+      return
+    }
+    const child = spawn('/bin/sh', ['-c', command], { cwd, env, stdio: ['ignore', 'pipe', 'pipe'], detached: true })
     let stderr = ''
     const keep = (chunk: Buffer) => {
       stderr = (stderr + chunk.toString('utf8')).slice(-4096)
     }
     child.stderr?.on('data', keep)
     child.stdout?.on('data', (c: Buffer) => log.info(`pre-launch: ${c.toString('utf8').trimEnd().slice(0, 2000)}`))
-    const timer = setTimeout(() => child.kill('SIGKILL'), timeoutMs)
-    child.once('error', (e) => {
+    let settled = false
+    let drainTimer: ReturnType<typeof setTimeout> | undefined
+    const killGroup = () => {
+      try {
+        if (child.pid) process.kill(-child.pid, 'SIGKILL')
+      } catch {
+        // Already gone.
+      }
+    }
+    const finish = (settle: () => void) => {
+      if (settled) return
+      settled = true
       clearTimeout(timer)
-      reject(e)
+      clearTimeout(drainTimer)
+      signal.removeEventListener('abort', onAbort)
+      child.stdout?.destroy()
+      child.stderr?.destroy()
+      settle()
+    }
+    const timer = setTimeout(() => {
+      killGroup()
+      finish(() => resolve({ code: null, stderr }))
+    }, timeoutMs)
+    const onAbort = () => {
+      killGroup()
+      finish(() => reject(signal.reason))
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+    child.once('error', (e) => finish(() => reject(e)))
+    child.once('exit', (code) => {
+      drainTimer = setTimeout(() => finish(() => resolve({ code, stderr })), PRELAUNCH_DRAIN_MS)
     })
-    child.once('close', (code) => {
-      clearTimeout(timer)
-      resolve({ code, stderr })
-    })
+    child.once('close', (code) => finish(() => resolve({ code, stderr })))
   })
 
-function toLines(events: readonly LogEvent[]): Omit<Events['launch:log']['lines'][number], 'seq'>[] {
-  return events.map((e) => ({
-    time: e.time,
-    level: e.level,
-    stream: e.stream,
-    thread: e.thread ?? null,
-    logger: e.logger ?? null,
-    text: e.throwable ? `${e.message}\n${e.throwable}` : e.message,
-  }))
+/** Log lines for the ring and the view, with the session's secrets (token, `token:<t>:<uuid>`) redacted. */
+function toLines(events: readonly LogEvent[], secrets: readonly string[] = []): Omit<Events['launch:log']['lines'][number], 'seq'>[] {
+  return events.map((e) => {
+    const text = e.throwable ? `${e.message}\n${e.throwable}` : e.message
+    return {
+      time: e.time,
+      level: e.level,
+      stream: e.stream,
+      thread: e.thread ?? null,
+      logger: e.logger ?? null,
+      text: secrets.length > 0 ? (redactArgs([text], secrets)[0] as string) : text,
+    }
+  })
 }
 
 /** Normalise any pipeline failure to a typed, RPC-friendly error. */
@@ -347,7 +416,19 @@ export class LaunchManager {
 
     // 5. Account.
     const session = await step('account', async () => {
-      const s = await sessionPromise
+      // The refresh takes no signal: bound it, and let a cancel through at once.
+      const s = await new Promise<Session>((resolve, reject) => {
+        const timer = setTimeout(
+          () => reject(new AppError('ETIMEOUT', 'Refreshing the account took too long. Check the connection and try again.', { step: 'account' })),
+          this.#d.accountTimeoutMs ?? ACCOUNT_TIMEOUT_MS,
+        )
+        const onAbort = () => reject(signal.reason)
+        signal.addEventListener('abort', onAbort, { once: true })
+        sessionPromise.then(resolve, reject).finally(() => {
+          clearTimeout(timer)
+          signal.removeEventListener('abort', onAbort)
+        })
+      })
       this.#d.telemetry.redact(s.username)
       return s
     })
@@ -377,6 +458,8 @@ export class LaunchManager {
     for (const w of command.warnings) log.warn(`${version.id}: ${w}`)
 
     // 8. Spawn.
+    run.secrets = command.secrets
+    if (plan.lwjgl) run.lwjgl = plan.lwjgl
     const proc = await step('spawn', () =>
       game.launch(command, {
         detached: true,
@@ -510,7 +593,9 @@ export class LaunchManager {
     }
   }
 
-  #onExit(run: Run, inst: ResolvedInstance, result: LaunchResult): void {
+  #onExit(run: Run, inst: ResolvedInstance, exit: LaunchResult): void {
+    const printed = run.lwjgl === 2 && exit.crashed && run.log.tail(run.log.capacity).some((l) => l.text.includes('---- Minecraft Crash Report ----'))
+    const result = isBenignLegacyExit(exit, run.lwjgl, printed) ? { ...exit, crashed: false } : exit
     run.phase = 'exited'
     run.result = result
     run.ready = false
@@ -544,7 +629,7 @@ export class LaunchManager {
   }
 
   #onLog(run: Run, events: readonly LogEvent[]): void {
-    const lines = toLines(events).map((l) => run.log.push(l))
+    const lines = toLines(events, run.secrets).map((l) => run.log.push(l))
     if ((this.#subscribers.get(run.instanceId) ?? 0) <= 0) return
     let pending = this.#pending.get(run.instanceId)
     if (!pending || pending.launchId !== run.launchId) {

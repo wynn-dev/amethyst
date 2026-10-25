@@ -141,8 +141,16 @@ export class JavaManager {
       const [cache] = await Promise.all([ProbeCache.load(this.#d.layout.javaProbeCache), this.#config.load()])
       this.#cache = cache
       const hidden = new Set(this.#config.value.hidden)
-      // Show what the last scan found right away; the next scan corrects it.
-      this.#records = cache.records().filter((r) => !hidden.has(r.path) && !hidden.has(r.realPath) && r.invalidReason !== 'missing')
+      // Show what the last scan found right away (the next scan corrects it), but never offer a
+      // runtime whose binary was deleted or replaced since: one stat per record, no spawn.
+      const shown = cache.records().filter((r) => !hidden.has(r.path) && !hidden.has(r.realPath) && r.invalidReason !== 'missing')
+      const unchanged = await Promise.all(
+        shown.map(async (r) => {
+          const st = await stat(r.realPath).catch(() => undefined)
+          return st?.isFile() === true && st.mtimeMs === r.mtimeMs && st.size === r.size
+        }),
+      )
+      this.#records = shown.filter((_, i) => unchanged[i])
     })().catch((e: unknown) => {
       this.#loaded = undefined
       throw e
@@ -266,7 +274,7 @@ export class JavaManager {
         { majorVersion: major, ...(options.component ? { component: options.component } : {}) },
         { runtimesDir: this.#d.layout.runtimes, client, ctx },
       )
-      log.info(`installed Java ${result.java.version} (${result.choice.source}) at ${result.java.path}`)
+      log.info(`installed Java ${result.java.version} (${result.choice.source}) at ${result.java.path}: ${result.choice.reason}`)
       this.#cache?.set(result.java)
       this.#merge([result.java])
       await this.#saveCache()

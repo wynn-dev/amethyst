@@ -2,9 +2,8 @@ import { createWriteStream } from 'node:fs'
 import { mkdir, rename, rm } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { pipeline } from 'node:stream/promises'
-import { randomBytes } from 'node:crypto'
 import type { ZipReader } from '@amethyst/zip'
-import { KeyedMutex } from '../fs-util'
+import { KeyedMutex, sweepStaleTemps, tempPathFor } from '../fs-util'
 import type { InstallOptions } from '../options'
 import type { ProcessorRunner } from './processors'
 
@@ -36,7 +35,7 @@ export const forgeMutex = new KeyedMutex()
 /** Stream one zip entry to `dest` through a temp file and an atomic rename. */
 export async function extractEntry(zip: ZipReader, name: string, dest: string, signal?: AbortSignal): Promise<void> {
   await mkdir(dirname(dest), { recursive: true })
-  const tmp = `${dest}.${process.pid}-${randomBytes(4).toString('hex')}.tmp`
+  const tmp = tempPathFor(dest)
   try {
     await pipeline(await zip.openStream(name, { signal }), createWriteStream(tmp), { signal })
     await rename(tmp, dest)
@@ -44,4 +43,5 @@ export async function extractEntry(zip: ZipReader, name: string, dest: string, s
     await rm(tmp, { force: true }).catch(() => {})
     throw e
   }
+  await sweepStaleTemps(dirname(dest))
 }

@@ -43,6 +43,13 @@ export interface InstallOptions extends FetchOptions {
   selectedOptional?: readonly string[]
   /** Files the user downloaded by hand for blocked CurseForge files; matched by hash. */
   manualFiles?: readonly string[]
+  /**
+   * Act only on these pack paths (e.g. the missing files a manual download fills in). Every
+   * other file is left exactly as it is on disk and keeps its entry in the existing lock, so
+   * configs the user changed since the install (or rows excluded from an update) are never
+   * reverted to the pack's version.
+   */
+  only?: readonly string[]
   /** Recorded in the lock, e.g. `{ kind: 'modrinth', projectId, versionId }`. */
   upstream?: ModpackUpstream
   /** @internal Test hooks. */
@@ -114,7 +121,10 @@ export async function installModpack(manifest: ModpackManifest, resolved: Resolv
   return withInstanceMutex(instanceDir, async () => {
     const identity = await instanceIdentity(instanceDir)
     const previousLock = await readModpackLock(instanceDir).catch(() => undefined)
-    const { targets, deselected } = buildTargets(manifest, resolved, selectionFor(resolved, options.selectedOptional))
+    const built = buildTargets(manifest, resolved, selectionFor(resolved, options.selectedOptional))
+    const onlyKeys = options.only ? new Set(options.only.map(pathKey)) : undefined
+    const targets = onlyKeys ? built.targets.filter((t) => onlyKeys.has(pathKey(t.path))) : built.targets
+    const deselected = onlyKeys && previousLock ? previousLock.deselected : built.deselected
     const rejectedManualFiles = await applyManualFiles(targets, options.manualFiles, signal)
 
     const opId = operationId('install', manifest.sha1)
@@ -172,10 +182,15 @@ export async function installModpack(manifest: ModpackManifest, resolved: Resolv
       if (kept.has(t.path)) lockFiles.push(lockEntry(t, kept.get(t.path)))
       else if (stagedByPath.has(t.path)) lockFiles.push(lockEntry(t, stagedByPath.get(t.path)))
     }
+    if (onlyKeys && previousLock) {
+      // A partial install keeps the lock entries of everything it did not touch.
+      const touched = new Set(lockFiles.map((f) => pathKey(f.path)))
+      lockFiles.unshift(...previousLock.files.filter((f) => !touched.has(pathKey(f.path))))
+    }
     const lock: ModpackLock = {
       schemaVersion: 1,
       source: manifest.format,
-      upstream: options.upstream ? { ...options.upstream, packSha1: manifest.sha1 } : undefined,
+      upstream: options.upstream ? { ...options.upstream, packSha1: manifest.sha1 } : onlyKeys ? previousLock?.upstream : undefined,
       pack: { name: manifest.name, version: manifest.version, sha1: manifest.sha1, minecraft: manifest.minecraft, loader: manifest.loader },
       installedAt: Date.now(),
       files: lockFiles,

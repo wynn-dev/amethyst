@@ -2,7 +2,8 @@ import { readFile, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { createHttpClient, type HttpClient } from '@amethyst/net'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { makeMrpack, mrFile, read, sha, startServer, tempDir, writeTree, type Entries, type TestServer } from './__fixtures__/build'
+import { makeCfZip, makeMrpack, mrFile, read, sha, startServer, tempDir, writeTree, type Entries, type TestServer } from './__fixtures__/build'
+import { cfFile, cfMod, mockCurseForge } from './__fixtures__/market'
 import {
   applyModpackUpdate,
   installModpack,
@@ -200,5 +201,30 @@ describe('applyModpackUpdate', () => {
     expect(rb.displaced).toEqual([])
     expect(await snapshot(instance)).toEqual(before)
     expect(await readModpackLock(instance)).toEqual(lock)
+  })
+})
+
+describe('CurseForge updates', () => {
+  it('never removes a file the new version still lists when CurseForge cannot return it (#971)', async () => {
+    const a = cfFile(1, 10, 'a.jar', 'a v1')
+    const b = cfFile(2, 20, 'b.jar', 'b v1')
+    const cf = (zip: string, ids: number[]) => makeCfZip(path.join(tmp, zip), { files: ids.map((id) => ({ projectID: id * 10, fileID: id })) })
+    const v1 = await readModpack(await cf('v1.zip', [1, 2]))
+    const r1 = await resolveModpackFiles(v1, { curseforge: mockCurseForge([a, b], [cfMod(10, 6), cfMod(20, 6)]).client })
+    for (const f of r1.files) f.downloads = f.downloads.map((u) => `${server.url}${new URL(u).pathname}`)
+    server.serve('/files/1/a.jar', 'a v1')
+    server.serve('/files/2/b.jar', 'b v1')
+    await installModpack(v1, r1, { instanceDir: instance, download: download() })
+
+    // v2 still lists b (file 2), but CurseForge rejects that id now.
+    const v2 = await readModpack(await makeCfZip(path.join(tmp, 'v2.zip'), { version: '3.0.0', files: [{ projectID: 10, fileID: 1 }, { projectID: 20, fileID: 2 }] }))
+    const r2 = await resolveModpackFiles(v2, { curseforge: mockCurseForge([a, b], [cfMod(10, 6), cfMod(20, 6)], [2]).client })
+    for (const f of r2.files) f.downloads = f.downloads.map((u) => `${server.url}${new URL(u).pathname}`)
+    const plan = await planModpackUpdate(await readModpackLock(instance), v2, r2, instance)
+    expect(plan.remove).toEqual([])
+    expect(paths(plan.keep)).toEqual(['mods/a.jar', 'mods/b.jar'])
+    await applyModpackUpdate(plan, { download: download() })
+    expect(await read(instance, 'mods/b.jar')).toBe('b v1')
+    expect((await readModpackLock(instance))?.files.map((f) => f.path).toSorted()).toEqual(['mods/a.jar', 'mods/b.jar'])
   })
 })

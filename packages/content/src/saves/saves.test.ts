@@ -58,6 +58,18 @@ describe('level.dat', () => {
     expect(await readLevelDat(bytes)).toMatchObject({ difficulty: 'hard', hardcore: false, difficultyLocked: true })
   })
 
+  it('round-trips a world name with emoji and NUL in Modified UTF-8', async () => {
+    const name = 'Base\u0000 😀 Café'
+    const gz = await levelDat({ levelName: name })
+    expect((await readLevelDat(gz)).levelName).toBe(name)
+    const { gunzipSync } = await import('node:zlib')
+    const raw = gunzipSync(gz)
+    // NUL is C0 80 and the emoji is a surrogate pair of two 3-byte sequences; no 0x00 or F0 lead bytes.
+    const at = raw.indexOf(Buffer.from('Base'))
+    const encoded = raw.subarray(at, at + raw.readUInt16BE(at - 2))
+    expect([...encoded]).toEqual([...Buffer.from('Base'), 0xc0, 0x80, 0x20, 0xed, 0xa0, 0xbd, 0xed, 0xb8, 0x80, 0x20, ...Buffer.from('Café')])
+  })
+
   it('rejects corrupt data with ENOT_A_WORLD', async () => {
     await expect(readLevelDat(Buffer.from([0x1f, 0x8b, 0, 1, 2]))).rejects.toMatchObject({ code: 'ENOT_A_WORLD' })
   })
@@ -128,6 +140,23 @@ describe('export and import', () => {
     const none = await makeZip(path.join(tmp, 'none.zip'), { 'foo/bar.txt': 'x' })
     await expect(importWorld(none, saves)).rejects.toMatchObject({ code: 'ENOT_A_WORLD' })
     expect((await readdir(saves)).filter((n) => n.startsWith('.'))).toEqual([])
+  })
+
+  it('refuses zip-slip entries inside the world root and leaves nothing behind', async () => {
+    const saves = path.join(tmp, 'inst', 'saves')
+    const good = await makeZip(path.join(tmp, 'slip.zip'), { 'World/level.dat': await levelDat(), 'World/xx/evil.txt': 'pwned' })
+    // Same-length rename in both the local and central headers: World/xx/evil.txt → World/../evil.txt.
+    const bytes = await readFile(good)
+    const needle = Buffer.from('World/xx/evil.txt')
+    let hits = 0
+    for (let i = bytes.indexOf(needle); i !== -1; i = bytes.indexOf(needle, i + 1), hits++) bytes.write('World/../evil.txt', i, 'latin1')
+    expect(hits).toBe(2)
+    const evil = path.join(tmp, 'evil.zip')
+    await writeFile(evil, bytes)
+    await expect(importWorld(evil, saves)).rejects.toMatchObject({ code: 'EZIP_UNSAFE_PATH' })
+    await expect(stat(path.join(saves, 'evil.txt'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(stat(path.join(tmp, 'inst', 'evil.txt'))).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await readdir(saves)).toEqual([])
   })
 
   it('round-trips export → import', async () => {

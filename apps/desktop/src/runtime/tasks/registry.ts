@@ -136,6 +136,21 @@ export class TaskRegistry {
     return out
   }
 
+  /**
+   * Cancel every running task (quit): their abort signals stop the helper processes they spawned
+   * (Forge processors, pre-launch commands, `cp`, Java probes), which would otherwise outlive the
+   * runtime. Games are not tasks and keep running. Resolves when all have settled.
+   */
+  cancelAll(reason = 'Amethyst is quitting'): Promise<void> {
+    const out: Promise<unknown>[] = []
+    for (const e of this.#entries.values()) {
+      if (e.finished) continue
+      e.handle.cancel(reason)
+      out.push(e.handle.promise.catch(() => {}))
+    }
+    return Promise.all(out).then(() => {})
+  }
+
   dismiss(id: string): void {
     const entry = this.#entries.get(id)
     if (!entry) return

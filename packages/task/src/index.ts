@@ -210,7 +210,11 @@ export function createTask<T>(name: string, fn: (ctx: TaskContext) => Promise<T>
   }
 }
 
-/** Run `fn` over `items` with at most `concurrency` in flight. Rejects on the first failure and aborts the rest. */
+/**
+ * Run `fn` over `items` with at most `concurrency` in flight. On the first failure the rest are
+ * aborted (no new items start) and the promise rejects with that error once the items already
+ * running have settled, so callers never clean up while work is still writing.
+ */
 export async function mapLimit<I, O>(
   items: readonly I[],
   concurrency: number,
@@ -225,14 +229,22 @@ export async function mapLimit<I, O>(
     while (next < items.length) {
       if (inner.aborted) throw inner.reason instanceof Error ? inner.reason : new CancelledError(String(inner.reason ?? 'Cancelled'))
       const index = next++
+      // oxlint-disable-next-line no-await-in-loop -- each worker runs one item at a time by design
       results[index] = await fn(items[index] as I, index, inner)
     }
   }
-  try {
-    await Promise.all(Array.from({ length: Math.max(1, Math.min(concurrency, items.length)) }, worker))
-  } catch (e) {
-    controller.abort(e)
-    throw e
-  }
+  let failed = false
+  let failure: unknown
+  const workers = Array.from({ length: Math.max(1, Math.min(concurrency, items.length)) }, () =>
+    worker().catch((e: unknown) => {
+      if (!failed) {
+        failed = true
+        failure = e
+        controller.abort(e)
+      }
+    }),
+  )
+  await Promise.all(workers)
+  if (failed) throw failure
   return results
 }

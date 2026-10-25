@@ -147,7 +147,8 @@ export function rowChanged(a: ResourceRow | undefined, b: ResourceRow): boolean 
  * priority): 0 is the top. Keyed by the file name on disk.
  */
 export function packOrder(enabledList: readonly string[]): Map<string, number> {
-  const files = enabledList.filter((id) => id.startsWith('file/')).map((id) => id.slice('file/'.length))
+  // Keyed by NFC name: callers look up with `fileName.normalize('NFC')` (APFS may hold NFD names).
+  const files = enabledList.filter((id) => id.startsWith('file/')).map((id) => id.slice('file/'.length).normalize('NFC'))
   const out = new Map<string, number>()
   files.forEach((name, i) => out.set(name, files.length - 1 - i))
   return out

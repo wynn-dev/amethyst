@@ -134,9 +134,20 @@ export interface SerializedAuthError extends Omit<AuthErrorDetails, 'cause'> {
 
 const BODY_LIMIT = 512
 
-/** Truncate a response body for inclusion in an error. */
+/** JSON string fields that carry credentials in Microsoft, Xbox and Minecraft responses. */
+const SECRET_FIELD = /("(?:access_token|refresh_token|id_token|device_code|accessToken|refreshToken|Token|token)"\s*:\s*")(?:[^"\\]|\\.)*"/g
+/** Anything JWT-shaped (Minecraft access tokens, id tokens). */
+const JWT = /\beyJ[\w-]+\.[\w-]+\.[\w-]*/g
+
+/** Replace credentials in a response body (e.g. a malformed 200 that still carried tokens). */
+export function redactSecrets(text: string): string {
+  return text.replace(SECRET_FIELD, '$1<redacted>"').replace(JWT, '<redacted>')
+}
+
+/** Redact and truncate a response body for inclusion in an error. Errors cross IPC and reach logs. */
 export function truncateBody(text: string): string {
-  return text.length > BODY_LIMIT ? `${text.slice(0, BODY_LIMIT)}…` : text
+  const clean = redactSecrets(text)
+  return clean.length > BODY_LIMIT ? `${clean.slice(0, BODY_LIMIT)}…` : clean
 }
 
 export class AuthError extends Error {

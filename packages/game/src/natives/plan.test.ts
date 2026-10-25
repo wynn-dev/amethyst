@@ -167,6 +167,23 @@ describe('planNatives on an arm64 JVM', () => {
     })
   }
 
+  it('26.3 (year-based id, minor 3 < 19): libraries are used as shipped, nothing is rewritten', async () => {
+    const v = await resolveVersion(FIXTURE_VERSIONS, '26.3')
+    const p = planNatives(v, { jvmArch: 'arm64', lwjgl2: { baseUrl: 'https://x.invalid/', artifacts: [] }, glfw: { baseUrl: 'https://x.invalid/', artifacts: [] } })
+    expect(p.ok).toBe(true)
+    expect(p.replacements).toEqual([])
+    expect(p.issues).toEqual([])
+    expect(p.extract).toEqual([])
+    expect(new Set(p.libraries.filter((l) => l.coordinate.group === 'org.lwjgl').map((l) => l.coordinate.version))).toEqual(new Set(['3.4.3']))
+  })
+
+  it('decides by the library list, not the version id: a snapshot id with LWJGL 3.2.1 is still upgraded', async () => {
+    const v = await resolveVersion(FIXTURE_VERSIONS, '1.16.5')
+    const p = planNatives({ ...v, minecraftVersion: '20w45a' }, { jvmArch: 'arm64', lwjgl2: TEST_LWJGL2_SOURCE, glfw: TEST_GLFW_SOURCE })
+    expect(p.ok).toBe(true)
+    expect(new Set(p.libraries.filter((l) => l.coordinate.group === 'org.lwjgl').map((l) => l.coordinate.version))).toEqual(new Set(['3.3.1']))
+  })
+
   it('1.21: lwjgl-freetype keeps its odd natives-macos-patch jar and gets nothing synthesised', async () => {
     const p = await plan('1.21', 'arm64')
     expect(p.libraries.filter((l) => l.coordinate.artifact === 'lwjgl-freetype').map((l) => l.coordinate.classifier)).toEqual([undefined, 'natives-macos-arm64', 'natives-macos-patch'])

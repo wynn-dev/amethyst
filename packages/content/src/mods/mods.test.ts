@@ -228,6 +228,9 @@ modId = "badmod"
 type = "incompatible"
 `
 
+/** A mods.toml whose only dependency is on `dep` (NeoForge 1.20.2–1.20.4 jars still used this file). */
+const neoToml = (dep: string) => `modLoader="javafml"\nloaderVersion="[1,)"\n[[mods]]\nmodId="m"\nversion="1.0"\n[[dependencies.m]]\nmodId="${dep}"\ntype="required"\nversionRange="[20.4,)"\n`
+
 describe('mods.toml', () => {
   it('substitutes ${file.jarVersion} from the manifest and reads dependencies', async () => {
     const file = await jar('forge.jar', {
@@ -277,6 +280,13 @@ describe('mods.toml', () => {
     })
     const meta = await readModMetadata(file)
     expect(meta).toMatchObject({ loaders: ['neoforge'], id: 'neomod', environment: 'client', loaderRange: '[20.4,)' })
+  })
+
+  it('labels a NeoForge 1.20.2–1.20.4 mods.toml (depends on neoforge, not forge) as NeoForge', async () => {
+    const neo = await readModMetadata(await jar('neo-1204.jar', { 'META-INF/mods.toml': neoToml('neoforge') }))
+    expect(neo).toMatchObject({ loaders: ['neoforge'], primaryLoader: 'neoforge', loaderRange: '[20.4,)' })
+    const forge = await readModMetadata(await jar('forge-47.jar', { 'META-INF/mods.toml': neoToml('forge') }))
+    expect(forge.loaders).toEqual(['forge'])
   })
 })
 

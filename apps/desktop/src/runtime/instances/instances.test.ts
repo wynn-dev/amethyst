@@ -1,10 +1,11 @@
-import { lstat, mkdir, mkdtemp, readdir, readFile, readlink, rename, rm, symlink, writeFile } from 'node:fs/promises'
+import { cp, lstat, mkdir, mkdtemp, readdir, readFile, readlink, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Events } from '@shared/events'
 import { dataLayout, type DataLayout } from '../layout'
 import { TaskRegistry } from '../tasks/registry'
+import { folderNameFor } from './model'
 import { InstanceManager } from './service'
 
 let root: string
@@ -217,6 +218,109 @@ describe('InstanceManager', () => {
     const repaired = await reloaded.repair(row?.id ?? '', { minecraft: '1.21.1' })
     expect(repaired).toMatchObject({ state: 'ok', runtime: { minecraft: '1.21.1' } })
     expect((await readdir(path.dirname(meta))).some((n) => n.startsWith('instance.json.corrupt-'))).toBe(true)
+  })
+
+  it('maps every display name to a safe folder name through one sanitizer', () => {
+    expect(folderNameFor('Pack: Remix')).toBe('Pack_ Remix')
+    expect(folderNameFor('a/b\\c')).toBe('a_b_c')
+    expect(folderNameFor('Trailing... ')).toBe('Trailing')
+    expect(folderNameFor('  ..hidden')).toBe('hidden')
+    expect(folderNameFor('...')).toBe('Instance')
+    expect(folderNameFor('Café')).toBe('Café')
+    expect(folderNameFor('Сборка 🎮 生存')).toBe('Сборка 🎮 生存')
+    // Long names leave room for “ (2)” and rename temporaries within the 255-byte limit.
+    const long = folderNameFor(`${'字'.repeat(84)}.`)
+    expect(Buffer.byteLength(long)).toBeLessThanOrEqual(200)
+    expect(long).not.toMatch(/[.\s]$/)
+  })
+
+  it('creates instances from awkward names: colons, slashes, trailing dots, emoji, Cyrillic, CJK, 255 bytes', async () => {
+    const m = manager()
+    await m.load()
+    const long = 'x'.repeat(255)
+    const names = ['Pack: Remix', 'a/b\\c', 'Trailing... ', 'Сборка 🎮', '生存 モード', '👨‍👩‍👧‍👦', 'é'.repeat(127), long]
+    // oxlint-disable-next-line no-await-in-loop -- created one after another on purpose
+    for (const name of names) await m.create({ name, runtime: { minecraft: '1.21' } })
+    // The same 255-byte name again (create and duplicate): the suffixed folders must still fit.
+    const first = m.list().find((r) => r.name === long)
+    const twice = [await m.create({ name: long, runtime: { minecraft: '1.21' } }), await m.duplicate(first?.id ?? '')]
+    const folders = await readdir(layout.instances)
+    expect(folders).toHaveLength(names.length + 2)
+    for (const f of folders) {
+      expect(f.startsWith('.')).toBe(false)
+      expect(Buffer.byteLength(f)).toBeLessThanOrEqual(255)
+    }
+    expect(new Set(folders.map((f) => f.normalize('NFC').toLowerCase())).size).toBe(folders.length)
+    expect(twice.every((d) => d.state === 'ok')).toBe(true)
+    const again = manager()
+    expect(await again.load()).toBe(names.length + 2)
+
+    // Deleting it rescues its worlds into `<folder name> <stamp>`, which must fit too.
+    await mkdir(path.join(twice[0]?.path ?? '', 'saves', 'W'), { recursive: true })
+    expect((await again.delete(twice[0]?.id ?? '')).rescuedWorlds).toHaveLength(1)
+  })
+
+  it('keeps names and folders unique across concurrent creations and NFC/NFD spellings', async () => {
+    const m = manager()
+    await m.load()
+    const made = await Promise.all([
+      m.create({ name: 'Same', runtime: { minecraft: '1.21' } }),
+      m.create({ name: 'Same', runtime: { minecraft: '1.21' } }),
+      m.create({ name: 'same', runtime: { minecraft: '1.21' } }),
+      m.create({ name: 'SAME', runtime: { minecraft: '1.21' } }),
+    ])
+    const keys = made.map((d) => d.name.toLowerCase())
+    expect(new Set(keys).size).toBe(4)
+    expect(new Set(made.map((d) => d.path.toLowerCase())).size).toBe(4)
+
+    const nfc = await m.create({ name: 'Café', runtime: { minecraft: '1.21' } })
+    const nfd = await m.create({ name: 'Café', runtime: { minecraft: '1.21' } })
+    expect(nfd.name.normalize('NFC')).toBe('Café (2)')
+    expect(nfd.path).not.toBe(nfc.path)
+    await expect(m.rename(nfc.id, 'Café (2)')).rejects.toMatchObject({ code: 'ENAME_TAKEN' })
+    expect(await readdir(layout.instances)).toHaveLength(6)
+  })
+
+  it('loads each folder once and gives a Finder copy its own id and name', async () => {
+    const m = manager()
+    await m.load()
+    const ext = path.join(root, 'elsewhere', 'Game')
+    await mkdir(ext, { recursive: true })
+    const imported = await m.import({ path: ext, mode: 'in-place', runtime: { minecraft: '1.21' } })
+    const original = await m.create({ name: 'Orig', runtime: { minecraft: '1.21' } })
+    await m.flush()
+    // A second registry entry for the same folder in another case / normalisation (APFS: same folder).
+    const reg = JSON.parse(await readFile(layout.registry, 'utf8'))
+    reg.external.push({ id: 'other-id-123', path: path.join(root, 'ELSEWHERE', 'game'), name: 'dup' })
+    await writeFile(layout.registry, JSON.stringify(reg))
+    await mkdir(path.join(layout.instances, 'Orig copy'))
+    await cp(path.join(original.path, '.amethyst'), path.join(layout.instances, 'Orig copy', '.amethyst'), { recursive: true })
+
+    const again = manager()
+    expect(await again.load()).toBe(3)
+    const rows = again.list()
+    expect(rows.filter((r) => r.external).map((r) => r.id)).toEqual([imported.id])
+    const origs = rows.filter((r) => !r.external)
+    expect(new Set(origs.map((r) => r.id)).size).toBe(2)
+    expect(origs.map((r) => r.name).toSorted()).toEqual(['Orig', 'Orig (2)'])
+  })
+
+  it('keeps an unreachable external instance listed as missing instead of pruning it', async () => {
+    const m = manager()
+    await m.load()
+    const ext = path.join(root, 'volume', 'Game')
+    await mkdir(ext, { recursive: true })
+    const inst = await m.import({ path: ext, mode: 'in-place', runtime: { minecraft: '1.21' } })
+    await rename(path.join(root, 'volume'), path.join(root, 'unmounted'))
+    const again = manager()
+    await again.load()
+    expect(again.get(inst.id)).toMatchObject({ state: 'missing', external: true })
+    // Another registry write keeps it.
+    const other = path.join(root, 'other')
+    await mkdir(other)
+    await again.import({ path: other, mode: 'in-place', runtime: { minecraft: '1.21' } })
+    const reg = JSON.parse(await readFile(layout.registry, 'utf8'))
+    expect(reg.external.map((r: { id: string }) => r.id)).toContain(inst.id)
   })
 
   it('stores icons by content and tracks play time', async () => {

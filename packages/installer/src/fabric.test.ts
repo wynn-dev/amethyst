@@ -133,4 +133,23 @@ describe('runInstall with Fabric', () => {
     expect(await exists(join(root, 'versions', mini.id, `${mini.id}.jar`))).toBe(true)
     expect(await exists(join(root, 'versions', 'mini-f-fabric0.20.1', '.install-lock'))).toBe(true)
   })
+
+  it('re-plans an installed loader version from its local profile when the meta service is down', async () => {
+    await publishMiniVersion(server, 'mini-o')
+    await publishFabricProfile('mini-o', '0.20.2')
+    const plan = await planInstall({ minecraft: 'mini-o', loader: { kind: 'fabric', version: '0.20.2' } }, { root, meta, http })
+    await runInstall(plan, { root, http, meta, assetsBaseUrl: `${server.url}/assets/` })
+
+    server.route('/fabric/v2/versions/loader/mini-o/0.20.2/profile/json', (_req, res) => {
+      res.statusCode = 503
+      res.end()
+    })
+    const again = await planInstall({ minecraft: 'mini-o', loader: { kind: 'fabric', version: '0.20.2' } }, { root, meta, http })
+    expect(again.versionId).toBe('mini-o-fabric0.20.2')
+    expect(again.loader).toMatchObject({ kind: 'fabric', version: '0.20.2', profile: { id: 'mini-o-fabric0.20.2', inheritsFrom: 'mini-o' } })
+    await expect(runInstall(again, { root, http, meta, assetsBaseUrl: `${server.url}/assets/` })).resolves.toMatchObject({ versionId: 'mini-o-fabric0.20.2' })
+
+    // Without a local copy the failure is reported as before.
+    await expect(planInstall({ minecraft: 'mini-o', loader: { kind: 'fabric', version: '0.20.3' } }, { root, meta, http })).rejects.toThrow('HTTP 404')
+  })
 })

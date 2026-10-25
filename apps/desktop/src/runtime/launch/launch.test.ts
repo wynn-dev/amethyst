@@ -11,7 +11,7 @@ import { InstanceManager } from '../instances/service'
 import { JavaManager } from '../java/service'
 import { TaskRegistry } from '../tasks/registry'
 import { AppError } from '../util/errors'
-import { LaunchManager, type GameApi, type LaunchDeps } from './service'
+import { isBenignLegacyExit, LaunchManager, type GameApi, type LaunchDeps } from './service'
 
 let root: string
 let layout: DataLayout
@@ -186,6 +186,13 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true })
 })
 
+/** Accounts whose session refresh never settles. */
+const hung = () =>
+  Promise.resolve({
+    list: () => [{ id: 'm:1', kind: 'microsoft', name: 'A', uuid: '1', selected: true, status: 'ok', avatarUrl: null, skin: null, cape: null }],
+    sessionForLaunch: () => new Promise<never>(() => {}),
+  }) as never
+
 describe('LaunchManager pipeline', () => {
   it('runs the steps in order and reports running, ready and exit', async () => {
     const h = await harness()
@@ -215,6 +222,32 @@ describe('LaunchManager pipeline', () => {
     expect(h.calls).toContain('telemetry:launch_exited')
     await vi.waitFor(() => expect(h.instances.get(inst.id).lastPlayedAt).toBeGreaterThan(0))
     expect(h.launch.listRunning()).toEqual([])
+  })
+
+  it('does not report a crash for a legacy (LWJGL 2) game quitting normally with a non-zero code', async () => {
+    const lwjgl2Plan = { ok: true, issues: [], warnings: [], jvmArch: 'arm64', lwjgl: 2, libraries: [], classpath: [], extract: [], replacements: [], revision: 1, platform: { name: 'osx', version: '13.0', arch: 'arm64' } } as unknown as NativesPlan
+    const h = await harness({}, { planNatives: (() => lwjgl2Plan) as never })
+    await writeVersion(modernJson('1.21.1'))
+    const inst = await h.instances.create({ name: 'Old', runtime: { minecraft: '1.21.1' } })
+    await h.instances.update(inst.id, { versionId: '1.21.1' })
+    await h.launch.launch(inst.id)
+    h.game.current?.exit({ exitCode: 255, crashed: true, ready: true })
+    await vi.waitFor(() => expect(states(inst.id).at(-1)).toMatchObject({ state: 'exited', code: 255, crashed: false }))
+
+    // A crash report printed to the output still counts.
+    await h.launch.launch(inst.id)
+    h.game.current?.log(['---- Minecraft Crash Report ----', '// Oops.'])
+    h.game.current?.exit({ exitCode: 255, crashed: true, ready: true })
+    await vi.waitFor(() => expect(states(inst.id).at(-1)).toMatchObject({ state: 'exited', code: 255, crashed: true }))
+
+    const base: LaunchResult = { exitCode: 1, signal: null, crashed: true, killed: false, ready: true, durationMs: 1 }
+    expect(isBenignLegacyExit(base, 2)).toBe(true)
+    expect(isBenignLegacyExit(base, 3)).toBe(false)
+    expect(isBenignLegacyExit({ ...base, ready: false }, 2)).toBe(false)
+    expect(isBenignLegacyExit({ ...base, crashReportPath: '/x/crash-reports/a.txt' }, 2)).toBe(false)
+    expect(isBenignLegacyExit({ ...base, hsErrPath: '/x/hs_err_pid1.log' }, 2)).toBe(false)
+    expect(isBenignLegacyExit({ ...base, nativeLoadError: 'architecture' }, 2)).toBe(false)
+    expect(isBenignLegacyExit({ ...base, exitCode: null, signal: 'SIGSEGV' }, 2)).toBe(false)
   })
 
   it('installs first when the version is missing, and repairs before spawning', async () => {
@@ -316,6 +349,22 @@ describe('LaunchManager pipeline', () => {
     await expect(p).rejects.toMatchObject({ code: 'ECANCELLED' })
     expect(h.calls).not.toContain('spawn')
   })
+
+  it('bounds a hung account refresh with ETIMEOUT, and a cancel during it is immediate', async () => {
+    const h = await harness({ accounts: hung, accountTimeoutMs: 50 })
+    await writeVersion(modernJson('1.21.1'))
+    const inst = await h.instances.create({ name: 'T', runtime: { minecraft: '1.21.1' } })
+    await h.instances.update(inst.id, { versionId: '1.21.1' })
+    await expect(h.launch.launch(inst.id)).rejects.toMatchObject({ code: 'ETIMEOUT' })
+    expect(states(inst.id).at(-1)).toMatchObject({ state: 'failed', code: 'ETIMEOUT' })
+
+    const h2 = await harness({ accounts: hung, accountTimeoutMs: 60_000 })
+    const p = h2.launch.launch(inst.id)
+    await vi.waitFor(() => expect(steps(inst.id).at(-1)).toBe('account'))
+    await h2.launch.kill(inst.id)
+    await expect(p).rejects.toMatchObject({ code: 'ECANCELLED' })
+    expect(h2.calls).not.toContain('spawn')
+  })
 })
 
 describe('LaunchManager logs', () => {
@@ -351,6 +400,29 @@ describe('LaunchManager logs', () => {
     // The log of the last run stays readable after the exit.
     expect(h.launch.getLog(inst.id).running).toBe(false)
     expect(h.launch.getLog(inst.id).lines.length).toBe(50)
+  })
+
+  it('redacts the session token from game output lines', async () => {
+    const secret = 'eyJsecretAccessToken123'
+    const session = `token:${secret}:0123abcd`
+    const plan = { ok: true, issues: [], warnings: [], jvmArch: 'arm64', libraries: [], classpath: [], extract: [], replacements: [], revision: 1, platform: { name: 'osx', version: '13.0', arch: 'arm64' } } as unknown as NativesPlan
+    const command: LaunchCommand = { java: JAVA.path, args: ['--accessToken', secret], wrapper: [], cwd: root, env: {}, secrets: [secret, session], warnings: [], natives: plan, nativesDir: root, classpath: [], features: {} }
+    const h = await harness({}, { buildLaunchCommand: async () => command })
+    await writeVersion(modernJson('1.21.1'))
+    const inst = await h.instances.create({ name: 'R', runtime: { minecraft: '1.21.1' } })
+    await h.instances.update(inst.id, { versionId: '1.21.1' })
+    await h.launch.launch(inst.id)
+    h.launch.subscribeLog(inst.id)
+    h.game.current?.log([`(Session ID is ${session})`, `args: --accessToken ${secret} --version 1.21.1`])
+    await vi.waitFor(() => expect(events.some((e) => e.event === 'launch:log')).toBe(true))
+    const batch = events.find((e) => e.event === 'launch:log')?.payload as Events['launch:log']
+    const pushed = batch.lines.map((l) => l.text)
+    const buffered = h.launch.getLog(inst.id).lines.map((l) => l.text)
+    for (const texts of [pushed, buffered]) {
+      expect(texts.join('\n')).not.toContain(secret)
+      expect(texts).toEqual(['(Session ID is <redacted>)', 'args: --accessToken <redacted> --version 1.21.1'])
+    }
+    h.game.current?.exit()
   })
 })
 

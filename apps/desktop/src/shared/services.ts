@@ -1956,6 +1956,8 @@ export interface HostServices {
   openAuthWindow(url: string, redirectUri: string): Promise<string>
   /** Close the sign-in window, if open (its pending `openAuthWindow` rejects with `ECANCELLED`). */
   closeAuthWindow(): Promise<void>
+  /** Sign the sign-in window out: clear its partition's cookies and storage (on account removal). */
+  clearAuthSession(): Promise<void>
   /** Open an `https:` URL in the default browser. Other schemes are rejected. */
   openExternal(url: string): Promise<void>
   /**

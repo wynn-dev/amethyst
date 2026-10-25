@@ -19,6 +19,7 @@ import {
   isContentFileName,
   isPathInside,
   listBackups,
+  packIdKey,
   PARSER_VERSION,
   pathKey,
   pruneBackups,
@@ -320,8 +321,9 @@ export class ResourceManager {
     const kind = col.kind
     const records = new Map(await this.#records(col.dir))
     const enabledList = kind === 'resourcepacks' ? await readEnabledPacks(st.dir) : []
-    const enabledPacks = kind === 'resourcepacks' ? new Set(enabledList) : undefined
+    const enabledPacks = kind === 'resourcepacks' ? new Set(enabledList.map(packIdKey)) : undefined
     const activeShader = kind === 'shaderpacks' ? await readActiveShaderPack(st.dir) : undefined
+    const activeShaderKey = typeof activeShader === 'string' ? pathKey(activeShader) : undefined
     const prefer = this.#preferLoader(st)
     const listed = await mapLimit(dirents, 32, async (d) => {
       const p = path.join(col.dir, d.name)
@@ -333,7 +335,7 @@ export class ResourceManager {
     const items: { id: string; entry?: ContentEntry; pending?: ResourceRow; icon?: string }[] = []
     for (const l of listed.filter((x) => x !== undefined).toSorted((a, b) => (a.name < b.name ? -1 : 1))) {
       const id = this.#uniqueId(items.map((i) => i.id), resourceId(l.name, kind))
-      const enabled = kind === 'mods' ? stripDisabled(l.name) === l.name : kind === 'resourcepacks' ? (enabledPacks?.has(resourcePackId(l.name)) ?? false) : activeShader === l.name
+      const enabled = kind === 'mods' ? stripDisabled(l.name) === l.name : kind === 'resourcepacks' ? (enabledPacks?.has(resourcePackId(l.name)) ?? false) : activeShaderKey === pathKey(l.name)
       const record = records.get(scanCacheKey(l.path))
       if (record && record.size === l.st.size && record.mtimeMs === l.st.mtimeMs && record.ino === l.st.ino && record.parserVersion === PARSER_VERSION) {
         const entry: ContentEntry = {
@@ -373,7 +375,7 @@ export class ResourceManager {
   #applyPackOrder(items: Map<string, Item>, enabledList: string[]): void {
     const order = packOrder(enabledList)
     for (const item of items.values()) {
-      const pos = item.row.enabled ? order.get(item.row.fileName) : undefined
+      const pos = item.row.enabled ? order.get(item.row.fileName.normalize('NFC')) : undefined
       if (pos !== undefined) item.row = { ...item.row, order: pos }
       else if (item.row.order !== undefined) {
         const { order: _drop, ...row } = item.row
@@ -735,6 +737,7 @@ export class ResourceManager {
     const out = analyzeMods(
       items.filter((i) => i.row.enabled && !i.row.problem && i.entry?.mod),
       loader ? loader.kind : null,
+      runtime.minecraft,
     )
     out.broken = items.flatMap((i) => (i.row.problem ? [{ id: i.row.id, message: i.row.problem.message }] : []))
     return out

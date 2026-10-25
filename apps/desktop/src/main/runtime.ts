@@ -1,9 +1,9 @@
 import { join } from 'node:path'
 import { app, BrowserWindow, ipcMain, MessageChannelMain, safeStorage, shell, utilityProcess, type UtilityProcess, type WebContents } from 'electron'
-import { CONNECT_CHANNEL, PORT_CHANNEL, ServiceRegistry, type RpcMessage } from '@shared/rpc'
+import { CONNECT_CHANNEL, PORT_CHANNEL, postResponse, ServiceRegistry, type RpcMessage } from '@shared/rpc'
 import type { HostServices, ReportedError } from '@shared/services'
 import { RUNTIME_ENV } from '@shared/paths'
-import { closeAuthWindow, openAuthWindow } from './auth-window'
+import { clearAuthSession, closeAuthWindow, openAuthWindow } from './auth-window'
 import { emitMain } from './rpc/server'
 
 const SHUTDOWN_TIMEOUT_MS = 1_500
@@ -31,6 +31,7 @@ const host: HostServices = {
   async closeAuthWindow() {
     closeAuthWindow()
   },
+  clearAuthSession: () => clearAuthSession(),
   async openExternal(url) {
     if (!/^https:\/\//i.test(url)) throw Object.assign(new Error('Only https: links can be opened'), { code: 'EINVALID_ARGUMENT' })
     await shell.openExternal(url)
@@ -93,15 +94,25 @@ export class RuntimeSupervisor {
     this.#stopping = true
     const child = this.#child
     if (!child) return
-    await new Promise<void>((resolve) => {
-      const timer = setTimeout(resolve, timeoutMs)
+    const exited = await new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => resolve(false), timeoutMs)
       child.once('exit', () => {
         clearTimeout(timer)
-        resolve()
+        resolve(true)
       })
       child.postMessage({ t: 'shutdown' })
     })
+    if (exited) return
+    // The runtime handles SIGTERM (`kill()`) by starting the same shutdown that is already stuck,
+    // so escalate: a hung runtime must never outlive the app.
     child.kill()
+    if (child.pid !== undefined) {
+      try {
+        process.kill(child.pid, 'SIGKILL')
+      } catch {
+        // Already gone.
+      }
+    }
   }
 
   /** Forward a main-process error to the runtime's telemetry service, which applies consent. */
@@ -128,7 +139,7 @@ export class RuntimeSupervisor {
     child.on('message', async (msg: RpcMessage) => {
       if (msg?.t !== 'req') return
       const result = await this.#hostRegistry.dispatch(msg)
-      child.postMessage({ t: 'res', id: msg.id, result } satisfies RpcMessage)
+      postResponse((res) => child.postMessage(res), msg.id, result)
     })
 
     child.once('spawn', () => {

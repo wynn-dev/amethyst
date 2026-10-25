@@ -70,12 +70,24 @@ class RangeRestart extends NetError {
 
 /** Errors raised while a body was streaming; these get resumed or restarted on the same URL. */
 const bodyErrors = new WeakSet<object>()
+/** Local write failures (ENOSPC, EACCES, ...): re-requesting the body cannot fix them, so they are never continued. */
+const diskErrors = new WeakSet<object>()
 function bodyError(e: unknown): unknown {
-  if (typeof e === 'object' && e !== null) bodyErrors.add(e)
+  if (typeof e === 'object' && e !== null && !diskErrors.has(e)) bodyErrors.add(e)
   return e
 }
 
-const inflight = new Map<string, { key: string; promise: Promise<DownloadResult> }>()
+/** In-flight downloads by {@link pathSlot}; `dest` is the exact resolved path. */
+const inflight = new Map<string, { dest: string; key: string; promise: Promise<DownloadResult> }>()
+
+/**
+ * APFS is normalization-insensitive and (by default) case-insensitive, so `Foo.jar`, `foo.jar` and
+ * an NFD spelling can name one file. Such paths share a slot and are serialized, so two transfers
+ * never write the same `.part` at once.
+ */
+function pathSlot(path: string): string {
+  return path.normalize('NFC').toLowerCase()
+}
 
 /**
  * Download one file to `item.dest`.
@@ -129,7 +141,14 @@ export async function downloadItem(item: DownloadItem, options: DownloadOptions,
   const dest = resolve(item.dest)
   const key = item.checksum ? `${item.checksum.algorithm}:${item.checksum.value.toLowerCase()}` : `size:${item.size ?? '?'}`
 
-  for (let other = inflight.get(dest); other; other = inflight.get(dest)) {
+  const slot = pathSlot(dest)
+  for (let other = inflight.get(slot); other; other = inflight.get(slot)) {
+    if (other.dest !== dest) {
+      // Same file on a case/normalization-insensitive volume (or a distinct one on a sensitive volume):
+      // wait for it, then run ourselves (the existing-file check skips it if it is already valid).
+      await untilAborted(other.promise.catch(() => undefined), signal)
+      continue
+    }
     if (other.key !== key) throw new NetError('ECONFLICT', `${dest} is already being downloaded with a different checksum or size`)
     try {
       const r = await untilAborted(other.promise, signal)
@@ -159,9 +178,9 @@ export async function downloadItem(item: DownloadItem, options: DownloadOptions,
     metaOnDisk: false,
   }
   const promise: Promise<DownloadResult> = run(job, urls, item.existing ?? options.existing ?? 'verify').finally(() => {
-    if (inflight.get(dest)?.promise === promise) inflight.delete(dest)
+    if (inflight.get(slot)?.promise === promise) inflight.delete(slot)
   })
-  inflight.set(dest, { key, promise })
+  inflight.set(slot, { dest, key, promise })
   return promise
 }
 
@@ -266,6 +285,11 @@ async function attempt(job: Job, url: string, fresh: boolean): Promise<DownloadR
     discardBody(res.body)
     throw new NetError('EBADRESPONSE', `unexpected HTTP ${res.status} from ${sanitizeUrl(res.url)}`, sanitizeUrl(res.url))
   }
+  // An HTML page (captive portal, CDN error page) is never a launcher artifact; only a checksum could vouch for it.
+  if (!item.checksum && /^\s*text\/html\b/i.test(header(h['content-type']) ?? '')) {
+    discardBody(res.body)
+    throw new NetError('EBADRESPONSE', `unexpected HTML response from ${sanitizeUrl(res.url)}`, sanitizeUrl(res.url))
+  }
   if (item.size !== undefined && total !== undefined && total !== item.size) {
     discardBody(res.body)
     throw new SizeMismatchError(item.size, total, res.url)
@@ -343,12 +367,18 @@ async function single(
     await fh.close().catch(() => {})
   }
 
-  if (hash && item.checksum) {
-    const actual = hash.digest('hex')
-    if (actual !== item.checksum.value.toLowerCase()) {
-      await discard(job)
-      throw new ChecksumError(item.checksum.algorithm, item.checksum.value.toLowerCase(), actual, job.dest, res.url)
-    }
+  const actual = hash?.digest('hex')
+  const verified = item.checksum !== undefined && actual === item.checksum.value.toLowerCase()
+  // An empty body is a failed download (mirror error), not a file, unless the caller expects exactly that.
+  if (end === 0 && item.size === undefined && !verified) {
+    await discard(job)
+    throw new NetError('EBADRESPONSE', `empty response body from ${sanitizeUrl(res.url)}`, sanitizeUrl(res.url))
+  }
+  if (item.checksum && !verified) {
+    await discard(job)
+    // A stale or corrupt resumed prefix: restart this URL from zero once rather than failing it.
+    if (start > 0) throw new RangeRestart(url, 'resumed file failed verification')
+    throw new ChecksumError(item.checksum.algorithm, item.checksum.value.toLowerCase(), actual ?? '', job.dest, res.url)
   }
   return finish(job, res.url)
 }
@@ -537,10 +567,15 @@ class BatchWriter {
     const { chunks, size } = this
     this.chunks = []
     this.size = 0
-    let written = (await this.fh.writev(chunks, this.pos)).bytesWritten
-    if (written < size) {
-      const rest = Buffer.concat(chunks, size)
-      while (written < size) written += (await this.fh.write(rest, written, size - written, this.pos + written)).bytesWritten
+    try {
+      let written = (await this.fh.writev(chunks, this.pos)).bytesWritten
+      if (written < size) {
+        const rest = Buffer.concat(chunks, size)
+        while (written < size) written += (await this.fh.write(rest, written, size - written, this.pos + written)).bytesWritten
+      }
+    } catch (e) {
+      if (typeof e === 'object' && e !== null) diskErrors.add(e)
+      throw e
     }
     this.pos += size
   }

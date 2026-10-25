@@ -9,7 +9,7 @@ import { classifyError, ContentError, isAbortError, throwIfAborted, type FilePro
 import { hashFile, type HashAlgorithm } from './hash'
 import { readModMetadata, withPreferredLoader, type ReadModOptions } from './mods/read'
 import type { InstanceLoader, ModMetadata } from './mods/types'
-import { resourcePackId } from './options'
+import { packIdKey, resourcePackId } from './options'
 import { pathKey, splitExtension } from './paths'
 import { readResourcePack, type ResourcePackInfo } from './packs/resourcepack'
 import { readShaderPack, type ShaderPackInfo } from './packs/shaderpack'
@@ -21,7 +21,7 @@ export type ContentKind = 'mods' | 'resourcepacks' | 'shaderpacks'
  * Version of the parsers' output. Bump it whenever parsing changes so cached results (and
  * cached parse errors) are recomputed.
  */
-export const PARSER_VERSION = 1
+export const PARSER_VERSION = 2
 
 /** One listed file or folder. Plain data: safe to structured-clone across threads. */
 export interface ContentEntry {
@@ -271,7 +271,9 @@ export async function scanContentFolder(dir: string, kind: ContentKind, options:
   const listed = await listFolder(dir, kind, signal)
   stats.total = listed.length
   options.ctx?.update(0, listed.length)
-  const enabledPacks = options.enabledPacks ? new Set(options.enabledPacks) : undefined
+  const enabledPacks = options.enabledPacks ? new Set(options.enabledPacks.map(packIdKey)) : undefined
+  // The shader mod resolves its pack through the file system: compare as APFS does.
+  const activeShaderKey = typeof options.activeShaderPack === 'string' ? pathKey(options.activeShaderPack) : options.activeShaderPack
 
   const entries = await mapLimit(
     listed,
@@ -341,7 +343,7 @@ export async function scanContentFolder(dir: string, kind: ContentKind, options:
         if (enabledPacks) entry.enabled = enabledPacks.has(entry.packId)
         if (record.resourcePack) entry.resourcePack = record.resourcePack
       } else {
-        if (options.activeShaderPack !== undefined) entry.enabled = options.activeShaderPack !== null && options.activeShaderPack === item.fileName
+        if (activeShaderKey !== undefined) entry.enabled = activeShaderKey !== null && activeShaderKey === pathKey(item.fileName)
         if (record.shaderPack) entry.shaderPack = record.shaderPack
       }
       return entry

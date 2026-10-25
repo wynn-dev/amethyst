@@ -96,7 +96,7 @@ interface AccountsDoc {
 export interface AccountManagerDeps {
   layout: DataLayout
   emit: Emit
-  host: Pick<HostServices, 'encrypt' | 'decrypt' | 'openAuthWindow' | 'closeAuthWindow' | 'openExternal'>
+  host: Pick<HostServices, 'encrypt' | 'decrypt' | 'openAuthWindow' | 'closeAuthWindow' | 'clearAuthSession' | 'openExternal'>
   settings: { readonly value: Settings }
   /** Azure application id; Microsoft login is unavailable without it. */
   msaClientId?: string
@@ -109,6 +109,8 @@ const MAX_SKIN_BYTES = 256 * 1024
 const APP_NOT_APPROVED =
   'Microsoft sign-in is not available in this build yet: its Azure app has not been approved by Mojang for the Minecraft API. ' +
   'Use an official Amethyst build, or (for developers) finish the approval at https://aka.ms/AppRegInfo.'
+
+const MISMATCH = 'The refreshed credentials belong to a different Minecraft account; sign in again'
 
 /** Parse one stored record; invalid records are dropped one at a time. */
 function parseStoredAccount(raw: unknown): StoredAccount | undefined {
@@ -159,6 +161,11 @@ export class AccountManager {
   readonly #doc: JsonDocument<AccountsDoc>
   readonly #now: () => number
   readonly #refreshing = new Map<string, Promise<AccountRow>>()
+  /**
+   * Bumped whenever an account's credentials are replaced by a sign-in or deleted by removal. A
+   * refresh that started under an older generation never writes secrets or marks the account.
+   */
+  readonly #generation = new Map<string, number>()
   #login: AbortController | undefined
 
   constructor(deps: AccountManagerDeps) {
@@ -351,6 +358,7 @@ export class AccountManager {
 
   /** Secrets first, then the public record (so a published account always has its tokens). */
   async #storeSession(session: AccountSession): Promise<void> {
+    this.#bump(session.id)
     await this.#secrets.put(session.id, { accessToken: session.accessToken, accessTokenExpiresAt: session.accessTokenExpiresAt, msRefreshToken: session.msRefreshToken })
     const previous = this.#doc.value.accounts.find((a) => a.id === session.id)
     const record: StoredAccount = { ...toPublicAccount(session) }
@@ -377,12 +385,26 @@ export class AccountManager {
 
   async remove(id: string): Promise<void> {
     const a = this.#record(id)
+    const inflight = this.#refreshing.get(id)
     this.#refreshing.delete(id)
+    this.#bump(id)
     await this.#secrets.delete(id)
     if (a.kind === 'offline' && a.localSkin) await rm(path.join(this.#d.layout.skins, a.localSkin.file), { force: true })
     const accounts = this.#doc.value.accounts.filter((x) => x.id !== id)
     const selectedId = this.#doc.value.selectedId === id ? (accounts[0]?.id ?? null) : this.#doc.value.selectedId
     await this.#save({ accounts, selectedId }, { removed: [id] })
+    // Microsoft cookies are not per account: sign the login window out so it never offers (or
+    // silently reuses) the removed account.
+    if (a.kind === 'microsoft') await this.#d.host.clearAuthSession().catch((e: unknown) => log.warn(`could not clear the sign-in session (${errorCode(e) ?? 'error'})`))
+    // A refresh write already past its guard can land after the delete above: delete again once it settles.
+    if (inflight) {
+      void inflight
+        .catch(() => {})
+        .then(async () => {
+          if (!this.#doc.value.accounts.some((x) => x.id === id)) await this.#secrets.delete(id)
+        })
+        .catch(() => {})
+    }
   }
 
   async select(id: string): Promise<void> {
@@ -408,6 +430,17 @@ export class AccountManager {
     return { ...a, kind: 'microsoft', accessToken: read.secrets.accessToken, accessTokenExpiresAt: read.secrets.accessTokenExpiresAt, msRefreshToken: read.secrets.msRefreshToken }
   }
 
+  #bump(id: string): void {
+    this.#generation.set(id, (this.#generation.get(id) ?? 0) + 1)
+  }
+
+  /** The account's row now, for a refresh that was overtaken by a sign-in (or a removal). */
+  #currentRow(id: string): AccountRow {
+    const a = this.#doc.value.accounts.find((x) => x.id === id)
+    if (!a) throw new AppError('ECANCELLED', 'The account was removed')
+    return this.#row(a)
+  }
+
   async #markInvalid(id: string): Promise<void> {
     const a = this.#doc.value.accounts.find((x) => x.id === id)
     if (!a || a.invalidated) return
@@ -431,18 +464,21 @@ export class AccountManager {
     const clientId = this.#clientId()
     const session = (await this.#session(a)) as AccountSession
     if (!force && !a.invalidated && !needsRefresh(session, this.#now())) return this.#row(a)
+    const generation = this.#generation.get(id) ?? 0
+    // A sign-in or removal since this refresh started owns the credentials now.
+    const superseded = () => (this.#generation.get(id) ?? 0) !== generation || !this.#doc.value.accounts.some((x) => x.id === id)
     try {
       const next = await this.#auth.refreshMicrosoft(session, {
         clientId,
         onRefreshTokenRotated: async (token) => {
           // The old refresh token may already be dead: persist the new one before anything else can fail.
-          await this.#secrets.put(id, { ...secretsOf(session), msRefreshToken: token })
+          if (!superseded()) await this.#secrets.put(id, { ...secretsOf(session), msRefreshToken: token })
         },
       })
-      if (!this.#doc.value.accounts.some((x) => x.id === id)) throw new AppError('ECANCELLED', 'The account was removed')
+      if (superseded()) return this.#currentRow(id)
       if (next.uuid.replaceAll('-', '').toLowerCase() !== a.uuid.replaceAll('-', '').toLowerCase()) {
         await this.#markInvalid(id)
-        throw new AppError('EACCOUNT_MISMATCH', 'The refreshed credentials belong to a different Minecraft profile; sign in again', { reauth: true })
+        throw new AppError('EACCOUNT_MISMATCH', MISMATCH, { reauth: true })
       }
       await this.#secrets.put(id, secretsOf(next))
       const record: StoredAccount = { ...toPublicAccount(next) }
@@ -450,10 +486,13 @@ export class AccountManager {
       await this.#upsert(record, false)
       return this.#row(this.#record(id))
     } catch (e) {
+      if (superseded()) return this.#currentRow(id)
       if (e instanceof AuthError) {
         if (e.rotatedRefreshToken) await this.#secrets.put(id, { ...secretsOf(session), msRefreshToken: e.rotatedRefreshToken }).catch(() => {})
-        // Definitive failures need a sign-in; transient ones (network, 5xx, 429) keep everything as is.
-        if (e.reauth) await this.#markInvalid(id)
+        // Definitive failures (and tokens that resolve to another account) need a sign-in;
+        // transient ones (network, 5xx, 429) keep everything as is.
+        if (e.reauth || e.code === 'EACCOUNT_MISMATCH') await this.#markInvalid(id)
+        if (e.code === 'EACCOUNT_MISMATCH') throw new AppError('EACCOUNT_MISMATCH', MISMATCH, { reauth: true }, { cause: e })
       }
       throw mapAuthError(e)
     }

@@ -27,6 +27,7 @@ import {
   searchMarketplace,
   sortVersionsNewestFirst,
   MarketplaceError,
+  type CurseForgeFile,
   type MarketProject,
   type MarketVersion,
   type ModrinthVersion,
@@ -251,23 +252,39 @@ export class MarketplaceManager {
       }
       const id = Number(projectId)
       if (!Number.isSafeInteger(id) || id <= 0) throw invalid('Bad CurseForge project id')
-      const loaderType = query.loader ? curseForgeLoaderType(query.loader) : undefined
-      const page = await this.#cf().getModFiles(id, {
+      const files = await this.#cfFiles(id, {
         ...(query.gameVersion ? { gameVersion: query.gameVersion } : {}),
-        ...(loaderType !== undefined ? { modLoaderType: loaderType } : {}),
+        ...(query.loader ? { loaders: expandLoaders(query.loader, query.gameVersion) } : {}),
         index: Math.max(0, Math.trunc(query.page ?? 0)) * 50,
-        pageSize: 50,
       })
-      return page.data.map((f) => versionRow(curseForgeFileToVersion(f))).toSorted((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt))
+      return files.map((f) => versionRow(curseForgeFileToVersion(f))).toSorted((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt))
     } catch (e) {
       throw mapError(e)
     }
   }
 
+  /**
+   * One page of a CurseForge project's files for a loader set. CurseForge filters by a single
+   * `modLoaderType`, so an expanded set (Quilt also runs Fabric files, NeoForge 1.20.1 Forge
+   * files) is one request per loader, merged by file id.
+   */
+  async #cfFiles(modId: number, params: { gameVersion?: string; loaders?: string[]; index?: number }, opts?: { fresh?: boolean }): Promise<CurseForgeFile[]> {
+    const types = [...new Set((params.loaders ?? []).flatMap((l) => curseForgeLoaderType(l) ?? []))]
+    const pages = await Promise.all(
+      (types.length > 0 ? types : [undefined]).map((t) =>
+        this.#cf().getModFiles(modId, { ...(params.gameVersion ? { gameVersion: params.gameVersion } : {}), ...(t !== undefined ? { modLoaderType: t } : {}), index: params.index ?? 0, pageSize: 50 }, opts),
+      ),
+    )
+    return [...new Map(pages.flatMap((p) => p.data).map((f) => [f.id, f])).values()]
+  }
+
   async getChangelog(platform: MarketPlatform, projectId: string, versionId: string): Promise<string> {
     try {
       if (platform === 'modrinth') return (await this.#modrinth.getVersion(versionId)).changelog ?? ''
-      return await this.#cf().getFileChangelog(Number(projectId), Number(versionId))
+      const modId = Number(projectId)
+      const fileId = Number(versionId)
+      if (!Number.isSafeInteger(modId) || modId <= 0 || !Number.isSafeInteger(fileId) || fileId <= 0) throw invalid('Bad CurseForge ids')
+      return await this.#cf().getFileChangelog(modId, fileId)
     } catch (e) {
       throw mapError(e)
     }
@@ -355,23 +372,39 @@ export class MarketplaceManager {
       if (!sha1) throw new AppError('EINTERNAL', 'The download has no hash')
       // 2. Into the instance, never under an unsanitised name.
       const { items } = await this.#d.resources.items(inst.id, kind)
-      const current = input.replaces ? items.find((i) => i.row.id === input.replaces?.id) : undefined
+      let current = input.replaces ? items.find((i) => i.row.id === input.replaces?.id) : undefined
       if (input.replaces && !current) throw new AppError('ENOT_FOUND', 'The resource to replace is gone')
+      // One file per project: installing another version of a project already in the folder replaces it.
+      current ??= items.find((i) => i.row.source?.platform === input.platform && i.row.source.projectId === version.projectId && i.row.sha1 !== sha1)
       let name = sanitizeFileName(file.fileName, 'download.jar')
       // An update of a disabled mod stays disabled.
       if (kind === 'mods' && current && !current.row.enabled) name = `${stripDisabled(name)}.disabled`
-      const existing = items.find((i) => pathKey(i.row.fileName) === pathKey(name))
-      if (existing?.row.sha1 !== sha1) {
+      // One file per content hash: the same bytes already in the folder (under any name) are not placed twice.
+      const twin = items.find((i) => i !== current && i.row.sha1 === sha1 && (kind !== 'mods' || i.row.enabled))
+      let placed: string | undefined
+      if (twin) {
+        name = twin.row.fileName
+      } else {
+        const existing = items.find((i) => pathKey(i.row.fileName) === pathKey(name))
         const replacingInPlace = existing !== undefined && existing.path === current?.path
         if (existing && !replacingInPlace) name = await uniqueName(dir, name)
         await store.place(sha1, path.join(dir, name), { overwrite: replacingInPlace, signal: ctx.signal })
+        if (!replacingInPlace) placed = path.join(dir, name)
       }
       // 3. Provenance is authoritative over later hash lookups.
       await this.#d.db
         ?.query('sources.put', { rows: [{ sha1, platform: input.platform, projectId: version.projectId, versionId: version.id, confidence: 'manifest', resolvedAt: this.#now() }] })
         .catch((e: unknown) => log.warn('cannot record attribution', e))
-      // 4. An update replaces the old file (never leaves both).
-      if (current && pathKey(current.path) !== pathKey(path.join(dir, name))) await this.#d.host.trash(current.path)
+      // 4. An update replaces the old file (never leaves both): if the old file cannot be removed,
+      //    the new one is taken back out and the folder stays as it was.
+      if (current && pathKey(current.path) !== pathKey(path.join(dir, name))) {
+        try {
+          await this.#d.host.trash(current.path)
+        } catch (e) {
+          if (placed) await rm(placed, { force: true }).catch(() => {})
+          throw e
+        }
+      }
       return resourceId(name, kind)
     })
     await this.#d.resources.rescan(inst.id, kind)
@@ -494,7 +527,7 @@ export class MarketplaceManager {
         await mapLimit(mrPlan, 4, async (p) => {
           let v: ModrinthVersion | undefined = latest[p.sha1]
           if (v && releaseOnly && v.version_type !== 'release') {
-            const list = await this.#modrinth.getProjectVersions(v.project_id, { ...(loaders ? { loaders } : {}), ...(minecraft ? { gameVersions: [minecraft] } : {}) }).catch(() => [] as ModrinthVersion[])
+            const list = await this.#modrinth.getProjectVersions(v.project_id, { ...(loaders ? { loaders } : {}), ...(minecraft ? { gameVersions: [minecraft] } : {}) }, { fresh: true }).catch(() => [] as ModrinthVersion[])
             v = sortVersionsNewestFirst(list).find((x) => x.version_type === 'release')
           }
           const file = v ? pickModrinthFile(v) : undefined
@@ -509,11 +542,10 @@ export class MarketplaceManager {
 
     const cfPlan = plan.filter((p) => p.src.platform === 'curseforge' && !cached.has(`curseforge:${p.sha1}`))
     if (cfPlan.length > 0 && this.#curseforge.isAvailable()) {
-      const loaderType = kind === 'mods' && loader ? curseForgeLoaderType(loader.kind) : undefined
       await mapLimit(cfPlan, 4, async (p) => {
         try {
-          const page = await this.#curseforge.getModFiles(Number(p.src.projectId), { ...(minecraft ? { gameVersion: minecraft } : {}), ...(loaderType !== undefined ? { modLoaderType: loaderType } : {}) }, { fresh: true })
-          const latest = pickLatestCurseForgeFile(page.data, { releaseOnly })
+          const files = await this.#cfFiles(Number(p.src.projectId), { ...(minecraft ? { gameVersion: minecraft } : {}), ...(loaders ? { loaders } : {}) }, { fresh: true })
+          const latest = pickLatestCurseForgeFile(files, { releaseOnly })
           const result =
             latest && String(latest.id) !== p.src.versionId
               ? { versionId: String(latest.id), name: latest.displayName, versionNumber: latest.displayName, releaseType: latest.releaseType === 1 ? 'release' : latest.releaseType === 2 ? 'beta' : 'alpha', publishedAt: latest.fileDate, fileName: latest.fileName }
@@ -527,16 +559,44 @@ export class MarketplaceManager {
     }
     if (toStore.length > 0) await this.#d.db?.query('updates.put', { rows: toStore }).catch(() => undefined)
 
+    const latestOf = (p: (typeof plan)[number]) => {
+      const key = `${p.src.platform}:${p.sha1}`
+      return (results.has(key) ? results.get(key) : cached.get(key)) as UpdateCandidate['latest'] | null | undefined
+    }
+    const published = await this.#publishedDates(plan.filter((p) => latestOf(p)).map((p) => p.src))
     const out: UpdateCandidate[] = []
     const seen = new Set<string>()
     for (const p of plan) {
-      const key = `${p.src.platform}:${p.sha1}`
-      const latest = (results.has(key) ? results.get(key) : cached.get(key)) as UpdateCandidate['latest'] | null | undefined
+      const latest = latestOf(p)
       // One plan entry per project: the same mod is never offered twice.
       if (!latest || seen.has(`${p.src.platform}:${p.src.projectId}`)) continue
+      // An update is never a downgrade (e.g. the newest release when a newer beta is installed).
+      const current = Date.parse(published.get(`${p.src.platform}:${p.src.versionId}`) ?? '')
+      const next = Date.parse(latest.publishedAt)
+      if (Number.isFinite(current) && Number.isFinite(next) && next <= current) continue
       seen.add(`${p.src.platform}:${p.src.projectId}`)
       out.push({ resourceId: p.row.id, fileName: p.row.fileName, platform: p.src.platform, projectId: p.src.projectId, currentVersionId: p.src.versionId, latest })
     }
+    return out
+  }
+
+  /** Publish dates of the installed versions (`platform:versionId` → ISO date), batched; unknown ones are absent. */
+  async #publishedDates(srcs: { platform: Platform; versionId?: string | null }[]): Promise<Map<string, string>> {
+    const out = new Map<string, string>()
+    const ids = (platform: Platform) => [...new Set(srcs.flatMap((s) => (s.platform === platform && s.versionId ? [s.versionId] : [])))]
+    const mr = ids('modrinth').filter((id) => MODRINTH_ID.test(id))
+    const cf = ids('curseforge').map(Number).filter((n) => Number.isSafeInteger(n) && n > 0)
+    await Promise.all([
+      mr.length > 0 &&
+        (async () => {
+          for (const v of await this.#modrinth.getVersions(mr)) out.set(`modrinth:${v.id}`, v.date_published)
+        })().catch((e: unknown) => log.warn(`Modrinth version lookup failed: ${errorMessage(e)}`)),
+      cf.length > 0 &&
+        this.#curseforge.isAvailable() &&
+        (async () => {
+          for (const f of await this.#curseforge.getFiles(cf)) out.set(`curseforge:${f.id}`, f.fileDate)
+        })().catch((e: unknown) => log.warn(`CurseForge file lookup failed: ${errorMessage(e)}`)),
+    ])
     return out
   }
 

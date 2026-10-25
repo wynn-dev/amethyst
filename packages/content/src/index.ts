@@ -44,6 +44,7 @@ export {
   GameOptions,
   isFilePackId,
   orderResourcePacks,
+  packIdKey,
   packNameFromId,
   parsePackList,
   readOptionsFile,

@@ -239,6 +239,11 @@ async function resolveCurseForge(manifest: ModpackManifest, options: ResolveOpti
   } catch (e) {
     throw unavailable(e)
   }
+  // Every lookup rejected is an API failure, not a pack whose files all vanished: a plan built
+  // from it would drop (and an update would remove) every file (known issue #971).
+  if ((files.failed.length > 0 && files.results.length === 0) || (mods.failed.length > 0 && mods.results.length === 0)) {
+    throw new ModpackError('EMARKET_UNAVAILABLE', "Couldn't contact CurseForge: it returned none of the pack's files. Try again later.")
+  }
 
   const fileById = new Map(files.results.map((f) => [f.id, f]))
   const modById = new Map(mods.results.map((m) => [m.id, m]))
@@ -252,7 +257,7 @@ async function resolveCurseForge(manifest: ModpackManifest, options: ResolveOpti
     const ref = `curseforge:${entry.projectId}/${entry.fileId}`
     const file = fileById.get(entry.fileId)
     if (!file) {
-      skipped.push({ path: ref, reason: 'missing-on-curseforge', message: `File ${entry.fileId} of project ${entry.projectId} no longer exists on CurseForge` })
+      skipped.push({ path: ref, reason: 'missing-on-curseforge', message: `File ${entry.fileId} of project ${entry.projectId} no longer exists on CurseForge`, fileId: entry.fileId })
       continue
     }
     const mod = modById.get(file.modId)

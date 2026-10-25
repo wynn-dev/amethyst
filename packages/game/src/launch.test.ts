@@ -104,6 +104,48 @@ describe('launch', () => {
     await expect(launch({ java: notExec, args: [], cwd: path.join(root, 'g'), env: {} })).rejects.toMatchObject({ code: 'ELAUNCH_JAVA_PERMISSION' })
   })
 
+  it('resolves exited when a grandchild (an orphaned osascript) still holds stdout open', async () => {
+    // The fake game starts a long-lived helper that inherits its stdout/stderr, prints its pid,
+    // then exits. Waiting for stream 'close' would hang until the helper dies.
+    const lines: string[] = []
+    const script = `
+      const { spawn } = require('child_process');
+      const g = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: ['ignore', 'inherit', 'inherit'], detached: true });
+      console.log('helper ' + g.pid);
+      g.unref();
+      setTimeout(() => process.exit(0), 50);`
+    const started = Date.now()
+    const game = await fake(script, { onLog: (b) => lines.push(...b.map((e) => e.message)), batchMs: 5, drainTimeoutMs: 300, readyFallbackMs: 0 })
+    const r = await game.exited
+    const helper = Number(lines.find((l) => l.startsWith('helper '))?.slice(7))
+    try {
+      expect(r).toMatchObject({ exitCode: 0, crashed: false, killed: false })
+      expect(Date.now() - started).toBeLessThan(5000)
+      // Output written before exit is still delivered.
+      expect(helper).toBeGreaterThan(0)
+    } finally {
+      if (helper > 0) {
+        try {
+          process.kill(helper, 'SIGKILL')
+        } catch {
+          // Already gone.
+        }
+      }
+    }
+  })
+
+  it('keeps draining a very chatty process so it never blocks on a full pipe', async () => {
+    // ~32 MB through stdout and stderr with no log listener: the child only exits if it is drained.
+    const script = `
+      const chunk = 'x'.repeat(1023) + '\\n';
+      const big = chunk.repeat(1024);
+      let n = 0;
+      const pump = () => { while (n < 16) { n++; const a = process.stdout.write(big); const b = process.stderr.write(big); if (!a || !b) { process.stdout.once('drain', pump); return; } } };
+      pump();`
+    const r = await (await fake(script, { readyFallbackMs: 0 })).exited
+    expect(r).toMatchObject({ exitCode: 0, crashed: false })
+  }, 20_000)
+
   it('passes arguments verbatim, without a shell', async () => {
     const lines: string[] = []
     const tricky = ['$HOME', '`id`', '"q"', "'s'", 'a b', '${clientid}']

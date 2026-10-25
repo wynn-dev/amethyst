@@ -306,4 +306,33 @@ describe('spawnProcessor', () => {
     const timed = await spawnProcessor({ java: slow, jvmArgs: [], classpath: [], mainClass: 'M', args: [], cwd: root }, { timeoutMs: 100 })
     expect(timed).toMatchObject({ timedOut: true, signal: 'SIGTERM' })
   })
+
+  it('settles when a grandchild outside the process group keeps the output pipes open', async () => {
+    // The fake tool starts a `sleep 30` in a new session (out of reach of the group kill) that
+    // inherits stdout/stderr, records its pid, then exits (or hangs until the timeout).
+    const pids = join(root, 'pids.txt')
+    const spawnOrphan = `"${process.execPath}" -e 'const c=require("child_process").spawn("sleep",["30"],{detached:true,stdio:["ignore",1,2]});require("fs").appendFileSync(process.argv[1],c.pid+"\\n");c.unref()' '${pids}'`
+    try {
+      const exits = await fakeJava(`${spawnOrphan}\necho started\nexit 0`)
+      let started = Date.now()
+      const done = await spawnProcessor({ java: exits, jvmArgs: [], classpath: [], mainClass: 'M', args: [], cwd: root }, {})
+      expect(done).toMatchObject({ exitCode: 0, timedOut: false })
+      expect(done.log).toContain('started')
+      expect(Date.now() - started).toBeLessThan(4000)
+
+      const hangs = await fakeJava(`${spawnOrphan}\nsleep 30`)
+      started = Date.now()
+      const timed = await spawnProcessor({ java: hangs, jvmArgs: [], classpath: [], mainClass: 'M', args: [], cwd: root }, { timeoutMs: 100 })
+      expect(timed).toMatchObject({ timedOut: true })
+      expect(Date.now() - started).toBeLessThan(4000)
+    } finally {
+      for (const pid of (await readFile(pids, 'utf8').catch(() => '')).split('\n').filter(Boolean)) {
+        try {
+          process.kill(Number(pid), 'SIGKILL')
+        } catch {
+          // already gone
+        }
+      }
+    }
+  }, 15_000)
 })

@@ -30,8 +30,8 @@ const BUILT_IN = new Set([
   'mixinextras',
 ])
 
-/** Loaders whose mods an instance loader can run. */
-function compatibleLoaders(loader: LoaderKind): Set<string> {
+/** Loaders whose mods an instance loader can run (on Minecraft `minecraft`, when known). */
+function compatibleLoaders(loader: LoaderKind, minecraft?: string): Set<string> {
   switch (loader) {
     case 'quilt':
       return new Set(['quilt', 'fabric'])
@@ -40,7 +40,8 @@ function compatibleLoaders(loader: LoaderKind): Set<string> {
     case 'forge':
       return new Set(['forge'])
     case 'neoforge':
-      return new Set(['neoforge'])
+      // NeoForge for 1.20.1 is a Forge 47 fork and still loads Forge mods.
+      return new Set(minecraft === '1.20.1' ? ['neoforge', 'forge'] : ['neoforge'])
   }
 }
 
@@ -53,7 +54,7 @@ function bundled(modId: string, provided: Set<string>): boolean {
   return false
 }
 
-export function analyzeMods(mods: AnalyzedMod[], loader: LoaderKind | null): ModAnalysis {
+export function analyzeMods(mods: AnalyzedMod[], loader: LoaderKind | null, minecraft?: string): ModAnalysis {
   const out: ModAnalysis = { duplicates: [], missing: [], incompatible: [], dependents: {}, broken: [] }
   // Who provides which id (mod ids, `provides` aliases).
   const providers = new Map<string, string[]>()
@@ -87,7 +88,7 @@ export function analyzeMods(mods: AnalyzedMod[], loader: LoaderKind | null): Mod
   for (const m of mods) if (m.row.sha1 && !reported.has(m.row.id)) bySha.set(m.row.sha1, [...(bySha.get(m.row.sha1) ?? []), m.row.id])
   for (const ids of bySha.values()) if (ids.length > 1) out.duplicates.push({ modId: mods.find((m) => m.row.id === ids[0])?.entry?.mod?.id ?? ids[0] ?? '', ids })
 
-  const allowed = loader ? compatibleLoaders(loader) : undefined
+  const allowed = loader ? compatibleLoaders(loader, minecraft) : undefined
   for (const m of mods) {
     const meta = m.entry?.mod
     if (!meta) continue

@@ -1,3 +1,4 @@
+/* oxlint-disable no-await-in-loop -- the cases are checked one at a time */
 import { rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -86,6 +87,23 @@ describe('format detection', () => {
     await expect(readModpack(jar)).rejects.toMatchObject({ code: 'EUNKNOWN_FORMAT' })
     const notCf = await makeZip(path.join(tmp, 'other.zip'), { 'manifest.json': '{"manifestType":"other"}' })
     await expect(readModpack(notCf)).rejects.toMatchObject({ code: 'EUNKNOWN_FORMAT' })
+    const empty = path.join(tmp, 'half.zip')
+    await writeFile(empty, '')
+    await expect(readModpack(empty)).rejects.toMatchObject({ code: 'ENOT_A_ZIP' })
+  })
+
+  it('says what a non-modpack zip is, detected from its content (#1642, #1555)', async () => {
+    const cases: [string, Record<string, string>, RegExp][] = [
+      ['prism.zip', { 'GTNH/mmc-pack.json': '{}', 'GTNH/instance.cfg': 'name=GTNH', 'GTNH/.minecraft/mods/a.jar': 'x' }, /Prism Launcher \/ MultiMC/],
+      ['mmc.zip', { 'instance.cfg': 'name=x' }, /Prism Launcher \/ MultiMC/],
+      ['mod.zip', { 'META-INF/mods.toml': '', 'a/B.class': '' }, /looks like a mod/],
+      ['rp.zip', { 'pack.mcmeta': '{}', 'assets/minecraft/x.png': '' }, /resource pack/],
+      ['world.zip', { 'My World/level.dat': 'l' }, /world/],
+    ]
+    for (const [name, entries, message] of cases) {
+      const file = await makeZip(path.join(tmp, name), entries)
+      await expect(readModpack(file)).rejects.toMatchObject({ code: 'EUNKNOWN_FORMAT', message: expect.stringMatching(message) })
+    }
   })
 
   it('validates the manifest and names the bad field', async () => {

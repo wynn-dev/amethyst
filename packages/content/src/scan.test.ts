@@ -9,7 +9,9 @@ import {
   createScanWorkerClient,
   createScanWorkerHandlers,
   isContentFileName,
+  PARSER_VERSION,
   readModMetadata,
+  scanCacheKey,
   scanContentFolder,
   serveScanWorker,
   setEnabled,
@@ -116,6 +118,37 @@ describe('scanContentFolder', () => {
     expect(first.stats.failed).toBe(1)
     const second = await scanContentFolder(mods, 'mods', { cache, readers })
     expect(second.entries[0]).toMatchObject({ problem: { code: 'invalid-zip' }, cached: true })
+    expect(counts.mod).toBe(1)
+  })
+
+  it('finds cached records of NFD-named files under NFC / other-case keys (APFS semantics)', async () => {
+    const mods = path.join(tmp, 'mods')
+    await mkdir(mods)
+    await fabricJar(mods, 'Cafe\u0301Mod.jar', 'cafe')
+    expect((await readdir(mods))[0]).toBe('Cafe\u0301Mod.jar')
+    const { counts, readers } = countingReaders()
+    const first = await scanContentFolder(mods, 'mods', { cache: createMemoryScanCache(), readers })
+    const entry = first.entries[0]
+    // The index stores records under keys built from NFC (e.g. a marketplace file name) in any case.
+    const key = scanCacheKey(path.join(tmp, 'MODS', 'CAF\u00c9MOD.JAR'))
+    expect(key).toBe(scanCacheKey(entry?.path ?? ''))
+    const { hashes, mod, size, mtimeMs, ino } = entry as NonNullable<typeof entry>
+    const cache = createMemoryScanCache([[key, { size, mtimeMs, ino, parserVersion: PARSER_VERSION, ...(hashes ? { hashes } : {}), ...(mod ? { mod } : {}) }]])
+    const second = await scanContentFolder(mods, 'mods', { cache, readers })
+    expect(second.entries[0]).toMatchObject({ cached: true, fileName: 'Cafe\u0301Mod.jar', mod: { id: 'cafe' } })
+    expect(counts).toEqual({ mod: 1, hash: 1 })
+  })
+
+  it('does not serve cached parse errors from an older parser version', async () => {
+    const mods = path.join(tmp, 'mods')
+    await mkdir(mods)
+    const file = await fabricJar(mods, 'fixed.jar', 'fixed')
+    const { size, mtimeMs, ino } = await (await import('node:fs/promises')).stat(file)
+    const stale = { size, mtimeMs, ino, parserVersion: PARSER_VERSION - 1, problem: { code: 'invalid-zip' as const, message: 'old zip reader' } }
+    const { counts, readers } = countingReaders()
+    const result = await scanContentFolder(mods, 'mods', { cache: createMemoryScanCache([[scanCacheKey(file), stale]]), readers })
+    expect(result.entries[0]).toMatchObject({ cached: false, mod: { id: 'fixed' } })
+    expect(result.entries[0]?.problem).toBeUndefined()
     expect(counts.mod).toBe(1)
   })
 

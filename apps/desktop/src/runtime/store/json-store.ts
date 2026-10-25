@@ -44,7 +44,7 @@ export type LoadOutcome =
   | 'recovered'
   /** The file and its backup were unreadable (moved aside): defaults. */
   | 'reset'
-  /** The file is unreadable and was left in place (`onCorrupt: 'keep'`): defaults, read-only. */
+  /** The file is unreadable and was left in place (`onCorrupt: 'keep'`, or any I/O error): defaults, read-only. */
   | 'unreadable'
 
 export interface LoadResult<T> {
@@ -162,8 +162,9 @@ export class JsonDocument<T> {
       if (bak.kind === 'ok') return this.#accept(bak.value, 'recovered')
       return this.#accept(this.#schema.defaults(), 'missing')
     }
-    // Unreadable primary.
-    if (this.#onCorrupt === 'keep') {
+    // Unreadable primary. An I/O error (EACCES, EIO, EMFILE…) says nothing about the content, so
+    // the file is always kept in place then: moving it aside would reset a good document.
+    if (this.#onCorrupt === 'keep' || primary.kind === 'io') {
       this.#value = this.#schema.defaults()
       this.#loaded = true
       this.#readOnly = true
@@ -183,13 +184,13 @@ export class JsonDocument<T> {
     return { value, outcome }
   }
 
-  async #read(file: string): Promise<{ kind: 'ok'; value: T } | { kind: 'missing' } | { kind: 'bad'; error: string }> {
+  async #read(file: string): Promise<{ kind: 'ok'; value: T } | { kind: 'missing' } | { kind: 'bad' | 'io'; error: string }> {
     let text: string
     try {
       text = await this.#fs.readFile(file)
     } catch (e) {
       if (isMissing(e)) return { kind: 'missing' }
-      return { kind: 'bad', error: e instanceof Error ? e.message : String(e) }
+      return { kind: 'io', error: e instanceof Error ? e.message : String(e) }
     }
     try {
       const raw: unknown = JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text)

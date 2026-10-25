@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { assetUrl } from '@shared/paths'
-import { isInside, parseRange, resolveAssetPath } from './asset-path'
+import { isInside, isServable, parseRange, resolveAssetPath } from './asset-path'
 import { serveAssetRequest } from './asset-protocol'
 
 const ROOT = '/Users/me/Library/Application Support/Amethyst'
@@ -55,6 +55,40 @@ describe('resolveAssetPath', () => {
     expect(resolveAssetPath(ROOT, 'not a url')).toEqual({ ok: false, status: 400 })
     expect(resolveAssetPath(ROOT, 'amethyst-asset://data/%E0%A4%A.png')).toEqual({ ok: false, status: 400 })
   })
+
+  it('serves only the whitelisted folders', () => {
+    for (const rel of ['cache/icons/a.png', 'instances/Pack/icon.png', 'instances/Pack/sub/icon.webp', 'theme-media/ab.mp4', 'skins/u-1.png', 'Cache/Icons/a.png']) {
+      expect({ rel, ok: resolveAssetPath(ROOT, assetUrl(rel)).ok }).toEqual({ rel, ok: true })
+    }
+    for (const rel of [
+      'outside.png',
+      'cache/a.png',
+      'cache/modpacks/x.png',
+      'cache/icons',
+      'minecraft/assets/objects/ab/abcd.png',
+      'runtimes/java/x.png',
+      'backups/1/w/x.png',
+      'rescued-worlds/x.png',
+      'store/sha1/ab/x.png',
+      'secrets/x.png',
+      'theme-media.png',
+      'skins',
+    ]) {
+      expect({ rel, r: resolveAssetPath(ROOT, assetUrl(rel)) }).toEqual({ rel, r: { ok: false, status: 403 } })
+    }
+  })
+})
+
+describe('isServable', () => {
+  it('applies the same rules to the symlink-resolved path', () => {
+    expect(isServable(ROOT, `${ROOT}/instances/Pack/icon.png`)).toBe(true)
+    expect(isServable(ROOT, `${ROOT}/secrets/abc.bin`)).toBe(false)
+    expect(isServable(ROOT, `${ROOT}/minecraft/assets/x.png`)).toBe(false)
+    expect(isServable(ROOT, `${ROOT}/instances/Pack/.amethyst/instance.json`)).toBe(false)
+    expect(isServable(ROOT, `${ROOT}/instances/Pack/options.txt`)).toBe(false)
+    expect(isServable(ROOT, '/etc/x.png')).toBe(false)
+    expect(isServable(ROOT, ROOT)).toBe(false)
+  })
 })
 
 describe('parseRange', () => {
@@ -81,6 +115,12 @@ describe('serveAssetRequest', () => {
       await writeFile(path.join(base, 'outside.png'), 'secret')
       await symlink(path.join(base, 'outside.png'), path.join(root, 'cache', 'icons', 'evil.png'))
       await symlink(path.join(root, 'cache', 'icons', 'a.png'), path.join(root, 'cache', 'icons', 'alias.png'))
+      // Inside the data root but outside the served folders, or not a media file.
+      await mkdir(path.join(root, 'secrets'), { recursive: true })
+      await writeFile(path.join(root, 'secrets', 'acct.bin'), 'ciphertext')
+      await writeFile(path.join(root, 'secrets', 'pic.png'), 'private')
+      await symlink(path.join(root, 'secrets', 'acct.bin'), path.join(root, 'cache', 'icons', 'token.png'))
+      await symlink(path.join(root, 'secrets'), path.join(root, 'cache', 'icons', 'dir'))
 
       const full = await serveAssetRequest(root, assetUrl('cache/icons/a.png'), null)
       expect(full.status).toBe(200)
@@ -98,8 +138,10 @@ describe('serveAssetRequest', () => {
 
       expect((await serveAssetRequest(root, assetUrl('cache/icons/evil.png'), null)).status).toBe(403)
       expect((await serveAssetRequest(root, assetUrl('cache/icons/alias.png'), null)).status).toBe(200)
+      expect((await serveAssetRequest(root, assetUrl('cache/icons/token.png'), null)).status).toBe(403)
+      expect((await serveAssetRequest(root, assetUrl('cache/icons/dir/pic.png'), null)).status).toBe(403)
       expect((await serveAssetRequest(root, assetUrl('cache/icons/missing.png'), null)).status).toBe(404)
-      expect((await serveAssetRequest(root, 'amethyst-asset://data/../outside.png', null)).status).toBe(404)
+      expect((await serveAssetRequest(root, 'amethyst-asset://data/../outside.png', null)).status).toBe(403)
     } finally {
       await rm(base, { recursive: true, force: true })
     }

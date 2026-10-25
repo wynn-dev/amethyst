@@ -184,6 +184,10 @@ export class InstanceManager {
   readonly #registry: JsonDocument<RegistryDoc>
   /** Live activity per instance (installs, launches); absent means `idle`. */
   readonly #activity = new Map<string, Exclude<InstanceActivity, 'idle'>>()
+  /** Display names reserved by creations that have not been added to the index yet. */
+  readonly #pendingNames = new Set<string>()
+  /** {@link pathKey}s of managed folder names a rename is moving into (creations must not take them). */
+  readonly #pendingFolders = new Set<string>()
 
   constructor(deps: InstanceManagerDeps) {
     this.#layout = deps.layout
@@ -220,18 +224,25 @@ export class InstanceManager {
     await this.#registry.load()
     await mkdir(this.#layout.instances, { recursive: true })
     const dirents = await readdir(this.#layout.instances, { withFileTypes: true }).catch(() => [])
+    // One entry per folder: registry paths are compared case- and NFC/NFD-insensitively (APFS).
+    const seen = new Set<string>()
     const items = [
       ...dirents.filter((d) => d.isDirectory() && !d.name.startsWith('.')).map((d) => ({ dir: path.join(this.#layout.instances, d.name), reg: undefined })),
       ...this.#registry.value.external.map((reg) => ({ dir: reg.path, reg })),
-    ]
+    ].filter((item) => {
+      const key = pathKey(path.resolve(item.dir))
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
     const loaded = await mapLimit(items, 16, (item) => this.#loadOne(item.dir, item.reg))
     for (const entry of loaded) {
       if (!entry) continue
       if (this.#entries.has(entry.id)) {
-        // A folder copied in Finder carries the same id: give the copy its own.
+        // A folder copied in Finder carries the same id (and name): give the copy its own.
         if (entry.state !== 'ok' || !entry.doc) continue
         const id = randomUUID()
-        entry.config = { ...entry.config, id }
+        entry.config = { ...entry.config, id, name: uniqueDisplayName(entry.config.name, this.#names()) }
         entry.id = id
         await entry.doc.set(entry.config).catch((e: unknown) => log.warn(`cannot re-id ${entry.dir}`, e))
       }
@@ -360,8 +371,38 @@ export class InstanceManager {
     return this.#entry(id) as Entry & { doc: JsonDocument<InstanceConfig> }
   }
 
+  /** Display names in use: every instance (except `except`) plus names held by unfinished creations. */
   #names(except?: string): string[] {
-    return [...this.#entries.values()].filter((e) => e.id !== except).map((e) => e.config.name)
+    return [...[...this.#entries.values()].filter((e) => e.id !== except).map((e) => e.config.name), ...this.#pendingNames]
+  }
+
+  /**
+   * Pick a display name that no instance and no in-flight create/duplicate/import uses, and hold it
+   * until `release` (a long copy must not let a second instance take the same name meanwhile).
+   */
+  #reserveName(base: string): { name: string; release: () => void } {
+    const name = uniqueDisplayName(base, this.#names())
+    this.#pendingNames.add(name)
+    return { name, release: () => this.#pendingNames.delete(name) }
+  }
+
+  /**
+   * Create a new, empty managed folder for `name`. Folder names a rename is about to move into are
+   * avoided, and a name a concurrent creation took first moves on to the next free one.
+   */
+  async #makeFolder(name: string): Promise<string> {
+    await mkdir(this.#layout.instances, { recursive: true })
+    for (let attempt = 0; ; attempt++) {
+      const folder = await uniqueName(this.#layout.instances, folderNameFor(name), { extension: false, reserved: this.#pendingFolders })
+      const dir = path.join(this.#layout.instances, folder)
+      try {
+        if (this.#pendingFolders.has(pathKey(folder))) throw Object.assign(new Error('reserved'), { code: 'EEXIST' })
+        await mkdir(dir)
+        return dir
+      } catch (e) {
+        if (errorCode(e) !== 'EEXIST' || attempt >= 8) throw e
+      }
+    }
   }
 
   #isBusy(id: string): boolean {
@@ -399,11 +440,15 @@ export class InstanceManager {
     if (!isRecord(input)) throw invalid('Missing instance details')
     const runtime = validateRuntime(input.runtime)
     const base = input.name?.trim() ? validateName(input.name) : generatedName(runtime)
-    const name = uniqueDisplayName(base, this.#names())
-    await mkdir(this.#layout.instances, { recursive: true })
-    const folder = await uniqueName(this.#layout.instances, folderNameFor(name), { extension: false })
-    const dir = path.join(this.#layout.instances, folder)
-    await mkdir(dir)
+    const { name, release } = this.#reserveName(base)
+    try {
+      return await this.#createIn(await this.#makeFolder(name), name, runtime, input)
+    } finally {
+      release()
+    }
+  }
+
+  async #createIn(dir: string, name: string, runtime: InstanceRuntime, input: CreateInstanceInput): Promise<InstanceDetail> {
     try {
       await Promise.all(['mods', 'resourcepacks', 'shaderpacks', '.amethyst'].map((d) => mkdir(path.join(dir, d), { recursive: true })))
       const config = newConfig(randomUUID(), name, runtime, this.#now())
@@ -462,19 +507,27 @@ export class InstanceManager {
     if (this.#isBusy(entry.id)) throw new AppError('EBUSY', 'Stop the game or wait for the install to finish before renaming')
     const dest = path.join(this.#layout.instances, target)
     const caseOnly = pathKey(target) === pathKey(current)
-    if (!caseOnly && (await lstat(dest).catch(() => undefined))) {
-      // Folder name taken: keep the folder, change only the display name.
-      log.info(`folder ${target} exists; renaming ${entry.id} without moving it`)
-      return { name: display }
-    }
-    await this.#release(entry.id, entry.dir)
-    if (caseOnly) {
-      // APFS is case-insensitive: go through a temporary name.
-      const tmp = `${dest}.renaming-${randomBytes(4).toString('hex')}`
-      await rename(entry.dir, tmp)
-      await rename(tmp, dest)
-    } else {
-      await rename(entry.dir, dest)
+    // Hold the target so a concurrent create cannot mkdir it (rename(2) would replace that empty folder).
+    const held = pathKey(target)
+    if (!caseOnly && this.#pendingFolders.has(held)) return { name: display }
+    this.#pendingFolders.add(held)
+    try {
+      if (!caseOnly && (await lstat(dest).catch(() => undefined))) {
+        // Folder name taken: keep the folder, change only the display name.
+        log.info(`folder ${target} exists; renaming ${entry.id} without moving it`)
+        return { name: display }
+      }
+      await this.#release(entry.id, entry.dir)
+      if (caseOnly) {
+        // APFS is case-insensitive: go through a temporary name.
+        const tmp = `${dest}.renaming-${randomBytes(4).toString('hex')}`
+        await rename(entry.dir, tmp)
+        await rename(tmp, dest)
+      } else {
+        await rename(entry.dir, dest)
+      }
+    } finally {
+      this.#pendingFolders.delete(held)
     }
     const old = entry.dir
     entry.dir = dest
@@ -486,28 +539,30 @@ export class InstanceManager {
 
   async duplicate(id: string, name?: string): Promise<InstanceDetail> {
     const source = this.#usable(id)
-    const display = uniqueDisplayName(name?.trim() ? validateName(name) : source.config.name, this.#names())
-    const folder = await uniqueName(this.#layout.instances, folderNameFor(display), { extension: false })
-    const dir = path.join(this.#layout.instances, folder)
-    await mkdir(dir)
+    const { name: display, release } = this.#reserveName(name?.trim() ? validateName(name) : source.config.name)
     try {
-      const result = await this.#tasks.runAndWait({ name: 'instances.duplicate', params: { name: display, from: source.config.name }, instanceId: id }, (ctx) =>
-        copyTree(source.dir, dir, { exclude: DUPLICATE_EXCLUDES, ctx, signal: ctx.signal }),
-      )
-      if (result.failed.length > 0) log.warn(`duplicate of ${source.config.name}: ${result.failed.length} entries failed`, result.failed)
-      const now = this.#now()
-      const config: InstanceConfig = { ...structuredClone(source.config), id: randomUUID(), name: display, createdAt: now, lastOpenedAt: now, lastPlayedAt: 0, playTimeMs: 0 }
-      const doc = instanceDoc(dir, { id: config.id, name: display })
-      await doc.load()
-      await doc.set(config)
-      const entry: Entry = { id: config.id, dir, external: false, state: 'ok', doc, config, iconUrl: null }
-      entry.iconUrl = await this.#iconUrl(entry)
-      this.#entries.set(entry.id, entry)
-      this.#changed({ added: [entry.id] })
-      return this.#detail(entry)
-    } catch (e) {
-      await rm(dir, { recursive: true, force: true })
-      throw e
+      const dir = await this.#makeFolder(display)
+      try {
+        const result = await this.#tasks.runAndWait({ name: 'instances.duplicate', params: { name: display, from: source.config.name }, instanceId: id }, (ctx) =>
+          copyTree(source.dir, dir, { exclude: DUPLICATE_EXCLUDES, ctx, signal: ctx.signal }),
+        )
+        if (result.failed.length > 0) log.warn(`duplicate of ${source.config.name}: ${result.failed.length} entries failed`, result.failed)
+        const now = this.#now()
+        const config: InstanceConfig = { ...structuredClone(source.config), id: randomUUID(), name: display, createdAt: now, lastOpenedAt: now, lastPlayedAt: 0, playTimeMs: 0 }
+        const doc = instanceDoc(dir, { id: config.id, name: display })
+        await doc.load()
+        await doc.set(config)
+        const entry: Entry = { id: config.id, dir, external: false, state: 'ok', doc, config, iconUrl: null }
+        entry.iconUrl = await this.#iconUrl(entry)
+        this.#entries.set(entry.id, entry)
+        this.#changed({ added: [entry.id] })
+        return this.#detail(entry)
+      } catch (e) {
+        await rm(dir, { recursive: true, force: true })
+        throw e
+      }
+    } finally {
+      release()
     }
   }
 
@@ -677,7 +732,15 @@ export class InstanceManager {
     const runtime = input.runtime ? validateRuntime(input.runtime) : existing?.runtime.minecraft ? existing.runtime : undefined
     if (!runtime) throw invalid('Choose the Minecraft version (and loader) of this folder', { keys: ['runtime'] })
     const base = input.name?.trim() ? validateName(input.name) : (existing?.name ?? path.basename(src))
-    const name = uniqueDisplayName(base, this.#names())
+    const { name, release } = this.#reserveName(base)
+    try {
+      return await this.#importAs(input, src, name, runtime, existing, now)
+    } finally {
+      release()
+    }
+  }
+
+  async #importAs(input: ImportInstanceInput, src: string, name: string, runtime: InstanceRuntime, existing: InstanceConfig | undefined, now: number): Promise<InstanceDetail> {
     const config: InstanceConfig = existing
       ? { ...existing, id: this.#entries.has(existing.id) ? randomUUID() : existing.id, name, runtime }
       : newConfig(randomUUID(), name, runtime, now)
@@ -695,9 +758,7 @@ export class InstanceManager {
     }
     if (input.mode !== 'copy') throw invalid('mode must be "in-place" or "copy"')
 
-    const folder = await uniqueName(this.#layout.instances, folderNameFor(name), { extension: false })
-    const dir = path.join(this.#layout.instances, folder)
-    await mkdir(dir)
+    const dir = await this.#makeFolder(name)
     try {
       const result = await this.#tasks.runAndWait({ name: 'instances.import', params: { name } }, (ctx) => copyTree(src, dir, { exclude: IMPORT_EXCLUDES, ctx, signal: ctx.signal }))
       if (result.failed.length > 0) log.warn(`import of ${src}: ${result.failed.length} entries failed`, result.failed)

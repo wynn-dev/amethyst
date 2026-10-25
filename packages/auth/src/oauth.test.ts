@@ -103,6 +103,16 @@ describe('token endpoint', () => {
     })
   })
 
+  it('never copies tokens from a malformed token response into the error', async () => {
+    const { expires_in: _, ...malformed } = { ...msTokenResponse('ms-refresh-secret'), id_token: fakeJwt({ oid: 'x' }) }
+    const f = createFakeFetch({ [`POST ${TOKEN_URL}`]: json(malformed) })
+    const e = (await refreshMsToken({ clientId: 'c', refreshToken: 'r', fetch: f.fetch }).catch((err: unknown) => err)) as AuthError
+    expect(e).toMatchObject({ code: 'EMSA_TOKEN_FAILED', status: 200 })
+    const serialized = JSON.stringify(e)
+    expect(serialized).toContain('"access_token\\":\\"<redacted>')
+    expect(serialized).not.toMatch(/ms-access|ms-refresh-secret|eyJ/)
+  })
+
   it('maps OAuth errors', async () => {
     expect((await run(reply({ error: 'invalid_grant' }))) as AuthError).toMatchObject({ code: 'EMSA_INVALID_GRANT', reauth: true })
     expect((await run(reply({ error: 'interaction_required' }))) as AuthError).toMatchObject({ code: 'EMSA_INTERACTION_REQUIRED', reauth: true })

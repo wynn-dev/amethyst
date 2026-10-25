@@ -65,6 +65,14 @@ export {
   type RequiredLwjgl2Artifact,
 } from './natives/lwjgl2'
 export {
+  DEFAULT_GLFW_ARM64_SOURCE,
+  findGlfwArtifact,
+  GLFW_PATCHED_ARTIFACT,
+  parseGlfwArm64Source,
+  type GlfwArm64Artifact,
+  type GlfwArm64Source,
+} from './natives/glfw'
+export {
   JNA_ARM64,
   LWJGL3_ARM64,
   LWJGL3_REPLACEMENT_VERSION,

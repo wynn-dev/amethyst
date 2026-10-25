@@ -110,6 +110,7 @@ async function main(): Promise<void> {
       throw new Error('not available')
     },
     closeAuthWindow: async () => {},
+    clearAuthSession: async () => {},
     openExternal: async () => {},
     setLauncherHidden: async (hidden) => out(`host: launcher ${hidden ? 'hidden' : 'shown'}`),
   }

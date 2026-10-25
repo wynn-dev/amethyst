@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { curseforgeFingerprintSync } from '@amethyst/marketplace'
 import type { InstallResult, ManualDownload, ModpackManifest, ResolvedModpack } from '@amethyst/modpack'
 import type { Events } from '@shared/events'
 import { dataLayout, type DataLayout } from '../layout'
@@ -77,7 +78,7 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true })
 })
 
-async function setup() {
+async function setup(market: { modrinth?: unknown; curseforge?: unknown } = {}) {
   const tasks = new TaskRegistry(() => {}, { intervalMs: 0 })
   const instances = new InstanceManager({ layout, emit, host: { trash: async () => {} }, tasks })
   await instances.load()
@@ -97,7 +98,7 @@ async function setup() {
     instances,
     install,
     resources: { store: undefined as never, autoBackupWorlds: async () => 0 },
-    market: { clients: () => ({ modrinth: {} as never, curseforge: {} as never }) },
+    market: { clients: () => ({ modrinth: (market.modrinth ?? {}) as never, curseforge: (market.curseforge ?? {}) as never }) },
     http: async () => ({}) as never,
     telemetry: { capture: ((...args: unknown[]) => void captured.push(args)) as never },
     api,
@@ -141,7 +142,7 @@ describe('ModpackManager import', () => {
     await writeFile(right, BLOCKED)
     const r = await manager.provideManualFile(right)
     expect(r).toEqual({ matched: true, instanceId, manual: [] })
-    expect(installModpack).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), expect.objectContaining({ manualFiles: [right] }))
+    expect(installModpack).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), expect.objectContaining({ manualFiles: [right], only: ['mods/blocked-1.0.jar'] }))
     expect(events.find((e) => e.event === 'modpack:manual')?.payload).toMatchObject({ instanceId, matched: ['blocked-1.0.jar'], manual: [] })
     expect(await manager.listManualFiles(instanceId)).toEqual([])
   })
@@ -176,6 +177,73 @@ describe('ModpackManager import', () => {
     const resumed = await manager.import({ source: { path: archive }, instanceId: id })
     expect(resumed.instanceId).toBe(id)
     expect(instances.list()).toHaveLength(1)
+  })
+
+  it('resumes an interrupted import of the same pack instead of creating a second instance (#1540)', async () => {
+    const { manager, instances, installModpack } = await setup()
+    const archive = path.join(root, 'pack.zip')
+    await writeFile(archive, 'zip')
+    installModpack.mockRejectedValueOnce(Object.assign(new Error('2 files failed'), { code: 'EINSTALL_INCOMPLETE' }))
+    const error = (await manager.import({ source: { path: archive } }).catch((e: unknown) => e)) as { details: { instanceId: string } }
+    const id = error.details.instanceId
+    // What installModpack leaves behind when staging fails: the operation record.
+    const staging = path.join(instances.resolve(id).dir, '.amethyst', 'staging')
+    await mkdir(staging, { recursive: true })
+    await writeFile(path.join(staging, 'install-ffffffffffffffff.json'), JSON.stringify({ schemaVersion: 1, id: 'install-ffffffffffffffff', kind: 'install', packSha1: 'f'.repeat(40), createdAt: 1, state: 'staging' }))
+
+    // "Import again to resume", without passing the instance id.
+    const again = await manager.import({ source: { path: archive } })
+    expect(again.instanceId).toBe(id)
+    expect(instances.list()).toHaveLength(1)
+  })
+
+  it('identifies a local pack file by its fingerprint and records its provenance; memory stays inherited (#1540, #1095)', async () => {
+    const archive = path.join(root, 'pack.zip')
+    await writeFile(archive, 'zip')
+    const fp = curseforgeFingerprintSync(Buffer.from('zip'))
+    const curseforge = { matchFingerprints: async (fps: number[]) => ({ exactMatches: fps.includes(fp) ? [{ id: 555, file: { id: 777, modId: 555, fileFingerprint: fp } }] : [] }) }
+    const { manager, instances, installModpack } = await setup({ curseforge })
+    const result = await manager.import({ source: { path: archive } })
+    const upstream = { kind: 'curseforge', projectId: 555, fileId: 777, packSha1: 'f'.repeat(40) }
+    expect(instances.get(result.instanceId).upstream).toMatchObject(upstream)
+    expect(installModpack).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), expect.objectContaining({ upstream }))
+    // The pack's own preferences never override the global memory setting.
+    expect(instances.resolve(result.instanceId).config.overrides.memory).toBeUndefined()
+  })
+
+  it('imports without provenance when the platforms do not know the file', async () => {
+    const { manager, instances } = await setup({ curseforge: { matchFingerprints: async () => Promise.reject(new Error('offline')) } })
+    const archive = path.join(root, 'pack.zip')
+    await writeFile(archive, 'zip')
+    const result = await manager.import({ source: { path: archive } })
+    expect(instances.get(result.instanceId).upstream).toBeFalsy()
+  })
+})
+
+describe('ModpackManager preview', () => {
+  it('reads a pack again when the file at the same path was replaced', async () => {
+    const read = vi.fn<(file: string) => Promise<ModpackManifest>>(async (file) => manifest(file))
+    const fresh = new ModpackManager({
+      layout,
+      emit,
+      tasks: new TaskRegistry(() => {}, { intervalMs: 0 }),
+      settings: { value: defaultSettings() },
+      instances: { list: () => [] } as never,
+      install: {} as never,
+      resources: {} as never,
+      market: { clients: () => ({ modrinth: {} as never, curseforge: undefined }) },
+      http: async () => ({}) as never,
+      telemetry: { capture: () => {} },
+      api: { readModpack: read as never },
+    })
+    const archive = path.join(root, 'pack.mrpack')
+    await writeFile(archive, 'v1')
+    await fresh.preview({ path: archive })
+    await fresh.preview({ path: archive })
+    expect(read).toHaveBeenCalledTimes(1)
+    await writeFile(archive, 'version 2, longer')
+    await fresh.preview({ path: archive })
+    expect(read).toHaveBeenCalledTimes(2)
   })
 })
 

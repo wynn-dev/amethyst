@@ -145,6 +145,10 @@ export async function planModpackUpdate(
     },
   }
 
+  // CurseForge files the new version still lists but the API could not return: never remove them.
+  const stillListed = new Set(resolved.skipped.flatMap((s) => (s.reason === 'missing-on-curseforge' && s.fileId !== undefined ? [s.fileId] : [])))
+  const listedButUnavailable = (f: ModpackLockFile | undefined) => (f?.origin.kind === 'curseforge' || f?.origin.kind === 'manual') && stillListed.has(f.origin.fileId)
+
   const keys = new Set([...oldByKey.keys(), ...newByKey.keys()])
   for (const key of keys) {
     throwIfAborted(signal)
@@ -174,6 +178,8 @@ export async function planModpackUpdate(
           row.action = 'conflict'
           row.conflict = userChanged === true ? 'modified-replaced' : 'unmanaged-replaced'
         }
+      } else if (listedButUnavailable(previous)) {
+        row.action = 'keep'
       } else if (userChanged === false) {
         row.action = 'remove'
       } else {
@@ -281,6 +287,7 @@ export async function applyModpackUpdate(plan: ModpackUpdatePlan, options: Apply
     const stagedByKey = new Map(staged.map((s) => [pathKey(s.target.path), s.hashes]))
     const files: ModpackLockFile[] = []
     for (const c of [...plan.add, ...plan.update, ...plan.conflicts, ...plan.keep]) {
+      if (!c.target && c.action === 'keep' && c.previous) files.push(c.previous)
       if (!c.target || c.conflict === 'modified-removed') continue
       const key = pathKey(c.path)
       const local = stagedByKey.get(key) ?? (c.action === 'keep' ? c.disk : undefined)

@@ -1,13 +1,48 @@
 import { randomBytes } from 'node:crypto'
-import { link, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { link, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { CancelledError } from '@amethyst/task'
 import { InstallError } from './errors'
 
-/** Write a file atomically: write a sibling temp file, then rename it over the target. */
+/** The temp-file name every installer write uses: `<target>.<pid>-<8 hex>.tmp`. */
+export function tempPathFor(path: string): string {
+  return `${path}.${process.pid}-${randomBytes(4).toString('hex')}.tmp`
+}
+
+const TEMP_NAME = /\.(\d+)-[0-9a-f]{8}\.tmp$/
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === 'EPERM'
+  }
+}
+
+/**
+ * Delete temp files ({@link tempPathFor}) in `dir` left behind by an installer process that is no
+ * longer running (a crash or kill between write and rename). Temps of live processes, including
+ * this one, are kept. Best effort: never throws.
+ */
+export async function sweepStaleTemps(dir: string): Promise<void> {
+  const names = await readdir(dir).catch(() => [] as string[])
+  await Promise.all(
+    names.map(async (name) => {
+      const pid = Number(TEMP_NAME.exec(name)?.[1] ?? Number.NaN)
+      if (!Number.isSafeInteger(pid) || pid <= 0 || pid === process.pid || pidAlive(pid)) return
+      await rm(join(dir, name), { force: true }).catch(() => {})
+    }),
+  )
+}
+
+/**
+ * Write a file atomically: write a sibling temp file, then rename it over the target. Stale temps
+ * of crashed installs in the same folder are cleaned up afterwards.
+ */
 export async function writeFileAtomic(path: string, data: string | Uint8Array): Promise<void> {
   await mkdir(dirname(path), { recursive: true })
-  const tmp = `${path}.${process.pid}-${randomBytes(4).toString('hex')}.tmp`
+  const tmp = tempPathFor(path)
   try {
     await writeFile(tmp, data)
     await rename(tmp, path)
@@ -15,6 +50,7 @@ export async function writeFileAtomic(path: string, data: string | Uint8Array): 
     await rm(tmp, { force: true }).catch(() => {})
     throw e
   }
+  await sweepStaleTemps(dirname(path))
 }
 
 /** Write pretty-printed JSON atomically. */
@@ -47,7 +83,7 @@ export async function pathExists(path: string): Promise<boolean> {
 export async function hardLink(target: string, alias: string): Promise<void> {
   const [t, a] = await Promise.all([stat(target), stat(alias).catch(() => undefined)])
   if (a && a.ino === t.ino && a.dev === t.dev) return
-  const tmp = `${alias}.${process.pid}-${randomBytes(4).toString('hex')}.tmp`
+  const tmp = tempPathFor(alias)
   await mkdir(dirname(alias), { recursive: true })
   await link(target, tmp)
   try {

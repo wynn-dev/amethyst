@@ -142,6 +142,29 @@ describe('errors', () => {
     await expect(z.entries()).rejects.toMatchObject({ code: 'EZIP_CLOSED' })
   })
 
+  it('opens jars whose end record has a wrong comment length, as Java does (#1431)', async () => {
+    const { bytes } = await build('c.jar', (w) => {
+      w.addBuffer(Buffer.from('{"id":"m"}'), 'fabric.mod.json')
+      w.addBuffer(Buffer.from('x'.repeat(5000)), 'big.txt')
+    })
+    const eocd = bytes.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]))
+    // Extra bytes after a zero-length comment, and a declared comment longer than the file.
+    const trailing = Buffer.concat([bytes, Buffer.from('junk!')])
+    const truncated = Buffer.from(bytes)
+    truncated.writeUInt16LE(40, eocd + 20)
+    for (const variant of [trailing, truncated]) {
+      const file = path.join(tmp, `variant-${variant.length}.jar`)
+      await writeFile(file, variant)
+      for (const source of [file, new Uint8Array(variant)]) {
+        await withZip(source, async (z) => {
+          expect((await z.entries()).map((e) => e.name).toSorted()).toEqual(['big.txt', 'fabric.mod.json'])
+          expect(await z.readText('fabric.mod.json')).toBe('{"id":"m"}')
+          expect(await z.readText('big.txt')).toBe('x'.repeat(5000))
+        })
+      }
+    }
+  })
+
   it('rejects garbage as malformed and passes through fs errors', async () => {
     await expect(openZip(Buffer.from('definitely not a zip file, just text'))).rejects.toBeInstanceOf(ZipError)
     await expect(openZip(Buffer.from('definitely not a zip file, just text'))).rejects.toMatchObject({ code: 'EZIP_MALFORMED' })

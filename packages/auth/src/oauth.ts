@@ -237,7 +237,8 @@ export interface RefreshMsTokenOptions extends HttpOptions {
  * the old token is returned unchanged so callers can always store `result.refreshToken`.
  *
  * `invalid_grant` and `interaction_required` reject with `reauth === true` errors; network
- * failures and 5xx reject with `retryable === true` and must not discard stored secrets.
+ * failures, 429 and 5xx (after the retry policy) reject with `retryable === true` and must not
+ * discard stored secrets.
  */
 export async function refreshMsToken(options: RefreshMsTokenOptions): Promise<MsTokens & { refreshToken: string }> {
   const now = Date.now()
@@ -249,7 +250,9 @@ export async function refreshMsToken(options: RefreshMsTokenOptions): Promise<Ms
       refresh_token: options.refreshToken,
       scope: (options.scopes ?? DEFAULT_SCOPES).join(' '),
     },
-    { ...options, stage: 'msaTokenFailed' },
+    // Unlike a single-use authorization code, a refresh token survives a failed request: retry
+    // 429 and 5xx with backoff, honouring Retry-After, before giving up as transient.
+    { ...options, stage: 'msaTokenFailed', retryable: true },
   )
   if (!res.ok) throw tokenError(res, 'refresh_token')
   const tokens = parseTokens(res, now)

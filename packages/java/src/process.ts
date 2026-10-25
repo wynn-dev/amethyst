@@ -21,6 +21,9 @@ export interface RunOptions {
   maxOutputBytes?: number
 }
 
+/** How long stdout/stderr may stay open after the process exited or was killed. */
+const PIPE_DRAIN_MS = 1000
+
 /**
  * Spawn a short-lived helper (`java -version`, `java_home`, `xattr`) with a timeout. stdin is
  * closed so a prompting binary cannot hang, and the process is killed on timeout or abort.
@@ -42,6 +45,7 @@ export function runProcess(command: string, args: readonly string[], options: Ru
         env: options.env ?? process.env,
         cwd: options.cwd,
         signal: options.signal,
+        killSignal: 'SIGKILL',
         windowsHide: true,
       })
     } catch (e) {
@@ -49,12 +53,25 @@ export function runProcess(command: string, args: readonly string[], options: Ru
       resolve({ code: null, signal: null, stdout: '', stderr: '', error: e as NodeJS.ErrnoException, timedOut: false })
       return
     }
+    // 'close' waits for stdout/stderr to close, which never happens while a grandchild (a
+    // wrapper's background job) or a stopped process holds the pipes. After 'exit' (or a
+    // timeout/abort kill) give the pipes a bounded drain, then settle anyway.
+    let drain: ReturnType<typeof setTimeout> | undefined
+    const settleSoon = () => {
+      drain ??= setTimeout(() => {
+        child.stdout.destroy()
+        child.stderr.destroy()
+        finish(child.exitCode, child.signalCode)
+      }, PIPE_DRAIN_MS)
+    }
     const timer = options.timeoutMs
       ? setTimeout(() => {
           timedOut = true
           child.kill('SIGKILL')
+          settleSoon()
         }, options.timeoutMs)
       : undefined
+    options.signal?.addEventListener('abort', settleSoon, { once: true })
     child.stdout.on('data', (b: Buffer) => {
       if (outLen < max) out.push(b)
       outLen += b.length
@@ -67,6 +84,8 @@ export function runProcess(command: string, args: readonly string[], options: Ru
       if (settled) return
       settled = true
       if (timer) clearTimeout(timer)
+      if (drain) clearTimeout(drain)
+      options.signal?.removeEventListener('abort', settleSoon)
       resolve({
         code,
         signal: sig,
@@ -81,6 +100,7 @@ export function runProcess(command: string, args: readonly string[], options: Ru
       // 'close' may never follow a failed spawn.
       if (child.pid === undefined) finish(null, null)
     })
+    child.on('exit', settleSoon)
     child.on('close', finish)
   })
 }

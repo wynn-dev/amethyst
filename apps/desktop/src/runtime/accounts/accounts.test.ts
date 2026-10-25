@@ -28,6 +28,7 @@ const host = {
   },
   openAuthWindow: vi.fn<(url: string, redirectUri: string) => Promise<string>>(async (_url, redirectUri) => `${redirectUri}?code=the-code&state=${new URL(_url).searchParams.get('state')}`),
   closeAuthWindow: vi.fn<() => Promise<void>>(async () => {}),
+  clearAuthSession: vi.fn<() => Promise<void>>(async () => {}),
   openExternal: vi.fn<(url: string) => Promise<void>>(async () => {}),
 }
 
@@ -191,6 +192,95 @@ describe('AccountManager', () => {
     const dev = manager({}, { developerMode: true })
     await dev.load()
     expect(dev.status().offlineAllowed).toBe(true)
+  })
+
+  it('keeps two accounts isolated across switch, removal and re-adding (KI #1587)', async () => {
+    const m = manager(fakeAuth([{ id: 'A', refreshToken: 'rt-A' }, { id: 'B', refreshToken: 'rt-B' }, { id: 'B', refreshToken: 'rt-B2' }]))
+    await m.load()
+    await m.loginMicrosoft()
+    await m.loginMicrosoft()
+    await m.select('A')
+    host.clearAuthSession.mockClear()
+    await m.remove('B')
+    // The login window's Microsoft cookies are cleared with the account.
+    expect(host.clearAuthSession).toHaveBeenCalledTimes(1)
+    expect(await m.secrets.get('B')).toEqual({ ok: false, reason: 'missing' })
+    expect(await readdir(layout.secrets)).toEqual([path.basename(m.secrets.fileFor('A'))])
+    await m.loginMicrosoft()
+    expect(m.list().map((r) => r.id).toSorted()).toEqual(['A', 'B'])
+    expect(await m.secrets.get('A')).toMatchObject({ ok: true, secrets: { msRefreshToken: 'rt-A' } })
+    expect(await m.secrets.get('B')).toMatchObject({ ok: true, secrets: { msRefreshToken: 'rt-B2' } })
+    // Removing an offline profile leaves the Microsoft sign-in alone.
+    const steve = await m.addOffline('Steve')
+    await m.remove(steve.id)
+    expect(host.clearAuthSession).toHaveBeenCalledTimes(1)
+  })
+
+  it('never relabels another profile’s tokens after a refresh, and never opens a window to recover', async () => {
+    const m = manager({
+      ...fakeAuth([{ id: 'A', refreshToken: 'rt-A' }]),
+      refreshMicrosoft: (async (s: AccountSession) => ({ ...session(s.id, 'rt-other', 'other-uuid'), accessToken: 'mc-token-other' })) as unknown as AuthApi['refreshMicrosoft'],
+    })
+    await m.load()
+    await m.loginMicrosoft()
+    host.openAuthWindow.mockClear()
+    host.openExternal.mockClear()
+    await expect(m.refresh('A', { force: true })).rejects.toMatchObject({ code: 'EACCOUNT_MISMATCH', details: { reauth: true } })
+    expect(m.list()[0]).toMatchObject({ id: 'A', uuid: 'A-uuid', status: 'needs-sign-in' })
+    expect(await m.secrets.get('A')).toMatchObject({ ok: true, secrets: { accessToken: 'mc-token-A', msRefreshToken: 'rt-A' } })
+    await expect(m.sessionForLaunch('A')).rejects.toMatchObject({ code: 'EACCOUNT_MISMATCH' })
+    expect(host.openAuthWindow).not.toHaveBeenCalled()
+    expect(host.openExternal).not.toHaveBeenCalled()
+  })
+
+  it('does not resurrect secrets when an account is removed during its refresh', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    const m = manager({
+      ...fakeAuth([{ id: 'A', refreshToken: 'rt-A' }]),
+      refreshMicrosoft: (async (s: AccountSession, o: { onRefreshTokenRotated?: (t: string) => Promise<void> }) => {
+        await gate
+        await o.onRefreshTokenRotated?.('rt-A-rotated')
+        return session(s.id, 'rt-A-rotated')
+      }) as unknown as AuthApi['refreshMicrosoft'],
+    })
+    await m.load()
+    await m.loginMicrosoft()
+    const refreshing = m.refresh('A', { force: true })
+    refreshing.catch(() => {})
+    await m.remove('A')
+    release()
+    await expect(refreshing).rejects.toMatchObject({ code: 'ECANCELLED' })
+    await vi.waitFor(async () => expect(await readdir(layout.secrets)).toEqual([]))
+    expect(await m.secrets.get('A')).toEqual({ ok: false, reason: 'missing' })
+    expect(m.list()).toEqual([])
+  })
+
+  it('lets a sign-in win over a refresh that was already running for the same account', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    let failRefresh = false
+    const m = manager({
+      ...fakeAuth([{ id: 'A', refreshToken: 'rt-A' }, { id: 'A', refreshToken: 'rt-A-new' }]),
+      refreshMicrosoft: (async () => {
+        if (!failRefresh) throw new AuthError('EMSA_INVALID_GRANT', 'revoked')
+        await gate
+        throw new AuthError('EMSA_INVALID_GRANT', 'revoked').withRotatedRefreshToken('rt-A-stale')
+      }) as unknown as AuthApi['refreshMicrosoft'],
+    })
+    await m.load()
+    await m.loginMicrosoft()
+    await expect(m.refresh('A', { force: true })).rejects.toMatchObject({ code: 'EMSA_INVALID_GRANT' })
+    expect(m.list()[0]?.status).toBe('needs-sign-in')
+
+    // A launch starts a (doomed) refresh with the old token; meanwhile the user signs in again.
+    failRefresh = true
+    const refreshing = m.refresh('A')
+    await m.loginMicrosoft({ accountId: 'A' })
+    release()
+    await expect(refreshing).resolves.toMatchObject({ id: 'A', status: 'ok' })
+    expect(m.list()[0]?.status).toBe('ok')
+    expect(await m.secrets.get('A')).toMatchObject({ ok: true, secrets: { msRefreshToken: 'rt-A-new' } })
   })
 
   it('removes accounts with their secrets and keeps memory-only credentials without a keychain', async () => {

@@ -1,9 +1,10 @@
 /* oxlint-disable no-await-in-loop -- entries and path components are processed sequentially by design */
 import { createWriteStream } from 'node:fs'
-import { chmod, lstat, mkdir, readlink, realpath, rm, symlink, unlink } from 'node:fs/promises'
+import { chmod, lstat, mkdir, open, readlink, realpath, rm, symlink, unlink, type FileHandle } from 'node:fs/promises'
 import path from 'node:path'
-import type { Readable } from 'node:stream'
+import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
+import { callbackify } from 'node:util'
 import yauzl from 'yauzl'
 import { isAbortError, wrapMalformed, ZipError } from './errors'
 import { entrySegments, isInside, resolvePhysical, unsafe } from './paths'
@@ -120,7 +121,79 @@ export async function openZip(source: ZipSource): Promise<ZipReader> {
         : await yauzl.fromBufferPromise(toBuffer(source), YAUZL_OPTIONS)
     return new YauzlReader(zip)
   } catch (e) {
+    if (e instanceof Error && BAD_COMMENT_LENGTH.test(e.message)) {
+      const zip = await openIgnoringCommentLength(source).catch(() => undefined)
+      if (zip) return new YauzlReader(zip)
+    }
     throw wrapMalformed(e, 'Cannot open zip')
+  }
+}
+
+const BAD_COMMENT_LENGTH = /invalid comment length/i
+const EOCD_SIGNATURE = 0x06054b50
+const EOCD_SIZE = 22
+
+/**
+ * Some tools write an end-of-central-directory record whose comment length disagrees with the
+ * bytes that follow it (extra trailing bytes, or a truncated comment). Java's own zip reader, and
+ * so the game, accepts these jars (known-issues #1431). Present the archive to yauzl as if the
+ * comment had exactly its declared length: cut off what follows, pad a short comment with zeros.
+ */
+async function openIgnoringCommentLength(source: ZipSource): Promise<yauzl.ZipFile> {
+  const handle = typeof source === 'string' ? await open(source, 'r') : undefined
+  try {
+    const buffer = handle ? undefined : toBuffer(source as Uint8Array)
+    const realSize = handle ? (await handle.stat()).size : (buffer as Buffer).length
+    const tailLength = Math.min(realSize, EOCD_SIZE + 0xffff)
+    const tailStart = realSize - tailLength
+    const tail = Buffer.alloc(tailLength)
+    if (handle) await handle.read(tail, 0, tailLength, tailStart)
+    else (buffer as Buffer).copy(tail, 0, tailStart)
+    let eocd = -1
+    for (let i = tailLength - EOCD_SIZE; i >= 0; i--) {
+      if (tail.readUInt32LE(i) === EOCD_SIGNATURE) {
+        eocd = i
+        break
+      }
+    }
+    if (eocd === -1) throw new Error('No end of central directory record')
+    const virtualSize = tailStart + eocd + EOCD_SIZE + tail.readUInt16LE(eocd + 20)
+    const reader = new PaddedReader(realSize, handle, buffer)
+    return await yauzl.fromRandomAccessReaderPromise(reader, virtualSize, YAUZL_OPTIONS)
+  } catch (e) {
+    await handle?.close()
+    throw e
+  }
+}
+
+/** Reads the archive's real bytes and zeros past its end. Closes the file with the zip. */
+class PaddedReader extends yauzl.RandomAccessReader {
+  constructor(
+    private readonly realSize: number,
+    private readonly handle: FileHandle | undefined,
+    private readonly buffer: Buffer | undefined,
+  ) {
+    super()
+  }
+
+  override _readStreamForRange(start: number, end: number): Readable {
+    const realEnd = Math.min(end, this.realSize)
+    const pad = end - Math.max(start, realEnd)
+    const { handle, buffer } = this
+    async function* bytes() {
+      if (realEnd > start) {
+        if (buffer) yield buffer.subarray(start, realEnd)
+        else if (handle) yield* handle.createReadStream({ start, end: realEnd - 1, autoClose: false })
+      }
+      if (pad > 0) yield Buffer.alloc(pad)
+    }
+    return Readable.from(bytes(), { objectMode: false })
+  }
+
+  override close(callback: (err: Error | null) => void): void {
+    const handle = this.handle
+    if (!handle) return callback(null)
+    callbackify(() => handle.close())((e) => callback(e))
   }
 }
 

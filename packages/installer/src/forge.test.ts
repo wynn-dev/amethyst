@@ -73,7 +73,7 @@ async function publishLibrary(repo: string, path: string, data: Buffer) {
  * processor libraries, an embedded `maven/` artifact, `data/client.lzma`, a server-only processor,
  * a DOWNLOAD_MOJMAPS processor (handled natively) and a patching processor.
  */
-async function publishNeoForge(options: { sidecar?: 'sha256' | 'sha1' | 'none' | 'wrong' } = {}) {
+async function publishNeoForge(options: { sidecar?: 'sha256' | 'sha1' | 'none' | 'wrong'; toolSha1?: boolean } = {}) {
   const version = '21.1.999'
   const tool = await publishLibrary('neo', 'net/neoforged/installertools/1.0/installertools-1.0.jar', await processorJar('net.neoforged.installertools.ConsoleTool'))
   const extra = await publishLibrary('neo', 'net/neoforged/extra/1.0/extra-1.0.jar', await buildZip({ 'Extra.class': 'x' }))
@@ -100,7 +100,7 @@ async function publishNeoForge(options: { sidecar?: 'sha256' | 'sha1' | 'none' |
         args: ['--task', 'PROCESS_MINECRAFT_JAR', '--input', '{MINECRAFT_JAR}', '--output', '{PATCHED}', '--apply-patches', '{BINPATCH}', '--mcp', '{MCP_VERSION}'],
       },
     ],
-    libraries: [{ name: 'net.neoforged:installertools:1.0', downloads: { artifact: tool } }],
+    libraries: [{ name: 'net.neoforged:installertools:1.0', downloads: { artifact: options.toolSha1 === false ? { path: tool.path, url: tool.url, size: tool.size } : tool } }],
   }
   const versionJson = {
     id: `neoforge-${version}`,
@@ -136,7 +136,7 @@ async function publishNeoForge(options: { sidecar?: 'sha256' | 'sha1' | 'none' |
   if (sidecar === 'sha256') server.file(`${base}.sha256`, sha256(installer))
   if (sidecar === 'sha1') server.file(`${base}.sha1`, `${sha1(installer)}  neoforge-${version}-installer.jar`)
   if (sidecar === 'wrong') server.file(`${base}.sha256`, sha256(Buffer.from('something else')))
-  return { version, installer, installerPath: base, lzma, embedded }
+  return { version, installer, installerPath: base, lzma, embedded, tool }
 }
 
 /** A runner standing in for the NeoForge tools: writes `--output` as a zip. */
@@ -262,6 +262,22 @@ describe('NeoForge', () => {
     await expect(installNeoForge(neo.version, { root, http, meta, java: '/j', runner: recordingRunner(calls) })).rejects.toMatchObject({ code: 'EINSTALL_UNVERIFIED' })
     expect(server.hits(neo.installerPath)).toBe(0)
     expect(calls).toEqual([])
+  })
+
+  it('refuses to run a processor library that has no checksum', async () => {
+    const neo = await publishNeoForge({ toolSha1: false })
+    await installVanilla121()
+    const calls: ProcessorInvocation[] = []
+    // No sha1 in the profile and no `.sha1` sidecar on the maven: a zip check alone is not enough.
+    await expect(installNeoForge(neo.version, { root, http, meta, java: '/j', runner: recordingRunner(calls) })).rejects.toMatchObject({
+      code: 'EINSTALL_UNVERIFIED',
+      message: expect.stringContaining('net.neoforged:installertools:1.0'),
+    })
+    expect(calls).toEqual([])
+    // With the maven's sidecar the same library is verified and the install proceeds.
+    server.file('/neo/net/neoforged/installertools/1.0/installertools-1.0.jar.sha1', neo.tool.sha1)
+    await expect(installNeoForge(neo.version, { root, http, meta, java: '/j', runner: recordingRunner(calls) })).resolves.toMatchObject({ versionId: 'neoforge-21.1.999' })
+    expect(calls).toHaveLength(1)
   })
 
   it('replaces a tampered local installer before running anything', async () => {

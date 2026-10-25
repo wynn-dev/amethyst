@@ -5,15 +5,20 @@
  * - the URL must be `amethyst-asset://data/<segments>`;
  * - every segment is decoded once and must not be empty, `.`/`..`, hidden (leading `.`), or
  *   contain a separator or NUL (so `%2e%2e`, `%2f` and `..%5c` tricks fail);
- * - top-level folders holding secrets are refused;
+ * - only the folders in `SERVED_FOLDERS` are served (never secrets, game files, Java runtimes,
+ *   backups or the content store);
  * - only extensions in `ASSET_TYPES` are allowed (no JSON, databases or encrypted blobs);
- * - after resolving symlinks the real path must still be inside the real data root.
+ * - after resolving symlinks the real path must pass the same checks against the real data root
+ *   (`isServable`), so a link inside a served folder cannot expose any other file.
  */
 import path from 'node:path'
 import { ASSET_HOST, ASSET_SCHEME, ASSET_TYPES } from '@shared/paths'
 
-/** Top-level folders of the data root that are never served. */
-const DENIED_TOP_LEVEL = new Set(['secrets'])
+/**
+ * The only folders of the data root the protocol serves (lower-case path prefixes): extracted
+ * and mirrored icons, instance folders (their icons), background media and offline skins.
+ */
+const SERVED_FOLDERS: readonly (readonly string[])[] = [['cache', 'icons'], ['instances'], ['theme-media'], ['skins']]
 
 export type AssetResolution = { ok: true; path: string; mime: string; immutable: boolean } | { ok: false; status: 400 | 403 | 404 }
 
@@ -49,15 +54,30 @@ export function resolveAssetPath(dataRoot: string, url: string): AssetResolution
     segments.push(decoded)
   }
   if (segments.length === 0) return { ok: false, status: 404 }
-  if (DENIED_TOP_LEVEL.has((segments[0] as string).toLowerCase())) return { ok: false, status: 403 }
-  const ext = path.extname(segments.at(-1) as string).toLowerCase()
-  const mime = ASSET_TYPES[ext]
+  const mime = servableMime(segments)
   if (!mime) return { ok: false, status: 403 }
   const root = path.resolve(dataRoot)
   const file = path.resolve(root, ...segments)
   if (!isInside(root, file)) return { ok: false, status: 403 }
   const rel = segments.join('/')
   return { ok: true, path: file, mime, immutable: IMMUTABLE_PREFIXES.some((p) => rel.startsWith(p)) }
+}
+
+/** The MIME type of a data-root-relative path the protocol may serve, or `undefined`. */
+function servableMime(segments: readonly string[]): string | undefined {
+  if (segments.some((s) => s === '' || s === '.' || s === '..' || s.startsWith('.'))) return undefined
+  const lower = segments.map((s) => s.toLowerCase())
+  if (!SERVED_FOLDERS.some((prefix) => lower.length > prefix.length && prefix.every((p, i) => lower[i] === p))) return undefined
+  return ASSET_TYPES[path.extname(lower.at(-1) as string)]
+}
+
+/**
+ * The real (symlink-resolved) file may be served: inside the real data root, in a served folder,
+ * not hidden, and with a media extension.
+ */
+export function isServable(realRoot: string, realFile: string): boolean {
+  if (!isInside(realRoot, realFile)) return false
+  return servableMime(path.relative(realRoot, realFile).split(path.sep)) !== undefined
 }
 
 /**

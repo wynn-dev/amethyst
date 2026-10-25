@@ -56,6 +56,12 @@ mac:
   extendInfo:
     LSMinimumSystemVersion: '13.0'
     NSRequiresAquaSystemAppearance: false
+    # macOS treats Amethyst as the "responsible process" for the games it starts, so the game's
+    # privacy prompts carry these strings. Without them macOS denies access without asking:
+    # voice-chat mods get no microphone (needs the audio-input entitlement too), and joining or
+    # hosting a LAN world fails with "No route to host" (Local Network privacy, macOS 15+).
+    NSMicrophoneUsageDescription: 'Minecraft mods you run with Amethyst, such as voice chat, can use the microphone.'
+    NSLocalNetworkUsageDescription: 'Minecraft uses your local network to find and join LAN worlds.'
 
 dmg:
   artifactName: ${productName}-${arch}.${ext}

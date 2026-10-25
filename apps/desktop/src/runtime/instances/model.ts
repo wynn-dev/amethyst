@@ -4,6 +4,7 @@
  * from version JSONs.
  */
 import path from 'node:path'
+import { sanitizeFileName } from '@amethyst/content'
 import type { AutoJoinServer, InstanceOverrides, InstancePatch, InstanceRuntime, InstanceUpstream, LoaderKind } from '@shared/services'
 import { AppError, invalid } from '../util/errors'
 import { asRecord, isRecord, readBool, readInt, readOneOf, readString, readStringArray, readStringRecord } from '../util/parse'
@@ -205,11 +206,21 @@ export function validateName(name: unknown): string {
   return trimmed
 }
 
-/** The folder name for a display name: invalid characters become `_`, trailing dots/spaces are trimmed. */
+/**
+ * Folder names stay this many UTF-8 bytes under the 255-byte limit, so that ` (12)` suffixes,
+ * the case-only-rename temporary (`.renaming-xxxxxxxx`) and rescued-world stamps still fit.
+ */
+const FOLDER_NAME_BYTES = 200
+
+/**
+ * The folder name for a display name: clamped to {@link FOLDER_NAME_BYTES}, then the shared
+ * {@link sanitizeFileName} rules (`/`, `\`, `:` and control characters become `_`, leading dots
+ * go, NFC), then trailing dots and spaces are trimmed.
+ */
 export function folderNameFor(name: string): string {
-  // oxlint-disable-next-line no-control-regex -- control characters are exactly what is replaced
-  let out = name.normalize('NFC').replace(/[\u0000-\u001f\u007f/:\\]/g, '_').trim().replace(/^\.+/, '').replace(/[.\s]+$/, '')
-  while (Buffer.byteLength(out) > 255) out = [...out].slice(0, -1).join('')
+  let out = name.normalize('NFC')
+  while (Buffer.byteLength(out) > FOLDER_NAME_BYTES) out = [...out].slice(0, -1).join('')
+  out = sanitizeFileName(out, '').replace(/[.\s]+$/, '')
   return out || 'Instance'
 }
 

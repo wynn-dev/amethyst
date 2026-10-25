@@ -147,7 +147,8 @@ booted.catch((e: unknown) => log.error('boot failed', e))
 const pool = once(async () => {
   const { WorkerPool } = await import('./resources/pool')
   const size = Math.max(2, Math.min(4, Math.floor(availableParallelism() / 2)))
-  return new WorkerPool<ResourceWorkerHandlers>(() => new Worker(new URL('./scan-worker.js', import.meta.url)), { size })
+  // Scans and hashes time out (default 10 min); world zips run as cancellable tasks of any length.
+  return new WorkerPool<ResourceWorkerHandlers>(() => new Worker(new URL('./scan-worker.js', import.meta.url)), { size, timeouts: { importWorld: 0, exportWorld: 0 } })
 })
 
 let resourceManager: ResourceManager | undefined
@@ -512,6 +513,9 @@ let stopping = false
 async function shutdown(): Promise<void> {
   if (stopping) return
   stopping = true
+  // Abort running tasks first so the helper processes they spawned are stopped, not orphaned;
+  // give their cleanup a brief, bounded moment (main kills the runtime after 1.5 s).
+  await Promise.race([tasks.cancelAll(), new Promise((r) => setTimeout(r, 400))])
   tasks.dispose()
   launchManager?.dispose()
   javaManager?.dispose()

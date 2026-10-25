@@ -84,6 +84,27 @@ describe('pack list helpers', () => {
     expect(isFilePackId('fabric')).toBe(false)
   })
 
+  it('uses NFC pack ids (as Java on macOS does) and matches NFD entries', () => {
+    const nfd = 'Cafe\u0301 Pack.zip'
+    const nfc = 'Caf\u00e9 Pack.zip'
+    expect(resourcePackId(nfd)).toBe(`file/${nfc}`)
+    // Case is kept exactly: the game compares ids case-sensitively.
+    expect(resourcePackId('Faithful.ZIP')).toBe('file/Faithful.ZIP')
+    expect(disableResourcePack(['vanilla', `file/${nfd}`], resourcePackId(nfd))).toEqual(['vanilla'])
+    expect(enableResourcePack(['vanilla', `file/${nfd}`, 'file/B.zip'], resourcePackId(nfd))).toEqual(['vanilla', 'file/B.zip', `file/${nfc}`])
+  })
+
+  it('matches packs and the shader pack whose names on disk are NFD to NFC config entries', async () => {
+    const rp = path.join(tmp, 'resourcepacks')
+    await makeZip(path.join(rp, 'Cafe\u0301.zip'), { 'pack.mcmeta': '{"pack":{"pack_format":34,"description":"x"}}' })
+    const packs = await scanContentFolder(rp, 'resourcepacks', { enabledPacks: ['vanilla', 'file/Caf\u00e9.zip'] })
+    expect(packs.entries.map((e) => [e.packId, e.enabled])).toEqual([['file/Caf\u00e9.zip', true]])
+    const sp = path.join(tmp, 'shaderpacks')
+    await makeZip(path.join(sp, 'Complementary Re\u0301imagined.zip'), { 'shaders/final.fsh': '' })
+    const shaders = await scanContentFolder(sp, 'shaderpacks', { activeShaderPack: 'Complementary R\u00e9imagined.zip' })
+    expect(shaders.entries.map((e) => e.enabled)).toEqual([true])
+  })
+
   it('enables at the top, disables and reorders without touching built-in packs', () => {
     expect(enableResourcePack([], 'file/A.zip')).toEqual(['vanilla', 'file/A.zip'])
     expect(enableResourcePack(['vanilla', 'file/A.zip', 'file/B.zip'], 'file/A.zip')).toEqual(['vanilla', 'file/B.zip', 'file/A.zip'])

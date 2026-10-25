@@ -1,13 +1,14 @@
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { app, BrowserWindow, protocol } from 'electron'
+import { app, BrowserWindow, protocol, session } from 'electron'
 import { ASSET_SCHEME } from '@shared/paths'
 import type { ReportedError } from '@shared/services'
 import { serveAssetRequest } from './asset-protocol'
 import { dialogService, shellService, windowService } from './os-services'
 import { prepareE2eDataRoot, runE2eUi } from './e2e-ui'
 import { confirmQuit, installAppMenu, type AppMenu } from './menu'
+import { installPermissionPolicy } from './permissions'
 import { registerMainService, startMainRpc } from './rpc/server'
 import { RuntimeSupervisor, showHiddenWindows } from './runtime'
 import { Updater } from './updater'
@@ -18,6 +19,11 @@ const isDev = !app.isPackaged
 if (process.env.AMETHYST_SMOKE) app.setPath('userData', mkdtempSync(join(tmpdir(), 'amethyst-smoke-')))
 const runtime = new RuntimeSupervisor()
 const updater = new Updater()
+
+// Deny web permissions (camera, microphone, geolocation…) to every session, including the sign-in
+// window's; Amethyst's own pages keep only clipboard writes and notifications.
+const devOrigin = isDev && process.env.ELECTRON_RENDERER_URL ? new URL(process.env.ELECTRON_RENDERER_URL).origin : undefined
+app.on('session-created', (s) => installPermissionPolicy(s, devOrigin))
 
 // Uncaught main-process errors are logged and forwarded to the runtime, whose telemetry service
 // drops them unless the user enabled crash reports.
@@ -186,6 +192,7 @@ function createMainWindow(): BrowserWindow {
 }
 
 app.whenReady().then(() => {
+  installPermissionPolicy(session.defaultSession, devOrigin)
   const dataRoot = app.getPath('userData')
   protocol.handle(ASSET_SCHEME, (request) => serveAssetRequest(dataRoot, request.url, request.headers.get('range')))
   // The registry only dispatches to own properties, so expose the class through a plain object.

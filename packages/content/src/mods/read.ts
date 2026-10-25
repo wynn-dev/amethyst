@@ -144,7 +144,8 @@ async function collect(zip: ZipReader, options: ReadModOptions): Promise<Collect
     if (text === undefined) continue
     const out = parseModsToml(text, { loader, file, jarVersion: implementationVersion })
     addWarnings(ctx, out.warnings)
-    if (out.meta) byLoader[loader] = out.meta
+    // A mods.toml may turn out to be a NeoForge one (see parseModsToml); neoforge.mods.toml, read next, wins.
+    if (out.meta) byLoader[out.meta.loader] = out.meta
   }
 
   // Legacy Forge: only consulted when there is no modern descriptor.

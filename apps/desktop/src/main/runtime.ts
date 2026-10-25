@@ -1,10 +1,10 @@
 import { join } from 'node:path'
 import { app, BrowserWindow, ipcMain, MessageChannelMain, safeStorage, shell, utilityProcess, type MessagePortMain, type UtilityProcess, type WebContents } from 'electron'
-import { CONNECT_CHANNEL, PORT_CHANNEL, RpcClient, ServiceRegistry, unwrap, type RpcMessage } from '@shared/rpc'
+import { CONNECT_CHANNEL, PORT_CHANNEL, postResponse, RpcClient, ServiceRegistry, unwrap, type RpcMessage } from '@shared/rpc'
 import type { Events } from '@shared/events'
 import type { HostServices, ReportedError, RuntimeServices } from '@shared/services'
 import { RUNTIME_ENV } from '@shared/paths'
-import { closeAuthWindow, openAuthWindow } from './auth-window'
+import { clearAuthSession, closeAuthWindow, openAuthWindow } from './auth-window'
 import { emitMain } from './rpc/server'
 
 const SHUTDOWN_TIMEOUT_MS = 1_500
@@ -32,6 +32,7 @@ const host: HostServices = {
   async closeAuthWindow() {
     closeAuthWindow()
   },
+  clearAuthSession: () => clearAuthSession(),
   async openExternal(url) {
     if (!/^https:\/\//i.test(url)) throw Object.assign(new Error('Only https: links can be opened'), { code: 'EINVALID_ARGUMENT' })
     await shell.openExternal(url)
@@ -143,15 +144,25 @@ export class RuntimeSupervisor {
     this.#stopping = true
     const child = this.#child
     if (!child) return
-    await new Promise<void>((resolve) => {
-      const timer = setTimeout(resolve, timeoutMs)
+    const exited = await new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => resolve(false), timeoutMs)
       child.once('exit', () => {
         clearTimeout(timer)
-        resolve()
+        resolve(true)
       })
       child.postMessage({ t: 'shutdown' })
     })
+    if (exited) return
+    // The runtime handles SIGTERM (`kill()`) by starting the same shutdown that is already stuck,
+    // so escalate: a hung runtime must never outlive the app.
     child.kill()
+    if (child.pid !== undefined) {
+      try {
+        process.kill(child.pid, 'SIGKILL')
+      } catch {
+        // Already gone.
+      }
+    }
   }
 
   /** Forward a main-process error to the runtime's telemetry service, which applies consent. */
@@ -165,6 +176,9 @@ export class RuntimeSupervisor {
       serviceName: 'Amethyst Runtime',
       stdio: app.isPackaged ? 'ignore' : 'inherit',
       env: {
+        // The runtime's file I/O, hashing and DNS share libuv's pool; the default 4 threads starve DNS
+        // during big installs (download.md P5).
+        UV_THREADPOOL_SIZE: '16',
         ...process.env,
         [RUNTIME_ENV.userData]: app.getPath('userData'),
         [RUNTIME_ENV.logs]: app.getPath('logs'),
@@ -178,7 +192,7 @@ export class RuntimeSupervisor {
     child.on('message', async (msg: RpcMessage) => {
       if (msg?.t !== 'req') return
       const result = await this.#hostRegistry.dispatch(msg)
-      child.postMessage({ t: 'res', id: msg.id, result } satisfies RpcMessage)
+      postResponse((res) => child.postMessage(res), msg.id, result)
     })
 
     child.once('spawn', () => {

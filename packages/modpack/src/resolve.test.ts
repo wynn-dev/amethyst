@@ -118,6 +118,15 @@ describe('CurseForge resolution', () => {
     await expect(resolveModpackFiles(m, { curseforge: forbidden })).rejects.toMatchObject({ code: 'EMARKET_UNAVAILABLE' })
   })
 
+  it('fails instead of returning an empty plan when CurseForge rejects every id (#971)', async () => {
+    const files = [cfFile(1, 10, 'a.jar', 'a'), cfFile(2, 10, 'b.jar', 'b')]
+    const { client } = mockCurseForge(files, [cfMod(10, 6)], [1, 2])
+    const m = await pack(files.map((f) => ({ projectID: f.modId, fileID: f.id })))
+    await expect(resolveModpackFiles(m, { curseforge: client })).rejects.toMatchObject({ code: 'EMARKET_UNAVAILABLE' })
+    const noMods = { ...mockCurseForge(files, []).client, getMods: async () => Promise.reject(new MarketplaceError('EHTTP', 'HTTP 400', { platform: 'curseforge', status: 400 })) }
+    await expect(resolveModpackFiles(m, { curseforge: noMods })).rejects.toMatchObject({ code: 'EMARKET_UNAVAILABLE' })
+  })
+
   it('lookupInBatches rethrows non-rejection errors', async () => {
     const boom = new MarketplaceError('ENETWORK', 'down', { platform: 'curseforge' })
     await expect(lookupInBatches([1, 2], 1, async () => Promise.reject(boom))).rejects.toBe(boom)

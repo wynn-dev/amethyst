@@ -262,6 +262,14 @@ export function isModrinthIdOrSlug(id: string): boolean {
   return ID_RE.test(id) || SLUG_RE.test(id)
 }
 
+/** `/project/{id|slug}` (plus `suffix`), rejecting anything that is not an id or slug before it reaches the URL. */
+function projectPath(idOrSlug: string, suffix = ''): string {
+  if (typeof idOrSlug !== 'string' || !isModrinthIdOrSlug(idOrSlug)) {
+    throw new MarketplaceError('EINVALID_ARGUMENT', `Invalid Modrinth project id or slug: ${String(idOrSlug)}`, { platform: 'modrinth' })
+  }
+  return `/project/${encodeURIComponent(idOrSlug)}${suffix}`
+}
+
 function chunk<T>(items: T[], size: number): T[][] {
   const out: T[][] = []
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size))
@@ -396,9 +404,9 @@ export class ModrinthClient {
   }
 
   /** `GET /project/{id|slug}`. */
-  getProject(idOrSlug: string, opts?: RequestOptions): Promise<ModrinthProject> {
+  async getProject(idOrSlug: string, opts?: RequestOptions): Promise<ModrinthProject> {
     return this.http.request(
-      { path: `/project/${encodeURIComponent(idOrSlug)}`, ttlMs: CACHE_TTL.project, validate: (v) => parseProject(v) },
+      { path: projectPath(idOrSlug), ttlMs: CACHE_TTL.project, validate: (v) => parseProject(v) },
       opts,
     )
   }
@@ -425,7 +433,7 @@ export class ModrinthClient {
   ): Promise<ModrinthVersion[]> {
     const list = await this.http.request(
       {
-        path: `/project/${encodeURIComponent(idOrSlug)}/version`,
+        path: projectPath(idOrSlug, '/version'),
         query: {
           loaders: filter.loaders?.length ? JSON.stringify(filter.loaders) : undefined,
           game_versions: filter.gameVersions?.length ? JSON.stringify(filter.gameVersions) : undefined,
@@ -542,10 +550,10 @@ export class ModrinthClient {
   }
 
   /** `GET /project/{id}/dependencies`. */
-  getProjectDependencies(idOrSlug: string, opts?: RequestOptions): Promise<ModrinthDependencies> {
+  async getProjectDependencies(idOrSlug: string, opts?: RequestOptions): Promise<ModrinthDependencies> {
     return this.http.request(
       {
-        path: `/project/${encodeURIComponent(idOrSlug)}/dependencies`,
+        path: projectPath(idOrSlug, '/dependencies'),
         ttlMs: CACHE_TTL.project,
         validate: (v) => {
           const o = record(v, 'dependencies')
@@ -557,10 +565,10 @@ export class ModrinthClient {
   }
 
   /** `GET /project/{id}/members`. */
-  getTeamMembers(idOrSlug: string, opts?: RequestOptions): Promise<ModrinthTeamMember[]> {
+  async getTeamMembers(idOrSlug: string, opts?: RequestOptions): Promise<ModrinthTeamMember[]> {
     return this.http.request(
       {
-        path: `/project/${encodeURIComponent(idOrSlug)}/members`,
+        path: projectPath(idOrSlug, '/members'),
         ttlMs: CACHE_TTL.project,
         validate: (v) =>
           arrayOf(v, 'members', (x, w) => {

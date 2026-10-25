@@ -180,6 +180,23 @@ describe('exportModrinth', () => {
     expect(result.embedded.map((e) => e.path)).toEqual(['mods/linked.jar'])
   })
 
+  it('never links CurseForge CDN URLs in a .mrpack, even with strict mode off (pitfall 7)', async () => {
+    const cdn = ['https://mediafiles.forgecdn.net/files/1/2/fromcf.jar', 'https://edge.forgecdn.net/files/1/2/fromcf.jar', 'https://www.curseforge.com/api/v1/mods/1/files/2/download']
+    await writeModpackLock(source, {
+      schemaVersion: 1,
+      source: 'curseforge',
+      pack: { name: 'x', version: '1', sha1: 'x', minecraft: '1.20.1', loader: null },
+      installedAt: 0,
+      files: [{ path: 'mods/fromcf.jar', hashes: { sha1: sha('sha1', 'curseforge only') }, size: 15, origin: { kind: 'curseforge', projectId: 1, fileId: 2 }, downloads: cdn }],
+      deselected: [],
+    })
+    const modrinth = mockModrinth({ [sha('sha1', 'curseforge only')]: mrVersion('EEEEEEEE', 'FFFFFFFF', cdn[0] as string, 'curseforge only') })
+    const result = await exportModrinth(source, { ...base(path.join(tmp, 'cdn.mrpack')), include: ['mods/fromcf.jar'], strict: false, modrinth })
+    expect(result.linked).toEqual([])
+    expect(result.embedded.map((e) => e.path)).toEqual(['mods/fromcf.jar'])
+    expect(result.warnings.some((w) => w.includes('CurseForge'))).toBe(true)
+  })
+
   it('never exports launcher folders or credentials', () => {
     for (const p of ['.amethyst/x', 'versions/1.20.1/1.20.1.jar', 'libraries/a.jar', 'assets/x', 'natives/x', 'usercache.json', 'launcher_profiles.json', 'keys/id.pem', 'config/my_secret.cfg', 'accounts_v2.json', 'mods/.DS_Store']) {
       expect(isNeverExported(p)).toBe(true)

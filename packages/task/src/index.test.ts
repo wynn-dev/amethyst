@@ -57,6 +57,21 @@ describe('createTask', () => {
 })
 
 describe('mapLimit', () => {
+  it('rejects only after the items already running have settled', async () => {
+    let slowDone = false
+    let started = 0
+    const error = await mapLimit([0, 1, 2, 3], 2, async (n) => {
+      started++
+      if (n === 0) throw new Error('boom')
+      await new Promise((r) => setTimeout(r, 20))
+      slowDone = true
+    }).catch((e: unknown) => e)
+    expect(error).toMatchObject({ message: 'boom' })
+    // The in-flight item finished before the caller saw the failure; no new items started.
+    expect(slowDone).toBe(true)
+    expect(started).toBe(2)
+  })
+
   it('respects the concurrency limit and keeps order', async () => {
     let active = 0
     let peak = 0

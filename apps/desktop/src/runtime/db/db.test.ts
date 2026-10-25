@@ -1,6 +1,7 @@
 import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import Database from 'better-sqlite3'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createQueryHandlers, openDatabase } from './engine'
 import { testDbClient } from './test-utils'
@@ -48,6 +49,21 @@ describe('engine', () => {
     db.close()
   })
 
+  it('never stores attribution with malformed platform ids (a leaked path would poison batches)', () => {
+    const { db } = openDatabase(file)
+    const q = createQueryHandlers(db)
+    q['sources.put']({
+      rows: [
+        { sha1: 'a', platform: 'modrinth', projectId: 'AAAAAAAA', versionId: 'data/AAAAAAAA/versions/BBBBBBBB', confidence: 'manifest', resolvedAt: 1 },
+        { sha1: 'b', platform: 'curseforge', projectId: '238222', versionId: '../4567', confidence: 'hash', resolvedAt: 1 },
+        { sha1: 'c', platform: 'modrinth', projectId: 'AAAAAAAA', versionId: 'BBBBBBBB', confidence: 'hash', resolvedAt: 1 },
+        { sha1: 'd', platform: 'curseforge', projectId: '238222', versionId: '4567', confidence: 'hash', resolvedAt: 1 },
+      ],
+    })
+    expect(q['sources.get']({ sha1s: ['a', 'b', 'c', 'd'] }).map((r) => r.sha1)).toEqual(['c', 'd'])
+    db.close()
+  })
+
   it('prunes the response cache by expiry and size', () => {
     const { db } = openDatabase(file)
     const q = createQueryHandlers(db)
@@ -76,6 +92,23 @@ describe('DbClient', () => {
     await expect(client.query('nope' as 'meta.stats', {})).rejects.toMatchObject({ code: 'EDB_UNKNOWN_QUERY' })
     await client.close()
     await expect(client.query('meta.stats', {})).rejects.toMatchObject({ code: 'EDB_CLOSED' })
+  })
+
+  it('rebuilds the index when a table goes missing or the file is damaged mid-session', async () => {
+    const { client } = testDbClient(file)
+    await client.open()
+    await client.query('placements.apply', { dir: '/i/mods', upserts: [['/i/mods/a.jar', rec('a')]], deletes: [], now: 1 })
+    // Another process (or a damaged page) takes the table away under the open connection.
+    const other = new Database(file)
+    other.exec('DROP TABLE placements')
+    other.close()
+    // The query that hits it fails once (callers degrade to scanning without a cache)...
+    await expect(client.query('placements.listDir', { dir: '/i/mods' })).rejects.toMatchObject({ message: expect.stringMatching(/no such table/) })
+    // ...then a fresh, migrated database serves every later query instead of a storm of errors.
+    expect(await client.query('placements.listDir', { dir: '/i/mods' })).toEqual([])
+    expect(await client.query('meta.stats', {})).toMatchObject({ placements: 0, schemaVersion: 1 })
+    expect((await readdir(dir)).some((n) => /^index\.sqlite\.\d+-runtime1\.bak$/.test(n))).toBe(true)
+    await client.close()
   })
 
   it('fails in-flight queries when the worker crashes, then restarts it', async () => {

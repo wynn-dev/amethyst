@@ -109,6 +109,26 @@ describe('JsonDocument', () => {
     expect(await read()).toMatchObject({ name: 'x' })
   })
 
+  it('never moves a good file aside or resets it when reading fails with an I/O error', async () => {
+    const good = `${JSON.stringify({ schemaVersion: 2, name: 'mine', count: 3 })}\n`
+    await writeFile(file, good)
+    // EMFILE / EACCES / EIO say nothing about the content: even in move-aside mode the file stays.
+    const doc = new JsonDocument(file, schema, {
+      fs: {
+        readFile: async () => {
+          throw Object.assign(new Error('too many open files'), { code: 'EMFILE' })
+        },
+      },
+    })
+    const result = await doc.load()
+    expect(result.outcome).toBe('unreadable')
+    expect(result.corruptPath).toBeUndefined()
+    expect(doc.readOnly).toBe(true)
+    await expect(doc.set({ name: 'default', count: 0 })).rejects.toMatchObject({ code: 'EDOCUMENT_READONLY' })
+    expect(await readFile(file, 'utf8')).toBe(good)
+    expect((await readdir(dir)).filter((n) => n.includes('.corrupt-'))).toEqual([])
+  })
+
   it('migrates older documents and parses fields leniently', async () => {
     await writeFile(file, JSON.stringify({ schemaVersion: 1, title: 'old', count: 'nope' }))
     const doc = new JsonDocument(file, schema)

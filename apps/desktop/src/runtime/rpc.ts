@@ -1,5 +1,5 @@
 import type { MessagePortMain } from 'electron'
-import { RpcClient, ServiceRegistry, unwrap, type RpcMessage } from '@shared/rpc'
+import { postResponse, RpcClient, ServiceRegistry, unwrap, type RpcMessage } from '@shared/rpc'
 import type { HostServices, RuntimeServices } from '@shared/services'
 import type { Events } from '@shared/events'
 
@@ -16,7 +16,7 @@ export function attachPort(port: MessagePortMain): void {
   port.on('message', async ({ data }: { data: RpcMessage }) => {
     if (data?.t !== 'req') return
     const result = await registry.dispatch(data)
-    port.postMessage({ t: 'res', id: data.id, result } satisfies RpcMessage)
+    postResponse((msg) => port.postMessage(msg), data.id, result)
   })
   port.on('close', () => ports.delete(port))
   port.start()
@@ -25,7 +25,14 @@ export function attachPort(port: MessagePortMain): void {
 /** Push an event to every connected renderer. */
 export function emit<K extends keyof Events>(event: K, payload: Events[K]): void {
   const msg: RpcMessage = { t: 'evt', event, payload }
-  for (const port of ports) port.postMessage(msg)
+  for (const port of ports) {
+    try {
+      port.postMessage(msg)
+    } catch (e) {
+      // A payload structured clone rejects must not throw into the service that emitted it.
+      console.error(`cannot send event ${event}`, e)
+    }
+  }
 }
 
 const hostClient = new RpcClient((req) => process.parentPort.postMessage(req))

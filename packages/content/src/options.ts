@@ -144,12 +144,19 @@ export function serializePackList(ids: readonly string[]): string {
 }
 
 /**
- * The `options.txt` id of a launcher-managed resource pack: `file/<exact name on disk>`. For a
+ * The `options.txt` id of a launcher-managed resource pack: `file/<name on disk>`. For a
  * zip that is the file name including `.zip`; for a folder pack it is the folder name as is,
- * **without** any added extension.
+ * **without** any added extension. The name is NFC-normalised, as Java on macOS reports file
+ * names (APFS keeps whatever form a file was created with, often NFD), so the id matches the one
+ * the game writes; case is kept exactly.
  */
 export function resourcePackId(nameOnDisk: string): string {
-  return `file/${nameOnDisk}`
+  return `file/${nameOnDisk.normalize('NFC')}`
+}
+
+/** Comparison key for pack ids: NFC, so ids written in NFD (by older tools) still match. */
+export function packIdKey(id: string): string {
+  return id.normalize('NFC')
 }
 
 /** True for ids of packs in the instance's `resourcepacks/` folder (as opposed to built-in or mod packs). */
@@ -168,7 +175,8 @@ export function packNameFromId(id: string): string | undefined {
  * at the bottom when the list was empty, as the game does.
  */
 export function enableResourcePack(list: readonly string[], id: string): string[] {
-  const out = list.filter((x) => x !== id)
+  const key = packIdKey(id)
+  const out = list.filter((x) => packIdKey(x) !== key)
   if (out.length === 0) out.push('vanilla')
   out.push(id)
   return out
@@ -176,7 +184,8 @@ export function enableResourcePack(list: readonly string[], id: string): string[
 
 /** Disable a pack: remove its id from the list. */
 export function disableResourcePack(list: readonly string[], id: string): string[] {
-  return list.filter((x) => x !== id)
+  const key = packIdKey(id)
+  return list.filter((x) => packIdKey(x) !== key)
 }
 
 /**

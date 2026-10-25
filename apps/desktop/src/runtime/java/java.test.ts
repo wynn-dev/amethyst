@@ -1,8 +1,8 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { javaRequirementFor, type JavaRecord } from '@amethyst/java'
+import { javaRequirementFor, ProbeCache, type JavaRecord } from '@amethyst/java'
 import type { Events } from '@shared/events'
 import type { Settings } from '@shared/services'
 import { dataLayout, type DataLayout } from '../layout'
@@ -135,6 +135,31 @@ describe('JavaManager', () => {
     expect(await java.pathForMajor(21)).toBe(SYSTEM_21.path)
     expect(await java.pathForMajor(17)).toBe('/data/runtimes/new-17/bin/java')
     expect(installJavaRuntime).toHaveBeenCalledOnce()
+  })
+
+  it('does not offer cached runtimes whose binary was deleted or replaced before the first scan', async () => {
+    const kept = path.join(root, 'jdk-21', 'bin', 'java')
+    const changed = path.join(root, 'jdk-17', 'bin', 'java')
+    await mkdir(path.dirname(kept), { recursive: true })
+    await mkdir(path.dirname(changed), { recursive: true })
+    await writeFile(kept, 'x')
+    await writeFile(changed, 'x')
+    const [a, b] = await Promise.all([stat(kept), stat(changed)])
+    const cached = [
+      record(kept, 21, { mtimeMs: a.mtimeMs, size: a.size }),
+      record(changed, 17, { mtimeMs: b.mtimeMs, size: b.size + 1 }),
+      record(path.join(root, 'deleted', 'bin', 'java'), 25),
+    ]
+    await new ProbeCache(cached).save(layout.javaProbeCache)
+    const java = new JavaManager({
+      layout,
+      emit,
+      settings: { value: defaultSettings() },
+      tasks: new TaskRegistry(() => {}, { intervalMs: 0 }),
+      instances: { resolve: () => ({}) as never },
+      http: async () => ({}) as never,
+    })
+    expect((await java.list()).map((r) => r.path)).toEqual([kept])
   })
 
   it('hides removed runtimes and keeps user-added paths', async () => {

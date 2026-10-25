@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { FIXTURE_LOGS } from './__fixtures__/helpers'
-import { LogParser, parsePlainLine, parseXmlEvent, type LogEvent } from './logs'
+import { LogParser, MAX_PARTIAL_LINE, parsePlainLine, parseXmlEvent, type LogEvent } from './logs'
 
 function parseAll(text: string | Uint8Array, chunkSize = Infinity, stream: LogEvent['stream'] = 'stdout'): LogEvent[] {
   const events: LogEvent[] = []
@@ -82,5 +82,19 @@ describe('plain lines', () => {
   it('decodes UTF-8 split across chunks', () => {
     const bytes = Buffer.from('[10:00:00] [main/INFO]: héllo — 世界\n')
     expect(parseAll(bytes, 1)[0]?.message).toBe('héllo — 世界')
+  })
+
+  it('bounds an unterminated line: output without newlines is emitted in capped pieces', () => {
+    const events: LogEvent[] = []
+    const p = new LogParser('stdout', (e) => events.push(e))
+    const chunk = 'x'.repeat(4096)
+    // 4 MiB with no newline at all.
+    for (let i = 0; i < 1024; i++) p.push(chunk)
+    expect(events.length).toBeGreaterThanOrEqual(63)
+    expect(events.every((e) => e.message.length <= MAX_PARTIAL_LINE)).toBe(true)
+    p.push('tail\n')
+    p.end()
+    expect(events.reduce((n, e) => n + e.message.length, 0)).toBe(4096 * 1024 + 4)
+    expect(events.at(-1)?.message.endsWith('tail')).toBe(true)
   })
 })

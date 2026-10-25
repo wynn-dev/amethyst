@@ -153,6 +153,7 @@ export async function installProject(
     // Required dependencies (one level; their own dependencies are rare and listed on their pages).
     const required = chosen.dependencies.filter((d) => d.type === 'required' && d.projectId)
     let deps = 0
+    let unresolved = 0
     if (required.length > 0) {
       const have = await installedKeys(target.id, kind)
       for (const d of required) {
@@ -165,7 +166,11 @@ export async function installProject(
             const list = await api.marketplace.getVersions(project.platform, d.projectId ?? '', { gameVersion: target.minecraft, ...(loader ? { loader } : {}) })
             depVersionId = bestVersion(list)?.id ?? null
           }
-          if (!depVersionId) continue
+          if (!depVersionId) {
+            // A required dependency with no compatible version is reported, never skipped silently.
+            unresolved++
+            continue
+          }
           // oxlint-disable-next-line no-await-in-loop
           const r = await api.marketplace.install({ instanceId: target.id, platform: project.platform, projectId: d.projectId ?? '', versionId: depVersionId })
           if (r.resource) deps++
@@ -177,7 +182,8 @@ export async function installProject(
     setState(k, { state: 'installed', resourceId: result.resource?.id ?? null })
     void queryClient.invalidateQueries({ queryKey: ['market', 'search'] })
     void queryClient.invalidateQueries({ queryKey: resourceKeys.kind(target.id, kind) })
-    toast({ kind: 'success', title: `Installed ${project.title}`, message: `Added to “${target.name}”${deps ? ` with ${deps} required ${deps === 1 ? 'dependency' : 'dependencies'}` : ''}.` })
+    const missing = unresolved ? ` ${unresolved} required ${unresolved === 1 ? 'dependency has' : 'dependencies have'} no version for ${target.minecraft}${loader ? ` with ${loader}` : ''}; see the Dependencies tab.` : ''
+    toast({ kind: unresolved ? 'warning' : 'success', title: `Installed ${project.title}`, message: `Added to “${target.name}”${deps ? ` with ${deps} required ${deps === 1 ? 'dependency' : 'dependencies'}` : ''}.${missing}` })
     return true
   } catch (e) {
     setState(k, { state: 'failed', message: errorMessage(e) })

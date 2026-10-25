@@ -166,7 +166,8 @@ async function doRefresh(session: AccountSession, options: RefreshMicrosoftOptio
   const rotated = ms.refreshToken !== session.msRefreshToken
   try {
     if (rotated) await options.onRefreshTokenRotated?.(ms.refreshToken)
-    const chain = await runChain(ms.accessToken, options)
+    // The refreshed tokens must belong to this account: never relabel another account's tokens.
+    const chain = await runChain(ms.accessToken, { ...options, expectedId: session.id })
     return toSession(session.id, chain, ms.refreshToken, session)
   } catch (e) {
     if (rotated && e instanceof AuthError) throw e.withRotatedRefreshToken(ms.refreshToken)
@@ -186,6 +187,8 @@ async function doRefresh(session: AccountSession, options: RefreshMicrosoftOptio
  * Failures with `reauth === true` (`EMSA_INVALID_GRANT`, `EMSA_INTERACTION_REQUIRED`) mean the
  * user must log in again. `retryable` failures are transient: keep the stored secrets. If the
  * error has `rotatedRefreshToken`, persist that token in place of the old one.
+ * `EACCOUNT_MISMATCH` means the stored tokens resolved to a different Minecraft account than
+ * `session.id`: they are never returned under this account's id.
  */
 export function refreshMicrosoft(session: AccountSession, options: RefreshMicrosoftOptions): Promise<AccountSession> {
   if (options.signal?.aborted) {

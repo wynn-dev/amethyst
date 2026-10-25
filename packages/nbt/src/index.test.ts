@@ -154,6 +154,17 @@ describe('modified UTF-8', () => {
     }
   })
 
+  it('uses an unsigned 16-bit length for strings of 32768–65535 encoded bytes', () => {
+    // 40,000 bytes would read back as a negative length with a signed 16-bit reader.
+    const value = `${'a'.repeat(39_990)}\u0000😀`
+    const bytes = encodeNbt({ root: nbt.compound({ s: nbt.string(value) }) })
+    const at = 1 + 2 + 1 + 2 + 1 // root type, empty root name, child type, child name length, 's'
+    expect(new DataView(bytes.buffer, bytes.byteOffset).getUint16(at)).toBe(39_990 + 2 + 6)
+    expect(decodeNbt(bytes).root.value.get('s')).toEqual({ type: 'string', value })
+    const max = 'a'.repeat(65_535)
+    expect(decodeNbt(encodeNbt({ root: nbt.compound({ s: nbt.string(max) }) })).root.value.get('s')).toEqual({ type: 'string', value: max })
+  })
+
   it('rejects strings longer than 65535 encoded bytes on write', () => {
     expect(() => encodeNbt({ root: nbt.compound({ s: nbt.string('✦'.repeat(21846)) }) })).toThrow(
       expect.objectContaining({ code: 'ENBT_INVALID' }),

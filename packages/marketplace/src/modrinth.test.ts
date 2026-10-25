@@ -98,6 +98,21 @@ describe('ModrinthClient endpoints', () => {
     expect(calls[0]!.url.pathname).toBe('/v2/project/sodium')
   })
 
+  it('rejects project ids that are not an id or slug before building a URL', async () => {
+    const { c, calls } = client(() => json(project))
+    for (const bad of ['..', '.', '', 'a/b', 'x']) {
+      // oxlint-disable-next-line no-await-in-loop -- one bad id at a time
+      await expect(c.getProject(bad)).rejects.toMatchObject({ code: 'EINVALID_ARGUMENT' })
+      // oxlint-disable-next-line no-await-in-loop
+      await expect(c.getProjectVersions(bad)).rejects.toMatchObject({ code: 'EINVALID_ARGUMENT' })
+      // oxlint-disable-next-line no-await-in-loop
+      await expect(c.getProjectDependencies(bad)).rejects.toMatchObject({ code: 'EINVALID_ARGUMENT' })
+      // oxlint-disable-next-line no-await-in-loop
+      await expect(c.getTeamMembers(bad)).rejects.toMatchObject({ code: 'EINVALID_ARGUMENT' })
+    }
+    expect(calls).toHaveLength(0)
+  })
+
   it('batches projects, drops malformed ids and chunks by 100', async () => {
     const { c, calls } = client((call) => {
       const ids = jsonParam(call.url, 'ids') as string[]

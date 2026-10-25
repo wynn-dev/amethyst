@@ -11,7 +11,7 @@ import { useInstanceInfo } from '@/data/instance-info'
 import { openModpackImport } from '@/data/modpacks'
 import { isModpackPath, pickFiles, revealInFinder } from '@/lib/files'
 import { api } from '@/lib/rpc'
-import { reportError } from '@/lib/error-text'
+import { toastError } from '@/lib/error-messages'
 import {
   AddFromInstanceSheet,
   DropOverlay,
@@ -216,7 +216,7 @@ export default function ResourcePacksTab() {
       { label: 'Move Down', shortcut: 'alt+mod+down', disabled: !allOn, onSelect: () => move(keys, 1) },
       { label: 'Move to Top', disabled: !allOn, onSelect: () => move(keys, 'top') },
       { kind: 'separator' },
-      { label: 'Show in Finder', disabled: !one, onSelect: () => one && void api.resources.get(id, 'resourcepacks', one.id).then((d) => revealInFinder(d.path), (e: unknown) => reportError('Couldn’t show the file', e)) },
+      { label: 'Show in Finder', disabled: !one, onSelect: () => one && void api.resources.get(id, 'resourcepacks', one.id).then((d) => revealInFinder(d.path), (e: unknown) => toastError(e, 'Couldn’t show the file')) },
       { label: 'Copy Name', onSelect: () => copyText(rs.map((p) => p.name).join('\n')) },
       { kind: 'separator' },
       { label: 'Move to Trash…', shortcut: 'mod+backspace', destructive: true, onSelect: () => setPendingTrash(rs.map((p) => p.id)) },

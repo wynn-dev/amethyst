@@ -16,11 +16,17 @@
   --color-transparent: transparent;
   --color-current: currentColor;
 
-  /* Accent: overridable at runtime through the unprefixed `--accent` variable on <html>. */
+  /*
+   * Accent: overridable at runtime through the unprefixed `--accent`, `--accent-fill` and
+   * `--on-accent` variables on <html> (lib/theme.ts). `accent` is for text, icons and rings on the
+   * window; `accent-fill` is for surfaces that carry `on-accent` text or glyphs (buttons, menu
+   * highlights, selected rows), tuned so that text keeps at least 4.5:1 contrast.
+   */
   --color-accent: var(--accent);
-  --color-accent-hover: color-mix(in srgb, var(--accent) 88%, black);
+  --color-accent-fill: var(--accent-fill);
+  --color-accent-hover: color-mix(in srgb, var(--accent-fill) 88%, black);
   --color-accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
-  --color-on-accent: #fff;
+  --color-on-accent: var(--on-accent);
 
   /* Labels (NSColor.labelColor family). */
   --color-label: light-dark(rgb(0 0 0 / 0.85), rgb(255 255 255 / 0.86));
@@ -165,6 +171,9 @@
 
 :root {
   --accent: light-dark(#8b55d6, #a578ec);
+  /* White on #8b55d6 is 4.8:1 (the dark-mode text accent would only reach 3.2:1). */
+  --accent-fill: #8b55d6;
+  --on-accent: #fff;
   color-scheme: light dark;
   font-family: var(--font-sans);
   font-size: var(--text-body);
@@ -281,21 +290,21 @@ textarea {
   box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 60%, transparent);
 }
 .source-list:has(:focus-visible) .sl-row[aria-current='page'] {
-  background: var(--accent);
+  background: var(--accent-fill);
   color: var(--color-on-accent);
   box-shadow: none;
 }
 .source-list:has(:focus-visible) .sl-row[aria-current='page'] :is(.text-accent, .text-label-2, .text-label-3) {
-  color: rgb(255 255 255 / 0.8);
+  color: color-mix(in srgb, var(--on-accent) 80%, transparent);
 }
 
 /* Secondary text inside an accent-selected table row. */
 [role='grid']:focus [aria-selected='true'] :is(.text-label-2, .text-label-3, .text-accent) {
-  color: rgb(255 255 255 / 0.78);
+  color: color-mix(in srgb, var(--on-accent) 80%, transparent);
 }
 [role='grid']:focus [aria-selected='true'] .row-badge > span {
-  color: white;
-  background: rgb(255 255 255 / 0.2);
+  color: var(--on-accent);
+  background: color-mix(in srgb, var(--on-accent) 20%, transparent);
 }
 
 @utility tabular {

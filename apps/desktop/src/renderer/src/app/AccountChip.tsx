@@ -70,7 +70,7 @@ export function AccountChip() {
             role="menuitemradio"
             aria-checked={a.active}
             onClick={() => switchTo(a)}
-            className="flex h-9 w-full items-center gap-2 rounded-md px-1.5 text-left hover:bg-accent hover:text-on-accent focus-visible:bg-accent focus-visible:text-on-accent focus-visible:outline-none [&:hover_.sub]:text-on-accent/75"
+            className="flex h-9 w-full items-center gap-2 rounded-md px-1.5 text-left hover:bg-accent-fill hover:text-on-accent focus-visible:bg-accent-fill focus-visible:text-on-accent focus-visible:outline-none [&:hover_.sub]:text-on-accent/75"
           >
             <span className="flex w-3.5 justify-center">{a.active && <Check className="size-3.5" strokeWidth={2.5} />}</span>
             <SkinHead skin={a.skinUrl} hue={a.hue} size={20} />
@@ -104,7 +104,7 @@ export function AccountChip() {
             setOpen(false)
             setUi({ addAccount: true })
           }}
-          className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-body hover:bg-accent hover:text-on-accent"
+          className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-body hover:bg-accent-fill hover:text-on-accent"
         >
           <Plus className="size-3.5" /> Add Account…
         </button>
@@ -115,7 +115,7 @@ export function AccountChip() {
             setOpen(false)
             openSettings('accounts')
           }}
-          className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-body hover:bg-accent hover:text-on-accent"
+          className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-body hover:bg-accent-fill hover:text-on-accent"
         >
           <span className="w-3.5" /> Manage Accounts…
         </button>

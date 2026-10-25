@@ -9,7 +9,7 @@ import { formatCount, formatDate, formatRelative } from '@/app/visuals'
 import { useInstanceRows, runtimeLabel, type RuntimeInstanceRow } from '@/data/instance-info'
 import { bestVersion, parseProjectKey, projectKey, useChangelog, useMarketProject, useMarketVersions } from '@/data/market'
 import { openExternal } from '@/lib/files'
-import { errorMessage } from '@/lib/error-text'
+import { errorMessage } from '@/lib/error-messages'
 import { FavouriteButton, InstallButton, ProjectIcon, SourceBadge, TYPE_LABELS } from './discover-parts'
 
 const Markdown = lazy(() => import('./markdown'))

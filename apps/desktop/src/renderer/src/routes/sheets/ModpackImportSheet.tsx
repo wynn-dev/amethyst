@@ -5,7 +5,7 @@ import { openInstance } from '@/app/commands'
 import { BlockIcon } from '@/app/visuals'
 import { loaderLabel, useInstanceRows } from '@/data/instance-info'
 import { importModpack, useModpackPreview, useModpackUi } from '@/data/modpacks'
-import { errorMessage } from '@/lib/error-text'
+import { errorMessage } from '@/lib/error-messages'
 import { PropertyList } from '@/routes/instance/parts'
 
 /** Import review (B4.5): preview a pack, confirm the name, then import it as one task. */

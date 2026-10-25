@@ -13,7 +13,7 @@ import { installProject, useInstallState } from '@/data/market'
 import { openModpackImport } from '@/data/modpacks'
 import { isModpackPath, pickFiles, revealInFinder } from '@/lib/files'
 import { api } from '@/lib/rpc'
-import { asError, reportError } from '@/lib/error-text'
+import { errorCode, toastError } from '@/lib/error-messages'
 import {
   AddFromInstanceSheet,
   DropOverlay,
@@ -75,8 +75,8 @@ export default function ShadersTab() {
       }
       await setResourcesEnabled(id, 'shaderpacks', [r.id], true)
     } catch (e) {
-      if (asError(e).code === 'ENO_SHADER_LOADER') setGate(r as ResourceRow)
-      else reportError('Couldn’t change the shader pack', e)
+      if (errorCode(e) === 'ENO_SHADER_LOADER') setGate(r as ResourceRow)
+      else toastError(e, 'Couldn’t change the shader pack')
     }
   }
 
@@ -110,9 +110,9 @@ export default function ShadersTab() {
             aria-label={`Use ${name}`}
             onMouseDown={(e) => e.stopPropagation()}
             onClick={() => void activate(r)}
-            className={cn('flex size-[14px] items-center justify-center rounded-full shadow-control', on ? 'bg-accent shadow-none' : 'bg-field')}
+            className={cn('flex size-[14px] items-center justify-center rounded-full shadow-control', on ? 'bg-accent-fill shadow-none' : 'bg-field')}
           >
-            {on && <span className="size-[5px] rounded-full bg-white" />}
+            {on && <span className="size-[5px] rounded-full bg-on-accent" />}
           </button>
         )
       },
@@ -144,7 +144,7 @@ export default function ShadersTab() {
     return [
       { label: r.id === activeId ? 'Turn Off' : 'Activate', onSelect: () => void activate(r.id === activeId ? { id: NONE } : r) },
       { kind: 'separator' },
-      { label: 'Show in Finder', onSelect: () => void api.resources.get(id, 'shaderpacks', r.id).then((d) => revealInFinder(d.path), (e: unknown) => reportError('Couldn’t show the file', e)) },
+      { label: 'Show in Finder', onSelect: () => void api.resources.get(id, 'shaderpacks', r.id).then((d) => revealInFinder(d.path), (e: unknown) => toastError(e, 'Couldn’t show the file')) },
       { label: 'Copy Name', onSelect: () => copyText(r.name) },
       { kind: 'separator' },
       { label: 'Move to Trash…', destructive: true, onSelect: () => setPendingTrash(realIds(keys)) },

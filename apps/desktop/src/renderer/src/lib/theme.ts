@@ -39,13 +39,60 @@ export function accentValue(color: string): string | null {
   return `light-dark(${hex}, color-mix(in srgb, ${hex} 84%, white))`
 }
 
+const channels = (hex: string) => [1, 3, 5].map((i) => Number.parseInt(hex.slice(i, i + 2), 16))
+
+/** WCAG relative luminance of `#rrggbb`. */
+function luminance(hex: string): number {
+  const [r, g, b] = channels(hex).map((c) => {
+    const v = c / 255
+    return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4
+  })
+  return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!
+}
+
+/** WCAG contrast ratio between two `#rrggbb` colours (1–21). */
+export function contrastRatio(a: string, b: string): number {
+  const [hi, lo] = [luminance(a), luminance(b)].toSorted((x, y) => y - x)
+  return (hi! + 0.05) / (lo! + 0.05)
+}
+
+/** `weight` of `hex` mixed with black, as `#rrggbb`. */
+function darken(hex: string, weight: number): string {
+  return `#${channels(hex)
+    .map((c) => Math.round(c * weight).toString(16).padStart(2, '0'))
+    .join('')}`
+}
+
+/** Text on accent fills must reach WCAG AA for normal text. */
+const MIN_CONTRAST = 4.5
+
+/**
+ * The surface colour behind accent-filled controls and the text colour on it: white text on the
+ * accent, darkened just enough to reach 4.5:1 while keeping its hue; for accents too light for
+ * that (yellow, orange), the accent itself with black text.
+ */
+export function accentFill(color: string): { fill: string; on: string } {
+  const hex = normalizeHex(color) ?? DEFAULT_ACCENT
+  for (let weight = 1; weight >= 0.7; weight -= 0.02) {
+    const fill = weight === 1 ? hex : darken(hex, weight)
+    if (contrastRatio(fill, '#ffffff') >= MIN_CONTRAST) return { fill, on: '#fff' }
+  }
+  return { fill: hex, on: '#000' }
+}
+
 export type ThemeInput = Pick<AppearanceSettings, 'theme' | 'accentColor'>
 
 /** Sets only the accent (also used for the live preview while the colour panel is dragged). */
 export function applyAccent(color: string, root: HTMLElement = document.documentElement): void {
   const accent = accentValue(color)
-  if (accent) root.style.setProperty('--accent', accent)
-  else root.style.removeProperty('--accent')
+  if (accent) {
+    const { fill, on } = accentFill(color)
+    root.style.setProperty('--accent', accent)
+    root.style.setProperty('--accent-fill', fill)
+    root.style.setProperty('--on-accent', on)
+  } else {
+    for (const name of ['--accent', '--accent-fill', '--on-accent']) root.style.removeProperty(name)
+  }
 }
 
 export function applyTheme(theme: ThemeInput, root: HTMLElement = document.documentElement): void {

@@ -2,6 +2,7 @@ import { mkdtemp, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import type { GlfwArm64Source } from '../natives/glfw'
 import type { Lwjgl2Arm64Source } from '../natives/lwjgl2'
 
 /** `versions` directory holding trimmed real version JSON (Mojang, Fabric meta, Forge/NeoForge installers). */
@@ -25,4 +26,10 @@ export const TEST_LWJGL2_SOURCE: Lwjgl2Arm64Source = {
     { name: 'lwjgl-platform', version: '2.9.1', url: 'lwjgl-platform-2.9.1-natives-macos-arm64.jar', sha256: fakeSha(2), size: 100 },
     { name: 'lwjgl-platform', version: '2.9.2-nightly-20140822', url: 'lwjgl-platform-2.9.2-nightly-20140822-natives-macos-arm64.jar', sha256: fakeSha(3), size: 100 },
   ],
+}
+
+/** A fake patched-GLFW manifest, as the `natives-lwjgl3-glfw` CI release would publish it. */
+export const TEST_GLFW_SOURCE: GlfwArm64Source = {
+  baseUrl: 'https://example.invalid/glfw/',
+  artifacts: [{ name: 'lwjgl-glfw', version: '3.3.1', url: 'lwjgl-glfw-patched-3.3.1-natives-macos-arm64.jar', sha256: fakeSha(0x61f3), size: 62116 }],
 }

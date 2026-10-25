@@ -607,7 +607,7 @@ Snapshots and third-party JSON that use other LWJGL versions (for example 3.2.2 
      - Keep the `org.lwjgl.lwjgl:lwjgl`/`lwjgl_util` Java jars as they are.
      - Verify that the 2.9.3-based natives load with 2.9.0/2.9.1 Java classes (JNI symbol compatibility) by launching 1.5.2, 1.6.4 and 1.7.10. If 2.9.0 fails, also replace the Java jars with the matching 2.9.3 build.
    - **LWJGL 3 before 3.3.0:** for every `org.lwjgl:*` module, upgrade the Java jar to a single 3.3.x version.
-     - Use 3.3.1 to match the tested HMCL set; it is the earliest release with official macOS arm64 natives. Use the patched GLFW build for `lwjgl-glfw`.
+     - Use 3.3.1 to match the tested HMCL set; it is the earliest release with official macOS arm64 natives. For `lwjgl-glfw`, keep the official 3.3.1 Java jar but use Amethyst's own patched GLFW natives jar (`natives/lwjgl3-glfw`, see `DECISIONS.md`) instead of the official natives: the official GLFW reports an error from `glfwSetWindowIcon` that 1.13–1.18 treat as fatal.
      - Replace each old native entry with the `natives-macos-arm64` classifier jar **on the classpath**.
      - Remove the old `natives-macos` (x86) entries entirely.
      - Make sure `-XstartOnFirstThread` is present. It is, because 1.13+ JSON has it.

@@ -43,6 +43,7 @@ export interface DiagnoseOptions {
   /** Required when `natives` is not given. */
   jvmArch?: PlanNativesOptions['jvmArch']
   lwjgl2?: PlanNativesOptions['lwjgl2']
+  glfw?: PlanNativesOptions['glfw']
   /** `suspect` (default): see the module doc. `always`: hash everything. `never`: sizes only. */
   hash?: 'never' | 'suspect' | 'always'
   /** Install timestamp (epoch ms, from `.install-lock`). Files not modified since are trusted by size. */
@@ -130,7 +131,7 @@ export async function diagnose(version: ResolvedVersion, dirs: GameDirs | string
   let plan = options.natives
   if (!plan) {
     if (!options.jvmArch) throw new TypeError('diagnose needs options.natives or options.jvmArch')
-    plan = planNatives(version, { jvmArch: options.jvmArch, lwjgl2: options.lwjgl2 })
+    plan = planNatives(version, { jvmArch: options.jvmArch, lwjgl2: options.lwjgl2, glfw: options.glfw })
   }
   for (const i of plan.issues) issues.push({ kind: 'native', name: i.library, path: '', problem: 'unavailable', expected: {}, message: i.message })
 

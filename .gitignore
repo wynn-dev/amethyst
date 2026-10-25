@@ -15,3 +15,6 @@ coverage/
 # natives/lwjgl2/build.sh scratch and output (published by .github/workflows/natives-lwjgl2.yml)
 natives/lwjgl2/build/
 natives/lwjgl2/dist/
+# natives/lwjgl3-glfw/build.sh scratch and output (published by .github/workflows/natives-lwjgl3-glfw.yml)
+natives/lwjgl3-glfw/build/
+natives/lwjgl3-glfw/dist/

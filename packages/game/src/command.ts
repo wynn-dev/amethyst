@@ -12,6 +12,7 @@ import { toArgv } from './argv'
 import { assetIndexCandidates, assetObjectPath, readAssetIndex } from './assets'
 import { GameError } from './errors'
 import { nativesDirectory } from './natives/extract'
+import type { GlfwArm64Source } from './natives/glfw'
 import type { Lwjgl2Arm64Source } from './natives/lwjgl2'
 import { planNatives, type NativesPlan } from './natives/plan'
 import type { ResolvedVersion } from './resolve'
@@ -69,6 +70,7 @@ export interface BuildLaunchOptions {
   /** Precomputed plan; otherwise {@link planNatives} runs with the options below. */
   natives?: NativesPlan
   lwjgl2?: Lwjgl2Arm64Source
+  glfw?: GlfwArm64Source
   replaceNatives?: boolean
   /** macOS product version for rules. Default `13.0`. */
   osVersion?: string
@@ -285,7 +287,7 @@ export async function buildLaunchCommand(version: ResolvedVersion, options: Buil
   const warnings: string[] = []
   const jvmArch = requireArch(options.java.arch)
   const plan =
-    options.natives ?? planNatives(version, { jvmArch, osVersion: options.osVersion, lwjgl2: options.lwjgl2, replace: options.replaceNatives })
+    options.natives ?? planNatives(version, { jvmArch, osVersion: options.osVersion, lwjgl2: options.lwjgl2, glfw: options.glfw, replace: options.replaceNatives })
   if (plan.jvmArch !== jvmArch) throw new GameError('ELAUNCH_OPTIONS', `Natives plan is for ${plan.jvmArch} but the JVM is ${jvmArch}`, { field: 'natives' })
   warnings.push(...plan.warnings)
   if (!plan.ok && !options.allowUnavailableNatives) {

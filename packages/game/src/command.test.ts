@@ -2,7 +2,7 @@
 import { copyFile, mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { FIXTURE_ASSETS, FIXTURE_VERSIONS, TEST_LWJGL2_SOURCE, tempDir } from './__fixtures__/helpers'
+import { FIXTURE_ASSETS, FIXTURE_VERSIONS, TEST_GLFW_SOURCE, TEST_LWJGL2_SOURCE, tempDir } from './__fixtures__/helpers'
 import { parseArgs, redactArgs, redactCommand } from './argv'
 import { autoMemory, buildLaunchCommand, expandArguments, isLog4ShellAffected, sanitizeEnv, substitute, type BuildLaunchOptions } from './command'
 import { resolveVersion } from './resolve'
@@ -26,6 +26,7 @@ const base = (over: Partial<BuildLaunchOptions> = {}): BuildLaunchOptions => ({
   gameDir: path.join(root, 'instances', 'test'),
   auth: { username: 'Steve', uuid: UUID, accessToken: TOKEN, userType: 'msa', xuid: '2535400000000000', clientId: 'client-abc' },
   lwjgl2: TEST_LWJGL2_SOURCE,
+  glfw: TEST_GLFW_SOURCE,
   launcherVersion: '1.2.3',
   baseEnv: { PATH: '/usr/bin:/bin', HOME: '/Users/steve', ELECTRON_RUN_AS_NODE: '1', NODE_OPTIONS: '--inspect', DYLD_INSERT_LIBRARIES: '/x.dylib', JAVA_TOOL_OPTIONS: '-Dx=y' },
   ...over,
@@ -268,11 +269,24 @@ describe('buildLaunchCommand', () => {
   it('fails clearly for unavailable natives, missing log configs and bad memory', async () => {
     const v = await resolveVersion(FIXTURE_VERSIONS, '1.7.10')
     await expect(buildLaunchCommand(v, base({ lwjgl2: { baseUrl: 'https://x/', artifacts: [] } }))).rejects.toMatchObject({ code: 'ENATIVES_UNAVAILABLE' })
+    const v116 = await resolveVersion(FIXTURE_VERSIONS, '1.16.5')
+    await expect(buildLaunchCommand(v116, base({ glfw: { baseUrl: 'https://x/', artifacts: [] } }))).rejects.toMatchObject({ code: 'ENATIVES_UNAVAILABLE' })
     const modern = await resolveVersion(FIXTURE_VERSIONS, '1.21')
     await expect(buildLaunchCommand(modern, base({ dirs: { root, assets: path.join(root, 'empty-assets') } }))).rejects.toMatchObject({ code: 'ELOG_CONFIG_MISSING' })
     await expect(buildLaunchCommand(modern, base({ memory: { maxMB: -1 } }))).rejects.toMatchObject({ code: 'ELAUNCH_OPTIONS' })
     const clamped = await buildLaunchCommand(modern, base({ memory: { minMB: 8192, maxMB: 4096 } }))
     expect(clamped.args).toContain('-Xms4096M')
+  })
+
+  it('1.16.5 on arm64: LWJGL 3.3.1 with the patched GLFW jar on the classpath instead of the official natives', async () => {
+    const v = await resolveVersion(FIXTURE_VERSIONS, '1.16.5')
+    const cmd = await buildLaunchCommand(v, base())
+    const libs = path.join(root, 'libraries')
+    expect(cmd.classpath).toContain(path.join(libs, 'dev/wynn/amethyst/natives/lwjgl-glfw-patched/3.3.1/lwjgl-glfw-patched-3.3.1-natives-macos-arm64.jar'))
+    expect(cmd.classpath).toContain(path.join(libs, 'org/lwjgl/lwjgl-glfw/3.3.1/lwjgl-glfw-3.3.1.jar'))
+    expect(cmd.classpath.some((c) => c.endsWith('lwjgl-glfw-3.3.1-natives-macos-arm64.jar'))).toBe(false)
+    expect(cmd.natives.extract).toEqual([])
+    expect(cmd.args.includes('-XstartOnFirstThread')).toBe(true)
   })
 
   it('evaluates rules with an x64 JVM and keeps the x86_64 natives (Rosetta)', async () => {

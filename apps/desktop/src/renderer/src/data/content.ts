@@ -31,6 +31,7 @@ export const resourceKeys = {
   detail: (instanceId: string, kind: ResourceKind, id: string) => ['res', instanceId, kind, 'detail', id] as const,
   analysis: (instanceId: string) => ['res', instanceId, 'mods', 'analysis'] as const,
   backups: (instanceId: string, worldId?: string) => ['res', instanceId, 'saves', 'backups', worldId ?? '*'] as const,
+  counts: (instanceId: string) => ['res', instanceId, 'counts'] as const,
 }
 
 /** Stable serialisation of a list query (the cache key part). */
@@ -97,6 +98,7 @@ async function applyChange(ev: Events['resources:changed']): Promise<void> {
   const { instanceId, kind } = ev
   // Small whole-list queries and problem analysis are cheap: refetch them.
   void queryClient.invalidateQueries({ queryKey: [...resourceKeys.kind(instanceId, kind), 'all'] })
+  void queryClient.invalidateQueries({ queryKey: resourceKeys.counts(instanceId) })
   if (kind === 'mods') void queryClient.invalidateQueries({ queryKey: resourceKeys.analysis(instanceId) })
   for (const id of [...ev.changed, ...ev.removed]) void queryClient.invalidateQueries({ queryKey: resourceKeys.detail(instanceId, kind, id) })
   if (kind === 'saves') void queryClient.invalidateQueries({ queryKey: [...resourceKeys.kind(instanceId, 'saves'), 'backups'] })
@@ -265,6 +267,33 @@ export function useMods(instanceId: string) {
     queryFn: async () => (await api.resources.list(instanceId, 'mods', { limit: 1000 })).items,
     select: (rows): (ResourceRow & { update?: { version: string } })[] => rows,
     enabled: !!instanceId,
+  })
+}
+
+/**
+ * Row totals of the content folders (one small `resources.list` page each): the Overview summary
+ * and the instance tab counts. Refreshed whenever a folder changes.
+ */
+export function useContentCounts(id: string, modded: boolean) {
+  return useQuery({
+    queryKey: resourceKeys.counts(id),
+    staleTime: 30_000,
+    enabled: !!id,
+    queryFn: async () => {
+      const total = (kind: ResourceKind, enabled?: boolean) =>
+        api.resources
+          .list(id, kind, { limit: 1, ...(enabled === undefined ? {} : { enabled }) })
+          .then((p) => p.total)
+          .catch(() => undefined)
+      const [mods, modsEnabled, resourcePacks, shaders, worlds] = await Promise.all([
+        modded ? total('mods') : undefined,
+        modded ? total('mods', true) : undefined,
+        total('resourcepacks'),
+        total('shaderpacks'),
+        total('saves'),
+      ])
+      return { mods, modsEnabled, resourcePacks, shaders, worlds }
+    },
   })
 }
 

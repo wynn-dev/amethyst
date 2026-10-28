@@ -60,3 +60,43 @@ export async function writeBackgroundFixture(dir: string): Promise<string> {
   await writeFile(file, encodePng(1200, 780, landscape(1200, 780)))
   return file
 }
+
+/** Sample mods for the screenshots: [name, author, version]. */
+const SAMPLE_MODS: [string, string, string][] = [
+  ['Sodium', 'CaffeineMC', '0.6.3'],
+  ['Iris Shaders', 'coderbot', '1.8.1'],
+  ['Lithium', 'CaffeineMC', '0.14.3'],
+  ['Fabric API', 'FabricMC', '0.107.0'],
+  ['Mod Menu', 'Prospector', '11.0.3'],
+  ["Xaero's Minimap", 'xaero96', '24.6.1'],
+  ["Xaero's World Map", 'xaero96', '1.39.2'],
+  ['Jade', 'Snownee', '15.8.2'],
+  ['AppleSkin', 'squeek502', '3.0.5'],
+  ['Entity Culling', 'tr7zw', '1.7.2'],
+  ['ImmediatelyFast', 'RaphiMC', '1.3.3'],
+  ['FerriteCore', 'malte0811', '7.0.2'],
+  ['Krypton', 'astei', '0.2.8'],
+  ['Continuity', 'PepperCode1', '3.0.0'],
+  ['Zoomify', 'isXander', '2.14.2'],
+  ['Sound Physics Remastered', 'henkelmax', '1.4.8'],
+  ['Cloth Config', 'shedaniel', '15.0.140'],
+  ['YetAnotherConfigLib', 'isXander', '3.6.1'],
+]
+
+/** Writes small Fabric mod jars (metadata only) and returns their absolute paths. */
+export async function writeModFixtures(dir: string): Promise<string[]> {
+  const { createZip } = await import('@amethyst/zip')
+  const folder = join(dir, '.fixtures', 'mods')
+  await mkdir(folder, { recursive: true })
+  const files: string[] = []
+  for (const [name, author, version] of SAMPLE_MODS) {
+    const id = name.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-')
+    const file = join(folder, `${id}-${version}.jar`)
+    const zip = createZip(file)
+    zip.addBuffer(Buffer.from(JSON.stringify({ schemaVersion: 1, id: id.replaceAll('-', '_'), version, name, authors: [author] })), 'fabric.mod.json')
+    // oxlint-disable-next-line no-await-in-loop -- a few tiny files, written in order
+    await zip.finish()
+    files.push(file)
+  }
+  return files
+}

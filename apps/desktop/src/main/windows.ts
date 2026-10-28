@@ -4,7 +4,7 @@ import { app, BrowserWindow, nativeTheme, shell, type WebContents } from 'electr
 import { MAIN_EVENT_CHANNEL } from '@shared/rpc'
 import { DEFAULT_ACCENT } from '@shared/accent'
 import type { MenuCommandEvent } from '@shared/menu'
-import { writeBackgroundFixture } from './screenshot-fixtures'
+import { writeBackgroundFixture, writeModFixtures } from './screenshot-fixtures'
 
 /**
  * Window management beyond the main window: the Settings window (B7), routing renderer
@@ -111,6 +111,8 @@ interface Shot {
   script?: string
   /** RPC calls made after the shot, to leave the state as it was. */
   cleanup?: RpcStep[]
+  /** JavaScript run in the main window after the shot, to leave the state as it was. */
+  cleanupScript?: string
 }
 
 /** `[service, method, args]`; the string `BACKGROUND_FIXTURE` in args becomes the generated image's path. */
@@ -132,6 +134,31 @@ const resetAppearance: RpcStep[] = [
   ['settings', 'patch', [{ appearance: { accentColor: DEFAULT_ACCENT } }]],
 ]
 
+/** Sample instances, created once per screenshot profile (the game installs only at first launch). */
+const SAMPLE_INSTANCES = [
+  { name: 'Survival', runtime: { minecraft: '1.21.1', fabric: '0.16.9' } },
+  { name: 'Create: Above & Beyond', runtime: { minecraft: '1.18.2', forge: '40.2.4' } },
+  { name: 'Vanilla', runtime: { minecraft: '1.21.4' } },
+  { name: 'Skyblock', runtime: { minecraft: '1.20.1', quilt: '0.26.4' } },
+]
+// `MOD_FIXTURES` becomes the generated jars' paths; they are added to the first instance.
+const seedInstances = `(async () => {
+  const list = await window.amethyst.invoke('instances', 'list', [])
+  if (!list.ok || list.value.length > 0) return
+  for (const input of ${JSON.stringify(SAMPLE_INSTANCES)}) {
+    const made = await window.amethyst.invoke('instances', 'create', [input])
+    if (made.ok && input.name === 'Survival') await window.amethyst.invoke('resources', 'add', [made.value.id, 'mods', "MOD_FIXTURES"])
+  }
+})()`
+/** Opens a sample instance's tab by name (instance ids are random). */
+const openSample = (name: string, tab: string) =>
+  `window.amethyst.invoke('instances', 'list', []).then((l) => { const i = l.ok && l.value.find((x) => x.name === ${JSON.stringify(name)}); if (i) location.hash = '#/instances/' + i.id + '/${tab}' })`
+
+/** Installs a sample instance (a real download in the screenshot profile) to show the Play button's progress pill. */
+const installSample = (name: string) =>
+  `window.amethyst.invoke('instances', 'list', []).then((l) => { const i = l.ok && l.value.find((x) => x.name === ${JSON.stringify(name)}); if (i) { location.hash = '#/instances/' + i.id + '/overview'; window.amethyst.invoke('install', 'install', [i.id]) } })`
+const cancelTasks = `window.amethyst.invoke('tasks', 'list', []).then((l) => { for (const t of l.ok ? l.value : []) window.amethyst.invoke('tasks', 'cancel', [t.id]) })`
+
 const firstRun = (step: string, completed = false) =>
   `localStorage.setItem('amethyst:first-run', ${JSON.stringify(JSON.stringify({ state: { completed, step }, version: 1 }))})`
 
@@ -140,19 +167,22 @@ const SHOTS: Shot[] = [
   { name: 'firstrun-appearance', hash: '#/welcome', setup: firstRun('appearance'), reload: true },
   { name: 'firstrun-privacy', hash: '#/welcome', setup: firstRun('privacy'), reload: true },
   { name: 'firstrun-done', hash: '#/welcome', setup: firstRun('done'), reload: true },
-  { name: 'home', hash: '#/', setup: `${firstRun('done', true)}; localStorage.removeItem('amethyst:fixtures')`, reload: true, invoke: [['settings', 'patch', [{ privacy: { prompted: true } }]]] },
+  { name: 'home', hash: '#/', setup: `${firstRun('done', true)}; localStorage.removeItem('amethyst:fixtures')`, reload: true, invoke: [['settings', 'patch', [{ privacy: { prompted: true } }]]], script: seedInstances, wait: 400 },
   { name: 'discover', hash: '#/discover?type=modpack' },
   { name: 'discover-target', hash: '#/discover?type=mod&target=survival' },
   { name: 'project', hash: '#/discover/modpack-0' },
-  { name: 'instance-overview', hash: '#/instances/fabulously/overview' },
-  { name: 'instance-mods', hash: '#/instances/survival/mods' },
-  { name: 'instance-resource-packs', hash: '#/instances/survival/resource-packs' },
-  { name: 'instance-shaders', hash: '#/instances/survival/shaders' },
-  { name: 'instance-worlds', hash: '#/instances/survival/worlds' },
-  { name: 'instance-logs', hash: '#/instances/survival/logs' },
-  { name: 'instance-settings', hash: '#/instances/survival/settings' },
-  { name: 'instance-vanilla-mods', hash: '#/instances/vanilla/mods' },
-  { name: 'palette', hash: '#/instances/survival/overview', command: { command: 'view.palette' } },
+  { name: 'instance-overview', hash: '#/', script: openSample('Survival', 'overview') },
+  { name: 'instance-mods', hash: '#/', script: openSample('Survival', 'mods') },
+  { name: 'instance-resource-packs', hash: '#/', script: openSample('Survival', 'resource-packs') },
+  { name: 'instance-shaders', hash: '#/', script: openSample('Survival', 'shaders') },
+  { name: 'instance-worlds', hash: '#/', script: openSample('Survival', 'worlds') },
+  { name: 'instance-logs', hash: '#/', script: openSample('Survival', 'logs') },
+  { name: 'instance-settings', hash: '#/', script: openSample('Survival', 'settings') },
+  { name: 'instance-vanilla-mods', hash: '#/', script: openSample('Vanilla', 'mods') },
+  { name: 'instance-create', hash: '#/', script: openSample('Create: Above & Beyond', 'overview') },
+  { name: 'instance-installing', hash: '#/', script: installSample('Vanilla'), wait: 2500, cleanupScript: cancelTasks },
+  { name: 'activity-installing', hash: '#/', script: installSample('Vanilla'), command: { command: 'view.activity' }, wait: 2500, cleanupScript: cancelTasks },
+  { name: 'palette', hash: '#/', script: openSample('Survival', 'overview'), command: { command: 'view.palette' } },
   { name: 'activity', hash: '#/', command: { command: 'view.activity' } },
   { name: 'shortcuts', hash: '#/', command: { command: 'help.shortcuts' } },
   { name: 'new-instance', hash: '#/', command: { command: 'file.newInstance' }, wait: 600 },
@@ -179,7 +209,7 @@ const SHOTS: Shot[] = [
     script: `document.getElementById('row-background')?.scrollIntoView({ block: 'center' })`,
   },
   { name: 'home-background', hash: '#/' },
-  { name: 'instance-background', hash: '#/instances/survival/mods', cleanup: resetAppearance },
+  { name: 'instance-background', hash: '#/', script: openSample('Survival', 'mods'), cleanup: resetAppearance },
 ]
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -208,7 +238,9 @@ async function reload(contents: WebContents) {
 export async function runScreenshots(main: BrowserWindow, dir: string, onDone: () => void): Promise<void> {
   await mkdir(dir, { recursive: true })
   const background = await writeBackgroundFixture(dir)
+  const mods = await writeModFixtures(dir)
   // `AMETHYST_SCREENSHOT_FILTER=<regex>` captures only the matching shots (setup of skipped shots still runs).
+  // `AMETHYST_SCREENSHOT_NETWORK=1` also captures the `*-installing` shots, which start a real game download (then cancel it).
   const filter = process.env.AMETHYST_SCREENSHOT_FILTER ? new RegExp(process.env.AMETHYST_SCREENSHOT_FILTER) : undefined
   const call = async (steps: RpcStep[] | undefined) => {
     for (const [service, method, args] of steps ?? []) {
@@ -247,6 +279,7 @@ export async function runScreenshots(main: BrowserWindow, dir: string, onDone: (
       await call(shot.cleanup)
       return
     }
+    if (shot.name.includes('installing') && !process.env.AMETHYST_SCREENSHOT_NETWORK) return
     await bounded(contents.executeJavaScript(`${mark}; true`))
     let target = main
     if (shot.settings) {
@@ -267,7 +300,7 @@ export async function runScreenshots(main: BrowserWindow, dir: string, onDone: (
     }
     if (shot.script) {
       await settle(target.webContents)
-      await bounded(target.webContents.executeJavaScript(`${shot.script}; true`))
+      await bounded(target.webContents.executeJavaScript(`${shot.script.replaceAll('"MOD_FIXTURES"', JSON.stringify(mods))}; true`))
     }
     await settle(target.webContents, shot.wait)
     const image = await Promise.race([target.webContents.capturePage(), sleep(10_000).then(() => undefined)])
@@ -277,6 +310,7 @@ export async function runScreenshots(main: BrowserWindow, dir: string, onDone: (
     }
     await writeFile(join(dir, `${theme}-${shot.name}.png`), image.toPNG())
     await call(shot.cleanup)
+    if (shot.cleanupScript) await bounded(contents.executeJavaScript(`${shot.cleanupScript}; true`))
     // Overlays opened by a command are discarded with a reload before the next shot.
     if (shot.command) await reload(contents)
   }

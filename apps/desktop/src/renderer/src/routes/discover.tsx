@@ -7,7 +7,7 @@ import { useQuery } from '@tanstack/react-query'
 import { PageToolbar } from '@/app/PageToolbar'
 import { QueryError } from '@/app/RouteStates'
 import { findTargetRef } from '@/app/ui-store'
-import { formatCount, formatRelative } from '@/app/visuals'
+import { formatCount, formatRelative, heroTone } from '@/app/visuals'
 import { useInstanceRows, runtimeLabel, type RuntimeInstanceRow } from '@/data/instance-info'
 import { useFavourites, useMarketSearch, useMarketStatus, type Favourite } from '@/data/market'
 import { api } from '@/lib/rpc'
@@ -610,8 +610,8 @@ function GridCard({ project, target }: { project: MarketProjectRow; target?: Run
 function FeaturedCard({ project, target }: { project: MarketProjectRow; target?: RuntimeInstanceRow }) {
   const hue = hueOf(project.key)
   return (
-    <div className="relative flex h-[132px] flex-col justify-end overflow-hidden rounded-xl p-3 text-white shadow-card">
-      <div className="absolute inset-0" style={{ background: `linear-gradient(135deg, hsl(${hue} 55% 48%), hsl(${(hue + 50) % 360} 60% 30%))` }} />
+    <div className="relative flex h-[132px] flex-col justify-end overflow-hidden rounded-xl p-3 text-white shadow-card [color-scheme:dark]">
+      <div className="absolute inset-0" style={{ background: heroTone(hue, 20) }} />
       {project.iconUrl && <img src={project.iconUrl} alt="" aria-hidden className="absolute -top-6 -right-6 size-36 rotate-12 rounded-3xl opacity-25 blur-[1px]" />}
       <div className="relative flex items-end gap-2.5">
         <ProjectIcon project={project} size={40} />

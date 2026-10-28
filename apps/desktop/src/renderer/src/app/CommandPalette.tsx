@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
-import { ArrowRight, ChevronLeft, ChevronRight, Compass, CornerDownLeft, LayoutPanelTop, Search, Settings2, Sparkles } from 'lucide-react'
+import { ArrowRight, ChevronLeft, ChevronRight, Command, Compass, CornerDownLeft, LayoutPanelTop, Search, Settings2 } from 'lucide-react'
 import { PanelDialog, Switch, cn, shortcutGlyphs } from '@/ui'
 import { useInstanceActions, useInstances } from '@/data/instances'
 import { useAppSettings, useSettings } from '@/data/settings'
@@ -13,12 +13,15 @@ import { BlockIcon } from './visuals'
 
 const NO_INSTANCES: InstanceSummary[] = []
 
-/** ⌘K: Spotlight-style command palette over routes, instances, actions and settings (B12). */
+/** The palette grows out of the sidebar's search field when it is on screen. */
+const searchField = () => document.getElementById('sidebar-search')
+
+/** ⌘K: a glass command palette over routes, instances, actions and settings (B12). */
 export function CommandPalette() {
   const open = useUi((s) => s.palette)
   const set = useUi((s) => s.set)
   return (
-    <PanelDialog open={open} onOpenChange={(o) => set({ palette: o })} title="Command Palette">
+    <PanelDialog open={open} onOpenChange={(o) => set({ palette: o })} title="Command Palette" width={540} top="72px" origin={searchField}>
       {open && <PaletteBody onClose={() => set({ palette: false })} />}
     </PanelDialog>
   )
@@ -133,7 +136,7 @@ export function PaletteBody({ onClose, instancesOverride }: { onClose: () => voi
   const headers = results.map((r, i) => !parent && r.item.group !== results[i - 1]?.item.group)
   return (
     <div className="flex flex-col">
-      <div className="flex h-[52px] items-center gap-2.5 px-4">
+      <div className="flex h-[46px] items-center gap-2.5 px-3.5">
         {parent ? (
           <button
             type="button"
@@ -143,7 +146,7 @@ export function PaletteBody({ onClose, instancesOverride }: { onClose: () => voi
             <ChevronLeft className="size-3.5" /> {parent.title}
           </button>
         ) : (
-          <Search aria-hidden className="size-5 text-label-2" />
+          <Search aria-hidden className="size-4 text-label-3" />
         )}
         <input
           autoFocus
@@ -161,15 +164,18 @@ export function PaletteBody({ onClose, instancesOverride }: { onClose: () => voi
           }}
           onKeyDown={onKeyDown}
           spellCheck={false}
-          className="h-full flex-1 bg-transparent text-title2 text-label outline-none placeholder:text-label-3"
+          className="h-full flex-1 bg-transparent text-[14px] text-label outline-none placeholder:text-label-3"
         />
+        <kbd aria-hidden className="inline-flex h-4 items-center rounded-[4px] px-[5px] font-sans text-[10.5px] font-medium text-label-3 hairline-strong">
+          esc
+        </kbd>
       </div>
       <div ref={listRef} id={`${id}-list`} role="listbox" aria-label="Results" className="max-h-[min(420px,56vh)] overflow-y-auto border-t border-separator p-1.5">
-        {results.length === 0 && <p className="px-3 py-6 text-center text-body text-label-2">No results for “{query}”</p>}
+        {results.length === 0 && <p className="px-3 py-6 text-center text-compact text-label-2">No results for “{query}”</p>}
         {results.map((r, i) => {
           return (
             <Fragment key={`${r.item.group}:${r.item.id}`}>
-              {headers[i] && <div className="px-2.5 pt-2 pb-1 text-small font-semibold text-label-3">{r.item.group}</div>}
+              {headers[i] && <div className="px-2 pt-1.5 pb-1 text-small font-semibold text-label-3">{r.item.group}</div>}
               <div
                 id={`${id}-${i}`}
                 role="option"
@@ -177,27 +183,27 @@ export function PaletteBody({ onClose, instancesOverride }: { onClose: () => voi
                 data-index={i}
                 onMouseMove={() => setActive(i)}
                 onClick={() => perform(r.item.run)}
-                className={cn('group flex h-9 items-center gap-2.5 rounded-lg px-2.5', i === active && 'bg-accent-fill text-on-accent')}
+                className={cn('group flex h-8 items-center gap-2.5 rounded-[7px] px-2', i === active && 'bg-fill-2')}
               >
                 <ItemIcon item={r.item} active={i === active} />
                 <span className="min-w-0 flex-1 truncate text-body">
                   <Highlight text={r.item.title} indices={r.match?.indices} />
-                  {r.item.subtitle && <span className={cn('ml-2 text-small', i === active ? 'text-on-accent/70' : 'text-label-2')}>{r.item.subtitle}</span>}
+                  {r.item.subtitle && <span className="ml-2 text-meta text-label-3">{r.item.subtitle}</span>}
                 </span>
                 {r.item.toggle && (
                   <span onClick={(e) => e.stopPropagation()}>
                     <Switch size="sm" checked={r.item.toggle.on} onCheckedChange={() => applyToggle(r.item.toggle!.action)} aria-label={r.item.title} />
                   </span>
                 )}
-                {r.item.shortcut && <span className={cn('text-callout tracking-[0.08em]', i === active ? 'text-on-accent/75' : 'text-label-3')}>{shortcutGlyphs(r.item.shortcut)}</span>}
-                {r.item.children && <ChevronRight className={cn('size-3.5', i === active ? 'text-on-accent/80' : 'text-label-3')} />}
-                {!r.item.shortcut && i < 9 && i === active && <span className="text-callout text-on-accent/75">{shortcutGlyphs(`mod+${i + 1}`)}</span>}
+                {r.item.shortcut && <span className="text-small tracking-[0.08em] text-label-3">{shortcutGlyphs(r.item.shortcut)}</span>}
+                {r.item.children && <ChevronRight className="size-3.5 text-label-3" />}
+                {!r.item.shortcut && i < 9 && i === active && <span className="text-small text-label-3">{shortcutGlyphs(`mod+${i + 1}`)}</span>}
               </div>
             </Fragment>
           )
         })}
       </div>
-      <div className="flex items-center gap-4 border-t border-separator px-4 py-2 text-small text-label-2">
+      <div className="flex h-[30px] items-center gap-3.5 border-t border-separator px-3.5 text-small text-label-3">
         <Hint keys={<CornerDownLeft className="size-3" />}>Open</Hint>
         <Hint keys="⌘↩">Launch</Hint>
         <Hint keys={<ArrowRight className="size-3" />}>Actions</Hint>
@@ -210,16 +216,16 @@ export function PaletteBody({ onClose, instancesOverride }: { onClose: () => voi
 function Hint({ keys, children }: { keys: ReactNode; children: ReactNode }) {
   return (
     <span className="flex items-center gap-1.5">
-      <kbd className="flex h-4 min-w-4 items-center justify-center rounded-[4px] bg-fill-2 px-1 font-sans text-caption text-label-2">{keys}</kbd>
+      <kbd className="flex h-4 min-w-4 items-center justify-center rounded-[4px] px-1 font-sans text-[10.5px] text-label-3 hairline-strong">{keys}</kbd>
       {children}
     </span>
   )
 }
 
 function ItemIcon({ item, active }: { item: PaletteItem; active: boolean }) {
-  if (item.icon.kind === 'instance') return <BlockIcon hue={item.icon.hue} label={item.icon.name} size={20} />
-  const glyph = { action: <Sparkles />, nav: <Compass />, settings: <Settings2 />, search: <Search />, tab: <LayoutPanelTop /> }[item.icon.name]
-  return <span className={cn('flex size-5 items-center justify-center [&_svg]:size-4', active ? 'text-on-accent' : 'text-label-2')}>{glyph}</span>
+  if (item.icon.kind === 'instance') return <BlockIcon hue={item.icon.hue} label={item.icon.name} size={18} className="m-px" />
+  const glyph = { action: <Command />, nav: <Compass />, settings: <Settings2 />, search: <Search />, tab: <LayoutPanelTop /> }[item.icon.name]
+  return <span className={cn('flex size-5 items-center justify-center [&_svg]:size-4', active ? 'text-label' : 'text-label-2')}>{glyph}</span>
 }
 
 function Highlight({ text, indices }: { text: string; indices?: number[] }) {

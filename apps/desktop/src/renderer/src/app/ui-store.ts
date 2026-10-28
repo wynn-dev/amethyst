@@ -29,6 +29,8 @@ interface UiState {
   sidebarWidth: number
   inspector: boolean
   sidebarFilter: string
+  /** The sidebar's instance filter field is shown (⌥⌘F, or while it holds a query). */
+  sidebarFilterOpen: boolean
   set: (patch: Partial<Omit<UiState, 'set'>>) => void
 }
 
@@ -53,6 +55,7 @@ export const useUi = create<UiState>()(
       sidebarWidth: 220,
       inspector: true,
       sidebarFilter: '',
+      sidebarFilterOpen: false,
       set: (patch) => set(patch),
     }),
     {

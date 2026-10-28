@@ -70,8 +70,10 @@ export interface DitherProgressProps {
   cell?: number
   /** Width of the dithered edge in CSS px. */
   soft?: number
-  /** Opacity of the dots (the colour is the element's text colour, `text-accent` by default). */
+  /** Opacity of the dots. */
   alpha?: number
+  /** The dot colour, as a text-colour class (`text-accent` by default). */
+  tone?: string
   className?: string
 }
 
@@ -81,7 +83,7 @@ export interface DitherProgressProps {
  * size or theme changes; the indeterminate band animates only while it is on screen, and stands
  * still under Reduce Motion.
  */
-export function DitherProgress({ value, label, cell = 1, soft = 18, alpha = 1, className }: DitherProgressProps) {
+export function DitherProgress({ value, label, cell = 1, soft = 18, alpha = 1, tone = 'text-accent', className }: DitherProgressProps) {
   const box = useRef<HTMLDivElement>(null)
   const canvas = useRef<HTMLCanvasElement>(null)
   const { width, height } = useSize(box)
@@ -118,7 +120,7 @@ export function DitherProgress({ value, label, cell = 1, soft = 18, alpha = 1, c
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `theme` is the redraw trigger for colours read from CSS
-  }, [determinate, value, width, height, cell, soft, alpha, theme])
+  }, [determinate, value, width, height, cell, soft, alpha, tone, theme])
 
   return (
     <div
@@ -129,18 +131,19 @@ export function DitherProgress({ value, label, cell = 1, soft = 18, alpha = 1, c
       aria-valuemin={label ? 0 : undefined}
       aria-valuemax={label ? 100 : undefined}
       aria-valuenow={label && determinate ? Math.round(value * 100) : undefined}
-      className={cn('relative overflow-hidden text-accent', className)}
+      // `relative` unless the caller positions it (cn doesn't resolve conflicting classes).
+      className={cn(/(^|\s)(absolute|fixed)(\s|$)/.test(className ?? '') ? undefined : 'relative', 'overflow-hidden', tone, className)}
     >
       <canvas ref={canvas} aria-hidden className="absolute inset-0 block size-full" />
     </div>
   )
 }
 
-/** A dithered progress bar on a faint track (download rows, Activity). */
-export function DitherBar({ value, label, className }: { value?: number; label: string; className?: string }) {
+/** A dithered progress bar on a faint track (download rows, Activity). `muted` for paused work. */
+export function DitherBar({ value, label, muted, className }: { value?: number; label: string; muted?: boolean; className?: string }) {
   return (
     <div className={cn('h-1.5 w-full overflow-hidden rounded-[2px] bg-fill', className)}>
-      <DitherProgress value={value} label={label} cell={2} soft={16} alpha={0.9} className="size-full" />
+      <DitherProgress value={value} label={label} cell={2} soft={16} alpha={0.9} tone={muted ? 'text-label-3' : 'text-accent'} className="size-full" />
     </div>
   )
 }

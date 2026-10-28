@@ -106,11 +106,11 @@ export const flight = {
 
 /**
  * A selection indicator that slides between items (sidebar rows, tabs). Returns a ref for the
- * indicator element, which must be absolutely positioned at the container's top-left and carry
- * the transition (`transition-[transform,width,height] ease-spring duration-(--duration-spring)`).
- * It is placed on the element matching `selector` inside `container` whenever `key` changes,
- * without animating the first placement or placements caused by resizing. Hidden when nothing
- * matches.
+ * indicator element, which must be absolutely positioned at the top-left of its positioned
+ * ancestor (in the same scroller as the items) and carry the transition (see `indicatorClass`
+ * in Layout.tsx). It is placed on the element matching `selector` inside `container` whenever
+ * `key` changes, without animating the first placement or placements caused by resizing. Hidden
+ * when nothing matches.
  */
 export function useSlidingIndicator(container: RefObject<HTMLElement | null>, selector: string, key: unknown): RefObject<HTMLSpanElement | null> {
   const ref = useRef<HTMLSpanElement>(null)
@@ -125,12 +125,14 @@ export function useSlidingIndicator(container: RefObject<HTMLElement | null>, se
         ind.dataset.placed = ''
         return
       }
-      const c = box.getBoundingClientRect()
+      // Measured against the indicator's own positioned ancestor, which may be a scroller.
+      const base = (ind.offsetParent as HTMLElement | null) ?? box
+      const c = base.getBoundingClientRect()
       const r = target.getBoundingClientRect()
       const instant = !animate || !ind.dataset.placed
       if (instant) ind.style.transition = 'none'
       ind.style.opacity = '1'
-      ind.style.transform = `translate(${r.left - c.left + box.scrollLeft}px, ${r.top - c.top + box.scrollTop}px)`
+      ind.style.transform = `translate(${r.left - c.left - base.clientLeft + base.scrollLeft}px, ${r.top - c.top - base.clientTop + base.scrollTop}px)`
       ind.style.width = `${r.width}px`
       ind.style.height = `${r.height}px`
       if (instant) {

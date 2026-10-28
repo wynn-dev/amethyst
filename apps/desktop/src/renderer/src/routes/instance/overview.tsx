@@ -1,12 +1,10 @@
 import type { ReactNode } from 'react'
-import { useQuery } from '@tanstack/react-query'
 import { AlertTriangle, CheckCircle2, Info, XOctagon } from 'lucide-react'
-import type { ResourceKind } from '@shared/services'
 import { Badge, Button, Skeleton, Spinner, cn } from '@/ui'
-import { api } from '@/lib/rpc'
 import { QueryError } from '@/app/RouteStates'
 import { openInstance } from '@/app/commands'
 import { formatDate, formatDuration, formatRelative } from '@/app/visuals'
+import { useContentCounts } from '@/data/content'
 import { installInstance, instanceActions, updateInstance, useInstallStatus, useInstance } from '@/data/instances'
 import { javaActions, useJavaRecommendation } from '@/data/java'
 import { launchInstance, useLaunchEntry } from '@/data/launch'
@@ -124,29 +122,6 @@ function StatusCard({ inst }: { inst: InstanceDetail }) {
       </ul>
     </Card>
   )
-}
-
-/** Row totals of the content folders (one small `resources.list` page each). */
-function useContentCounts(id: string, modded: boolean) {
-  return useQuery({
-    queryKey: ['overview', 'counts', id],
-    staleTime: 30_000,
-    queryFn: async () => {
-      const total = (kind: ResourceKind, enabled?: boolean) =>
-        api.resources
-          .list(id, kind, { limit: 1, ...(enabled === undefined ? {} : { enabled }) })
-          .then((p) => p.total)
-          .catch(() => undefined)
-      const [mods, modsEnabled, resourcePacks, shaders, worlds] = await Promise.all([
-        modded ? total('mods') : undefined,
-        modded ? total('mods', true) : undefined,
-        total('resourcepacks'),
-        total('shaderpacks'),
-        total('saves'),
-      ])
-      return { mods, modsEnabled, resourcePacks, shaders, worlds }
-    },
-  })
 }
 
 function Stat({ label, value, onClick }: { label: string; value: ReactNode; onClick?: () => void }) {

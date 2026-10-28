@@ -12,7 +12,7 @@ import { PageToolbar } from '@/app/PageToolbar'
 import { QueryError } from '@/app/RouteStates'
 import { openInstance, runCommand } from '@/app/commands'
 import { useUi } from '@/app/ui-store'
-import { BlockIcon, formatDuration, formatRelative } from '@/app/visuals'
+import { BlockIcon, formatDuration, formatRelative, heroTone } from '@/app/visuals'
 import { SkinHead } from '@/app/skin/SkinHead'
 import { InstanceStateIndicator } from '@/app/AppSidebar'
 import { markOnce } from '@/lib/perf'
@@ -116,14 +116,9 @@ function ContinuePlaying({ inst }: { inst: InstanceSummary }) {
   const { data: accounts = [] } = useAccounts()
   const account = accounts.find((a) => a.active)
   return (
-    <section aria-label="Continue playing" className="relative overflow-hidden rounded-2xl shadow-card">
-      {/* The contract has no screenshot listing yet; the hero uses the instance's colour. */}
-      <div
-        className="absolute inset-0"
-        style={{
-          background: `radial-gradient(120% 140% at 85% 0%, hsl(${(inst.iconHue + 40) % 360} 55% 52%) 0%, transparent 60%), linear-gradient(115deg, hsl(${inst.iconHue} 45% 18%) 0%, hsl(${(inst.iconHue + 20) % 360} 50% 32%) 100%)`,
-        }}
-      />
+    <section aria-label="Continue playing" className="relative overflow-hidden rounded-2xl shadow-card [color-scheme:dark]">
+      {/* The contract has no screenshot listing yet; the hero uses a dark, muted tone of the instance's art (never purple). */}
+      <div className="absolute inset-0" style={{ background: heroTone(inst.iconHue, 14) }} />
       <div className="absolute inset-0 bg-linear-to-r from-black/35 to-transparent" />
       <div className="relative flex min-h-[200px] flex-col justify-end gap-4 p-6 text-white">
         <p className="text-small font-semibold tracking-[0.06em] text-white/70 uppercase">{inst.lastPlayedAt ? 'Continue Playing' : 'Ready to Play'}</p>

@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import { CatchBoundary, Outlet, useRouterState } from '@tanstack/react-router'
 import type { InstanceDetail as RuntimeDetail } from '@shared/services'
 import { api, subscribe } from '@/lib/rpc'
-import { ToastViewport, cn } from '@/ui'
+import { ToastViewport } from '@/ui'
 import { toast } from '@/ui/toast-store'
 import { reconcileFirstRun } from '@/data/firstRun'
 import { getInstanceSummary, instanceKeys, useInstances } from '@/data/instances'
@@ -124,12 +124,7 @@ export function Shell() {
   return (
     <div className="flex h-full">
       {!collapsed && <AppSidebar />}
-      <main
-        className={cn(
-          'relative isolate flex min-w-0 flex-1 flex-col bg-window',
-          !collapsed && 'shadow-[-0.5px_0_0_var(--color-separator),-1px_0_0_light-dark(rgb(0_0_0/0.04),rgb(0_0_0/0.5))]',
-        )}
-      >
+      <main className="relative isolate flex min-w-0 flex-1 flex-col bg-window">
         <BackgroundLayer />
         {/* Errors are contained per view; the sidebar and toolbar keep working. */}
         <CatchBoundary getResetKey={() => pathname} errorComponent={RouteError}>

@@ -174,11 +174,11 @@ export async function runContentE2E(win: BrowserWindow, root: string, out: strin
 
     // 3. Disable, re-enable, Trash, Undo.
     step = 'disable and trash'
-    const box = `document.querySelector('[role=checkbox][aria-label="Enable Sodium"]')`
-    await click('the Sodium checkbox', box)
+    const box = `document.querySelector('[role=switch][aria-label="Enable Sodium"]')`
+    await click('the Sodium switch', box)
     await waitFor('Sodium disabled', `${box}.getAttribute('aria-checked') === 'false' && __e2e.rowOf('Sodium').className.includes('opacity')`, 10_000)
     await shoot('mods-sodium-disabled')
-    await click('the Sodium checkbox', box)
+    await click('the Sodium switch', box)
     await waitFor('Sodium enabled', `${box}.getAttribute('aria-checked') === 'true'`, 10_000)
     await click('Move to Trash… in the inspector', button('Move to Trash…', true, `document.querySelector('aside[aria-label="Mod details"]')`))
     await click('the confirmation', `[...document.querySelectorAll('[role=alertdialog] button')].find((b) => __e2e.text(b) === 'Move to Trash')`)

@@ -100,3 +100,65 @@ export async function writeModFixtures(dir: string): Promise<string[]> {
   }
   return files
 }
+
+/** Sample worlds for the screenshots: [name, game mode, hardcore, hours since last played, sky top, sky bottom, ground top, ground bottom]. */
+type Rgb = [number, number, number]
+const SAMPLE_WORLDS: [string, number, boolean, number, Rgb, Rgb, Rgb, Rgb][] = [
+  ['New Horizons', 0, false, 2, [96, 150, 214], [186, 214, 236], [92, 150, 64], [110, 82, 56]],
+  ['Creative test', 1, false, 5 * 24, [22, 32, 58], [58, 84, 110], [46, 92, 60], [70, 56, 44]],
+  ['Hardcore #3', 0, true, 21 * 24, [214, 170, 120], [238, 214, 170], [176, 112, 64], [132, 80, 50]],
+]
+
+/** A blocky 64×64 world icon: a sky gradient over a stepped, speckled ground (8px blocks). */
+function worldIcon(seed: number, skyTop: Rgb, skyBottom: Rgb, ground: Rgb, dirt: Rgb): Uint8Array {
+  const size = 64
+  const rgb = new Uint8Array(size * size * 3)
+  let s = seed * 2654435761
+  const rand = () => {
+    s = (s ^ (s << 13)) >>> 0
+    s = (s ^ (s >>> 17)) >>> 0
+    s = (s ^ (s << 5)) >>> 0
+    return s / 2 ** 32
+  }
+  const heights = Array.from({ length: 8 }, () => 36 + Math.floor(rand() * 3) * 4)
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const t = y / size
+      let c = skyTop.map((v, i) => Math.round(v + (skyBottom[i]! - v) * t))
+      const top = heights[Math.floor(x / 8)]!
+      if (y >= top) {
+        const base = y < top + 4 ? ground : dirt
+        const n = (rand() - 0.5) * 22
+        c = base.map((v) => Math.max(0, Math.min(255, Math.round(v + n))))
+      }
+      rgb.set(c, (y * size + x) * 3)
+    }
+  }
+  return rgb
+}
+
+/** Writes sample world folders (level.dat and icon.png) and returns their absolute paths. */
+export async function writeWorldFixtures(dir: string): Promise<string[]> {
+  const { nbt, writeNbt } = await import('@amethyst/nbt')
+  const folders: string[] = []
+  for (const [i, [name, gameType, hardcore, hoursAgo, skyTop, skyBottom, ground, dirt]] of SAMPLE_WORLDS.entries()) {
+    const folder = join(dir, '.fixtures', 'saves', name.replaceAll(/[^A-Za-z0-9 ]/g, ''))
+    // oxlint-disable-next-line no-await-in-loop -- three tiny folders, written in order
+    await mkdir(folder, { recursive: true })
+    const data = nbt.compound({
+      LevelName: nbt.string(name),
+      DataVersion: nbt.int(3955),
+      Version: nbt.compound({ Id: nbt.int(3955), Name: nbt.string('1.21.1'), Snapshot: nbt.byte(0) }),
+      GameType: nbt.int(gameType),
+      hardcore: nbt.byte(hardcore ? 1 : 0),
+      allowCommands: nbt.byte(gameType === 1 ? 1 : 0),
+      LastPlayed: nbt.long(BigInt(Date.now() - hoursAgo * 3_600_000)),
+    })
+    // oxlint-disable-next-line no-await-in-loop -- as above
+    await writeFile(join(folder, 'level.dat'), await writeNbt({ root: nbt.compound({ Data: data }) }, { compression: 'gzip' }))
+    // oxlint-disable-next-line no-await-in-loop -- as above
+    await writeFile(join(folder, 'icon.png'), encodePng(64, 64, worldIcon(i + 1, skyTop, skyBottom, ground, dirt)))
+    folders.push(folder)
+  }
+  return folders
+}

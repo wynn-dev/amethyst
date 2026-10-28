@@ -4,7 +4,7 @@ import { app, BrowserWindow, nativeTheme, shell, type WebContents } from 'electr
 import { MAIN_EVENT_CHANNEL } from '@shared/rpc'
 import { DEFAULT_ACCENT } from '@shared/accent'
 import type { MenuCommandEvent } from '@shared/menu'
-import { writeBackgroundFixture, writeModFixtures } from './screenshot-fixtures'
+import { writeBackgroundFixture, writeModFixtures, writeWorldFixtures } from './screenshot-fixtures'
 
 /**
  * Window management beyond the main window: the Settings window (B7), routing renderer
@@ -113,6 +113,8 @@ interface Shot {
   cleanup?: RpcStep[]
   /** JavaScript run in the main window after the shot, to leave the state as it was. */
   cleanupScript?: string
+  /** Feeds sample game output to this sample instance's log view (as `launch:log` events). */
+  log?: string
 }
 
 /** `[service, method, args]`; the string `BACKGROUND_FIXTURE` in args becomes the generated image's path. */
@@ -148,6 +150,7 @@ const seedInstances = `(async () => {
   for (const input of ${JSON.stringify(SAMPLE_INSTANCES)}) {
     const made = await window.amethyst.invoke('instances', 'create', [input])
     if (made.ok && input.name === 'Survival') await window.amethyst.invoke('resources', 'add', [made.value.id, 'mods', "MOD_FIXTURES"])
+    if (made.ok && input.name === 'Survival') await window.amethyst.invoke('resources', 'add', [made.value.id, 'saves', "WORLD_FIXTURES"])
   }
 })()`
 /** Opens a sample instance's tab by name (instance ids are random). */
@@ -177,6 +180,7 @@ const SHOTS: Shot[] = [
   { name: 'instance-shaders', hash: '#/', script: openSample('Survival', 'shaders') },
   { name: 'instance-worlds', hash: '#/', script: openSample('Survival', 'worlds') },
   { name: 'instance-logs', hash: '#/', script: openSample('Survival', 'logs') },
+  { name: 'instance-logs-output', hash: '#/', script: openSample('Survival', 'logs'), log: 'Survival', wait: 300 },
   { name: 'instance-settings', hash: '#/', script: openSample('Survival', 'settings') },
   { name: 'instance-vanilla-mods', hash: '#/', script: openSample('Vanilla', 'mods') },
   { name: 'instance-create', hash: '#/', script: openSample('Create: Above & Beyond', 'overview') },
@@ -212,6 +216,39 @@ const SHOTS: Shot[] = [
   { name: 'instance-background', hash: '#/', script: openSample('Survival', 'mods'), cleanup: resetAppearance },
 ]
 
+/** Sample game output for the log screenshot: a Fabric start-up with a few warnings and an error. */
+function sampleLog() {
+  const t0 = Date.now() - 60_000
+  const lines: [string, string, string, string][] = [
+    ['INFO', 'main', 'net.fabricmc.loader.impl.FabricLoaderImpl', 'Loading Minecraft 1.21.1 with Fabric Loader 0.16.9'],
+    ['INFO', 'main', 'net.fabricmc.loader.impl.FabricLoaderImpl', 'Loading 18 mods:'],
+    ['INFO', 'main', 'net.fabricmc.loader.impl.FabricLoaderImpl', '\t- fabric-api 0.107.0+1.21.1'],
+    ['INFO', 'main', 'net.fabricmc.loader.impl.FabricLoaderImpl', '\t- sodium 0.6.3+mc1.21.1'],
+    ['INFO', 'main', 'net.fabricmc.loader.impl.FabricLoaderImpl', '\t- iris 1.8.1+mc1.21.1'],
+    ['WARN', 'main', 'net.fabricmc.loader.impl.FabricLoaderImpl', 'Mod "krypton" is disabled, skipping'],
+    ['INFO', 'main', 'org.spongepowered.asm.mixin.Mixins', 'Mixin config sodium.mixins.json is using an old compatibility level'],
+    ['INFO', 'main', 'net.caffeinemc.mods.sodium.client.SodiumClientMod', 'Loaded configuration file for Sodium: 43 options available, 0 override(s) found'],
+    ['INFO', 'Render thread', 'net.minecraft.client.Minecraft', 'Setting user: wynn'],
+    ['INFO', 'Render thread', 'net.minecraft.client.Minecraft', 'Backend library: LWJGL version 3.3.3-snapshot'],
+    ['INFO', 'Render thread', 'net.irisshaders.iris.Iris', 'Iris is loading the shader pack ComplementaryReimagined_r5.3.zip'],
+    ['WARN', 'Render thread', 'net.minecraft.client.sounds.SoundEngine', 'Missing sound for event: minecraft:item.goat_horn.play'],
+    ['WARN', 'Render thread', 'net.minecraft.client.sounds.SoundEngine', 'Missing sound for event: minecraft:item.goat_horn.play'],
+    ['WARN', 'Render thread', 'net.minecraft.client.sounds.SoundEngine', 'Missing sound for event: minecraft:item.goat_horn.play'],
+    ['INFO', 'Render thread', 'net.minecraft.client.sounds.SoundEngine', 'Sound engine started'],
+    ['INFO', 'Render thread', 'net.minecraft.client.renderer.texture.TextureAtlas', 'Created: 1024x512x4 minecraft:textures/atlas/blocks.png-atlas'],
+    ['INFO', 'Render thread', 'net.minecraft.client.renderer.texture.TextureAtlas', 'Created: 256x256x4 minecraft:textures/atlas/signs.png-atlas'],
+    ['ERROR', 'Render thread', 'xaero.common.XaeroMinimapSession', 'Failed to read minimap waypoints for "New Horizons"\njava.io.EOFException: Unexpected end of ZLIB input stream\n\tat java.util.zip.InflaterInputStream.fill(InflaterInputStream.java:244)\n\tat xaero.common.minimap.waypoints.WaypointsManager.load(WaypointsManager.java:212)'],
+    ['INFO', 'Render thread', 'net.minecraft.client.Minecraft', 'Loaded 1342 recipes'],
+    ['INFO', 'Render thread', 'net.minecraft.client.Minecraft', 'Loaded 1453 advancements'],
+    ['INFO', 'Server thread', 'net.minecraft.server.MinecraftServer', 'Starting integrated minecraft server version 1.21.1'],
+    ['INFO', 'Server thread', 'net.minecraft.server.MinecraftServer', 'Preparing level "New Horizons"'],
+    ['INFO', 'Server thread', 'net.minecraft.server.level.progress.LoggerChunkProgressListener', 'Preparing spawn area: 83%'],
+    ['INFO', 'Server thread', 'net.minecraft.server.MinecraftServer', 'Time elapsed: 2318 ms'],
+    ['INFO', 'Server thread', 'net.minecraft.server.MinecraftServer', 'wynn joined the game'],
+  ]
+  return lines.map(([level, thread, logger, text], seq) => ({ seq, time: t0 + seq * 431, level, stream: 'stdout', thread, logger, text }))
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 async function settle(contents: WebContents, extra = 0) {
@@ -239,6 +276,7 @@ export async function runScreenshots(main: BrowserWindow, dir: string, onDone: (
   await mkdir(dir, { recursive: true })
   const background = await writeBackgroundFixture(dir)
   const mods = await writeModFixtures(dir)
+  const worlds = await writeWorldFixtures(dir)
   // `AMETHYST_SCREENSHOT_FILTER=<regex>` captures only the matching shots (setup of skipped shots still runs).
   // `AMETHYST_SCREENSHOT_NETWORK=1` also captures the `*-installing` shots, which start a real game download (then cancel it).
   const filter = process.env.AMETHYST_SCREENSHOT_FILTER ? new RegExp(process.env.AMETHYST_SCREENSHOT_FILTER) : undefined
@@ -300,7 +338,12 @@ export async function runScreenshots(main: BrowserWindow, dir: string, onDone: (
     }
     if (shot.script) {
       await settle(target.webContents)
-      await bounded(target.webContents.executeJavaScript(`${shot.script.replaceAll('"MOD_FIXTURES"', JSON.stringify(mods))}; true`))
+      await bounded(target.webContents.executeJavaScript(`${shot.script.replaceAll('"MOD_FIXTURES"', JSON.stringify(mods)).replaceAll('"WORLD_FIXTURES"', JSON.stringify(worlds))}; true`))
+    }
+    if (shot.log) {
+      await settle(contents)
+      const id = await bounded(contents.executeJavaScript(`window.amethyst.invoke('instances', 'list', []).then((l) => l.ok && l.value.find((x) => x.name === ${JSON.stringify(shot.log)})?.id)`))
+      if (typeof id === 'string') contents.send(MAIN_EVENT_CHANNEL, 'launch:log', { instanceId: id, launchId: 'screenshot', lines: sampleLog(), gap: false })
     }
     await settle(target.webContents, shot.wait)
     const image = await Promise.race([target.webContents.capturePage(), sleep(10_000).then(() => undefined)])

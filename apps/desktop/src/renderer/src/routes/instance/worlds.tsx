@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { Archive, Copy as CopyIcon, Download, Globe2, Play, Plus, RotateCcw, Trash2 } from 'lucide-react'
 import type { BackupRow, ResourceRow } from '@shared/services'
-import { Alert, Badge, Button, EmptyState, Menu, SearchField, SkeletonRows, Spinner, VirtualTable, type Column, type MenuEntry, type SortState } from '@/ui'
+import { Alert, Button, EmptyState, Menu, SearchField, SkeletonRows, Spinner, VirtualTable, type Column, type MenuEntry, type SortState } from '@/ui'
 import { QueryError } from '@/app/RouteStates'
 import { findTargetRef } from '@/app/ui-store'
 import { formatBytes, formatDate, formatRelative } from '@/app/visuals'
@@ -26,7 +26,7 @@ import { api } from '@/lib/rpc'
 import { toastError } from '@/lib/error-messages'
 import { toast } from '@/ui/toast-store'
 import { AddFromInstanceSheet, DropOverlay, PlaceholderCell, ResourceIcon, ScanningNote, TrashConfirm, isPlaceholder, realIds, useFileDrop, useTableRows, type ContentRow } from './content-parts'
-import { CopyButton, InspectorHeader, InspectorSection, PropertyList, SplitView, SubToolbar, copyText, useInstanceId, useSelection } from './parts'
+import { CopyButton, InspectorHeader, InspectorSection, PropertyList, SplitView, SubToolbar, WorldThumb, copyText, useInstanceId, useSelection } from './parts'
 
 const MODE: Record<string, string> = { survival: 'Survival', creative: 'Creative', adventure: 'Adventure', spectator: 'Spectator' }
 const REASON: Record<BackupRow['reason'], string> = {
@@ -83,10 +83,10 @@ export default function WorldsTab() {
           <PlaceholderCell index={w.index} request={request} />
         ) : (
           <div className="flex min-w-0 items-center gap-2.5">
-            <ResourceIcon row={w} size={28} />
-            <div className="flex min-w-0 flex-col">
-              <span className="truncate">{w.name}</span>
-              <span className="truncate text-small text-label-2">{w.fileName}</span>
+            <WorldThumb world={w} />
+            <div className="flex min-w-0 flex-col leading-[1.25]">
+              <span className="truncate font-medium">{w.name}</span>
+              <span className="truncate font-mono text-[11px] text-label-3">{w.fileName}</span>
             </div>
           </div>
         ),
@@ -98,9 +98,9 @@ export default function WorldsTab() {
       header: 'Last Played',
       width: '116px',
       sortValue: () => 0,
-      cell: (w) => (isPlaceholder(w) ? null : <span className="text-label-2">{w.world?.lastPlayed ? formatRelative(w.world.lastPlayed) : w.mtimeMs ? formatRelative(w.mtimeMs) : '—'}</span>),
+      cell: (w) => (isPlaceholder(w) ? null : <span className="text-label-2 tabular">{w.world?.lastPlayed ? formatRelative(w.world.lastPlayed) : w.mtimeMs ? formatRelative(w.mtimeMs) : '—'}</span>),
     },
-    { id: 'version', title: 'Version', header: 'Version', width: '80px', cell: (w) => (isPlaceholder(w) ? null : <span className="text-label-2">{w.version || '—'}</span>) },
+    { id: 'version', title: 'Version', header: 'Version', width: '80px', cell: (w) => (isPlaceholder(w) ? null : <span className="font-mono text-[11.5px] text-label-2">{w.version || '—'}</span>) },
   ], [request])
 
   const doExport = async (w: ResourceRow) => {
@@ -161,7 +161,7 @@ export default function WorldsTab() {
     <div className="relative flex min-h-0 flex-1 flex-col" {...drop.props}>
       <SubToolbar trailing={importMenu}>
         <SearchField ref={findTargetRef} value={query} onValueChange={setQuery} placeholder="Search worlds" className="w-[220px]" />
-        {!list.isPending && <span className="text-small text-label-2 tabular">{list.total === 1 ? '1 world' : `${list.total} worlds`}</span>}
+        {!list.isPending && <span className="font-mono text-[11px] text-label-3 tabular">{list.total === 1 ? '1 world' : `${list.total} worlds`}</span>}
         <ScanningNote scanning={list.scanning} />
       </SubToolbar>
       <SplitView
@@ -209,7 +209,7 @@ export default function WorldsTab() {
             rows={rows}
             columns={columns}
             getKey={(w) => w.id}
-            rowHeight={44}
+            rowHeight={46}
             selection={selection}
             onSelectionChange={setSelection}
             onDelete={(keys) => setPendingTrash(realIds(keys))}
@@ -305,7 +305,7 @@ function WorldInspector({
                   },
                 ]
               : []),
-            { label: 'Version', value: world.version || '—' },
+            { label: 'Version', value: <span className="font-mono text-[11.5px]">{world.version || '—'}</span> },
             ...(w?.lastPlayed ? [{ label: 'Last played', value: formatDate(w.lastPlayed) }] : []),
             ...(d?.sizeBytes || world.size ? [{ label: 'Size', value: formatBytes(d?.sizeBytes || world.size) }] : []),
           ]}
@@ -329,16 +329,14 @@ function WorldInspector({
         ) : (
           <ul className="-mx-1 flex flex-col">
             {backups.data.map((b) => (
-              <li key={b.id} className="flex items-center gap-2 rounded-md px-1 py-1 hover:bg-fill">
+              <li key={b.id} className="flex items-center gap-2 rounded-md px-1 py-1 hover:bg-hover">
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-callout">{formatDate(b.createdAt)} · {new Date(b.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
-                  <p className="truncate text-small text-label-2">
-                    {REASON[b.reason]} · {formatBytes(b.size)}
-                    {b.automatic && (
-                      <Badge className="ml-1" tone="neutral">
-                        Auto
-                      </Badge>
-                    )}
+                  <p className="truncate text-compact tabular">
+                    {formatDate(b.createdAt)} · {new Date(b.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </p>
+                  <p className="truncate text-meta text-label-2">
+                    {REASON[b.reason]} · <span className="tabular">{formatBytes(b.size)}</span>
+                    {b.automatic && ' · Automatic'}
                   </p>
                 </div>
                 <Menu

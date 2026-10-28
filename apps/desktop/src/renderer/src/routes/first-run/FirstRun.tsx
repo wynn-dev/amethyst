@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { CheckCircle2, Coffee, Compass, Download, Plus, UserRound } from 'lucide-react'
-import { Badge, Button, Skeleton, Switch, cn } from '@/ui'
+import { Button, Skeleton, Switch, cn } from '@/ui'
 import { FIRST_RUN_STEPS, answerPrivacy, reconcileFirstRun, useFirstRun, type FirstRunStep } from '@/data/firstRun'
 import { useAppSettings, useSettingsLoaded } from '@/data/settings'
 import { useAccounts } from '@/data/accounts'
@@ -15,6 +15,7 @@ import { AmethystMark } from '@/routes/settings-window/AmethystMark'
 import { AccentPicker, ModePicker } from '@/routes/settings-window/appearance-pickers'
 import { PrivacyDetailsSheet } from '@/routes/settings-window/PrivacyDetails'
 import { AccountForm, type AccountKind } from '@/routes/sheets/AccountForm'
+import { CardHeader, Note } from '@/routes/sheets/parts'
 
 const STEP_LABELS: Record<FirstRunStep, string> = {
   welcome: 'Welcome',
@@ -75,25 +76,22 @@ export function FirstRun() {
     case 'account':
       if (signingIn) {
         return (
-          <Frame index={index}>
-            <AccountForm
-              initialKind={signingIn}
-              showKindPicker={false}
-              onCancel={() => setSigningIn(undefined)}
-              onDone={(a) => {
-                setAdded(a)
-                setSigningIn(undefined)
-              }}
-            >
-              {({ body: form, actions }) => (
-                <>
-                  <StepHeader title={signingIn === 'microsoft' ? 'Sign in with Microsoft' : 'Use an offline account'} />
-                  <div className="min-h-[220px]">{form}</div>
-                  <Footer index={index} back={null} primary={<div className="flex gap-2">{actions}</div>} />
-                </>
-              )}
-            </AccountForm>
-          </Frame>
+          <AccountForm
+            initialKind={signingIn}
+            showKindPicker={false}
+            onCancel={() => setSigningIn(undefined)}
+            onDone={(a) => {
+              setAdded(a)
+              setSigningIn(undefined)
+            }}
+          >
+            {({ body: form, actions }) => (
+              <Frame index={index} footer={<Footer index={index} back={null} primary={<div className="flex gap-2">{actions}</div>} />}>
+                <StepHeader title={signingIn === 'microsoft' ? 'Sign in with Microsoft' : 'Use an offline account'} />
+                <div className="min-h-[200px]">{form}</div>
+              </Frame>
+            )}
+          </AccountForm>
         )
       }
       body = <AccountStep account={account} onSignIn={setSigningIn} onSkip={() => go(1)} />
@@ -131,28 +129,32 @@ export function FirstRun() {
   }
 
   return (
-    <Frame index={index}>
+    <Frame
+      index={index}
+      footer={
+        <Footer
+          index={index}
+          back={
+            index > 0 && step !== 'done' ? (
+              <Button size="lg" onClick={() => go(-1)}>
+                Back
+              </Button>
+            ) : step === 'done' ? (
+              <Button size="lg" variant="borderless" onClick={() => go(-1)}>
+                Back
+              </Button>
+            ) : null
+          }
+          primary={primary}
+        />
+      }
+    >
       {body}
-      <Footer
-        index={index}
-        back={
-          index > 0 && step !== 'done' ? (
-            <Button size="lg" onClick={() => go(-1)}>
-              Back
-            </Button>
-          ) : step === 'done' ? (
-            <Button size="lg" variant="borderless" onClick={() => go(-1)}>
-              Back
-            </Button>
-          ) : null
-        }
-        primary={primary}
-      />
     </Frame>
   )
 }
 
-function Frame({ index, children }: { index: number; children: ReactNode }) {
+function Frame({ index, children, footer }: { index: number; children: ReactNode; footer: ReactNode }) {
   return (
     <div className="flex h-full flex-col">
       {/* hiddenInset traffic lights sit here; the strip drags the window. */}
@@ -160,9 +162,13 @@ function Frame({ index, children }: { index: number; children: ReactNode }) {
       <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-6 pb-[52px]">
         <main
           aria-label={`Set up Amethyst, step ${index + 1} of ${FIRST_RUN_STEPS.length}: ${STEP_LABELS[FIRST_RUN_STEPS[index]!]}`}
-          className="flex w-[min(560px,100%)] animate-pop-in flex-col rounded-2xl bg-window px-10 pt-9 pb-6 shadow-sheet"
+          className="flex w-[min(500px,100%)] animate-pop-in flex-col rounded-2xl bg-window px-8 pt-8 pb-5 shadow-sheet"
         >
-          {children}
+          {/* Each step settles in on its own; the frame stays put. */}
+          <div key={index} className="flex animate-enter flex-col">
+            {children}
+          </div>
+          {footer}
         </main>
       </div>
     </div>
@@ -171,7 +177,7 @@ function Frame({ index, children }: { index: number; children: ReactNode }) {
 
 function Footer({ index, back, primary }: { index: number; back: ReactNode; primary: ReactNode }) {
   return (
-    <div className="mt-8 grid grid-cols-[1fr_auto_1fr] items-center">
+    <div className="mt-7 grid grid-cols-[1fr_auto_1fr] items-center">
       <div className="justify-self-start">{back}</div>
       <ol aria-label="Progress" className="flex items-center gap-1.5">
         {FIRST_RUN_STEPS.map((s, i) => (
@@ -179,7 +185,10 @@ function Footer({ index, back, primary }: { index: number; back: ReactNode; prim
             key={s}
             aria-current={i === index ? 'step' : undefined}
             aria-label={`${STEP_LABELS[s]}${i < index ? ', done' : i === index ? ', current' : ''}`}
-            className={cn('size-[7px] rounded-full transition-colors duration-200', i === index ? 'bg-accent' : i < index ? 'bg-label-3' : 'bg-fill-3')}
+            className={cn(
+              'h-[5px] rounded-full transition-[width,background-color] duration-(--duration-spring) ease-spring',
+              i === index ? 'w-4 bg-label' : i < index ? 'w-[5px] bg-label-3' : 'w-[5px] bg-fill-3',
+            )}
           />
         ))}
       </ol>
@@ -190,17 +199,18 @@ function Footer({ index, back, primary }: { index: number; back: ReactNode; prim
 
 function StepHeader({ title, description, icon }: { title: string; description?: ReactNode; icon?: ReactNode }) {
   return (
-    <div className="mb-6 flex flex-col items-center text-center">
+    <div className="mb-5 flex flex-col items-center text-center">
       {icon && <div className="mb-3">{icon}</div>}
-      <h1 className="text-title1 font-semibold">{title}</h1>
-      {description && <p className="mt-1.5 max-w-[400px] text-body text-label-2">{description}</p>}
+      <h1 className="text-title2 font-semibold tracking-[-0.01em]">{title}</h1>
+      {description && <p className="mt-1 max-w-[360px] text-compact text-label-2">{description}</p>}
     </div>
   )
 }
 
-function StepIcon({ children, color }: { children: ReactNode; color: string }) {
+/** A step's line icon: monochrome and muted, no tile. */
+function StepIcon({ children }: { children: ReactNode }) {
   return (
-    <span className="flex size-12 items-center justify-center rounded-xl text-white [&_svg]:size-6" style={{ background: `linear-gradient(180deg, color-mix(in srgb, ${color} 80%, white), ${color})` }}>
+    <span aria-hidden className="flex size-6 items-center justify-center text-label-2 [&_svg]:size-[22px] [&_svg]:stroke-[1.5]">
       {children}
     </span>
   )
@@ -210,10 +220,10 @@ function StepIcon({ children, color }: { children: ReactNode; color: string }) {
 
 function Welcome() {
   return (
-    <div className="flex flex-col items-center pt-4 text-center">
-      <AmethystMark size={112} />
-      <h1 className="mt-6 text-large font-semibold tracking-tight">Welcome to Amethyst</h1>
-      <p className="mt-2 max-w-[360px] text-title3 text-label-2">A fast, native Minecraft launcher for your Mac.</p>
+    <div className="flex flex-col items-center pt-2 text-center">
+      <AmethystMark size={72} />
+      <h1 className="mt-5 text-title1 font-semibold tracking-[-0.015em]">Welcome to Amethyst</h1>
+      <p className="mt-1.5 max-w-[340px] text-body text-label-2">A fast, native Minecraft launcher for your Mac.</p>
     </div>
   )
 }
@@ -224,10 +234,10 @@ function AppearanceStep() {
   return (
     <>
       <StepHeader title="Choose a look" description="Changes apply right away. You can change them later in Settings." />
-      <div className="flex flex-col items-center gap-7">
+      <div className="flex flex-col items-center gap-6">
         <ModePicker size="lg" value={a.theme} onValueChange={(theme) => patch({ theme })} />
-        <div className="flex flex-col items-center gap-2">
-          <span className="text-small font-semibold text-label-2">Accent colour</span>
+        <div className="flex flex-col items-center gap-2.5">
+          <span className="text-meta font-semibold text-label-2">Accent colour</span>
           <AccentPicker value={a.accentColor} onValueChange={(accentColor) => patch({ accentColor })} labels />
         </div>
       </div>
@@ -239,8 +249,8 @@ function AccountStep({ account, onSignIn, onSkip }: { account?: Account; onSignI
   if (account) {
     return (
       <>
-        <StepHeader title="You’re signed in" icon={<SkinHead skin={account.skinUrl} hue={account.hue} size={48} />} />
-        <p className="text-center text-title3">
+        <StepHeader title="You’re signed in" icon={<SkinHead skin={account.skinUrl} hue={account.hue} size={40} />} />
+        <p className="text-center text-body">
           {account.name} <span className="text-label-2">· {account.kind === 'microsoft' ? 'Microsoft' : 'Offline'}</span>
         </p>
       </>
@@ -252,12 +262,12 @@ function AccountStep({ account, onSignIn, onSkip }: { account?: Account; onSignI
         title="Add your account"
         description="Sign in with the Microsoft account that owns Minecraft: Java Edition."
         icon={
-          <StepIcon color="#007aff">
+          <StepIcon>
             <UserRound />
           </StepIcon>
         }
       />
-      <div className="mx-auto flex w-[280px] flex-col gap-2">
+      <div className="mx-auto flex w-[260px] flex-col gap-2">
         <Button variant="primary" size="lg" onClick={() => onSignIn('microsoft')}>
           Sign in with Microsoft
         </Button>
@@ -280,37 +290,37 @@ function JavaStep() {
         title="Java is taken care of"
         description="Amethyst will download the right Java for each Minecraft version automatically, natively for Apple silicon."
         icon={
-          <StepIcon color="#ff9500">
+          <StepIcon>
             <Coffee />
           </StepIcon>
         }
       />
-      <div className="flex flex-col gap-3">
-        <div className="overflow-hidden rounded-lg bg-surface shadow-[inset_0_0_0_0.5px_var(--color-surface-border)]">
-          <p className="border-b border-separator px-3 py-1.5 text-small font-semibold text-label-2">Found on this Mac</p>
+      <div className="flex flex-col gap-2.5">
+        <section aria-label="Found on this Mac" className="overflow-hidden rounded-[10px] border border-separator">
+          <CardHeader title="Found on this Mac" count={runtimes ? runtimes.filter((r) => r.valid).length : undefined} />
           {isPending ? (
             <div className="flex flex-col gap-2 p-3">
               <Skeleton className="h-3 w-2/3" />
               <Skeleton className="h-3 w-1/2" />
             </div>
           ) : !runtimes?.length ? (
-            <p className="px-3 py-3 text-body text-label-2">No Java runtimes yet. That’s fine.</p>
+            <p className="flex min-h-[34px] items-center px-3 text-compact text-label-2">No Java runtimes yet. That’s fine.</p>
           ) : (
             <ul className="max-h-[132px] divide-y divide-separator overflow-y-auto">
               {runtimes.filter((r) => r.valid).map((r) => (
-                <li key={r.id} className="flex h-8 items-center gap-2 px-3 text-body">
-                  <span className="tabular">Java {r.version}</span>
-                  <span className="truncate text-label-2">{r.vendor}</span>
-                  {r.arch === 'x86_64' && <Badge tone="warning">x86_64</Badge>}
-                  {r.source === 'managed' && <Badge>Managed</Badge>}
+                <li key={r.id} className="flex h-8 items-center gap-2.5 px-3 text-compact">
+                  <span className="w-[112px] shrink-0 truncate font-mono text-meta whitespace-nowrap tabular">Java {r.version}</span>
+                  <span className="min-w-0 flex-1 truncate text-label-2">{r.vendor}</span>
+                  {r.arch === 'x86_64' && <span className="font-mono text-[11px] text-orange">x86_64</span>}
+                  {r.source === 'managed' && <span className="text-meta text-label-3">Managed</span>}
                 </li>
               ))}
             </ul>
           )}
-        </div>
-        <p className="flex items-center gap-2 rounded-lg bg-surface px-3 py-2.5 text-body shadow-[inset_0_0_0_0.5px_var(--color-surface-border)]">
-          <Download className="size-4 shrink-0 text-accent" /> Missing runtimes download automatically when you play. You can change this in Settings → Java.
-        </p>
+        </section>
+        <Note className="flex items-start gap-2">
+          <Download className="mt-px size-3.5 shrink-0 text-label-3" strokeWidth={1.5} /> Missing runtimes download automatically when you play. You can change this in Settings → Java.
+        </Note>
       </div>
     </>
   )
@@ -321,13 +331,13 @@ function PrivacyStep({ consent, onChange }: { consent: { usage: boolean; crashes
   return (
     <>
       <StepHeader title="Help improve Amethyst" description="Both are off unless you turn them on. Continuing without changes means no." />
-      <div className="divide-y divide-separator overflow-hidden rounded-lg bg-surface shadow-[inset_0_0_0_0.5px_var(--color-surface-border)]">
+      <div className="divide-y divide-separator overflow-hidden rounded-[10px] border border-separator">
         <PrivacyRow id="fr-usage" title="Share usage data" description={USAGE_COPY} checked={consent.usage} onChange={(usage) => onChange({ ...consent, usage })} />
         <PrivacyRow id="fr-crashes" title="Send crash reports" description={CRASH_COPY} checked={consent.crashes} onChange={(crashes) => onChange({ ...consent, crashes })} />
       </div>
-      <p className="mt-3 text-center text-small text-label-2">
+      <p className="mt-3 text-center text-meta text-label-2">
         You can change this any time in Settings → Privacy.{' '}
-        <Button variant="link" className="text-small" onClick={() => setDetails(true)}>
+        <Button variant="link" className="text-meta" onClick={() => setDetails(true)}>
           Learn more…
         </Button>
       </p>
@@ -338,12 +348,12 @@ function PrivacyStep({ consent, onChange }: { consent: { usage: boolean; crashes
 
 function PrivacyRow({ id, title, description, checked, onChange }: { id: string; title: string; description: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
-    <div className="flex items-start gap-4 px-3.5 py-3">
+    <div className="flex items-start gap-4 px-3 py-2.5">
       <div className="flex-1">
-        <label htmlFor={id} className="text-body font-medium">
+        <label htmlFor={id} className="text-compact font-medium">
           {title}
         </label>
-        <p className="mt-0.5 text-small text-label-2">{description}</p>
+        <p className="mt-0.5 text-meta text-label-2">{description}</p>
       </div>
       <Switch id={id} checked={checked} onCheckedChange={onChange} />
     </div>
@@ -362,7 +372,11 @@ function DoneStep() {
       <StepHeader
         title="You’re all set"
         description="Create your first instance, or start from a modpack."
-        icon={<CheckCircle2 className="size-12 text-green" strokeWidth={1.75} />}
+        icon={
+          <StepIcon>
+            <CheckCircle2 />
+          </StepIcon>
+        }
       />
       <div className="mx-auto flex w-[300px] flex-col gap-2">
         <Button variant="primary" size="lg" icon={<Plus />} onClick={() => finish(() => useUi.getState().set({ newInstance: true }))} autoFocus>
@@ -383,7 +397,7 @@ function DoneStep() {
             Import…
           </Button>
         </div>
-        <Button variant="link" className="mt-2 self-center" onClick={() => finish()}>
+        <Button variant="link" className="mt-1.5 self-center text-meta" onClick={() => finish()}>
           Go to Home
         </Button>
       </div>

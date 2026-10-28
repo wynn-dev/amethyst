@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ArrowDownToLine, ChevronDown, ChevronUp, Copy, FileText, FileWarning, FolderOpen, Radio, RotateCcw, XOctagon } from 'lucide-react'
+import { ArrowDownToLine, ChevronDown, ChevronUp, Copy, FileText, FileWarning, FolderOpen, RotateCcw, XOctagon } from 'lucide-react'
 import type { CrashReport } from '@shared/services'
-import { Badge, Button, Checkbox, EmptyState, IconButton, SearchField, Spinner, Switch, VirtualList, cn, type VirtualListHandle } from '@/ui'
+import { Button, Checkbox, Dot, EmptyState, IconButton, SearchField, Spinner, Switch, VirtualList, cn, type VirtualListHandle } from '@/ui'
 import { api } from '@/lib/rpc'
 import { toastError } from '@/lib/error-messages'
 import { QueryError } from '@/app/RouteStates'
@@ -22,11 +22,12 @@ const LEVELS: { level: LogLevel; label: string }[] = [
   { level: 'error', label: 'Error' },
   { level: 'debug', label: 'Debug' },
 ]
-const levelStyle: Record<LogLevel, { text: string; glyph: string; row?: string }> = {
-  debug: { text: 'text-label-3', glyph: '·' },
-  info: { text: 'text-label-2', glyph: 'ℹ' },
-  warn: { text: 'text-orange', glyph: '⚠', row: 'bg-[color-mix(in_srgb,var(--color-orange)_7%,transparent)]' },
-  error: { text: 'text-red', glyph: '⨯', row: 'bg-[color-mix(in_srgb,var(--color-red)_8%,transparent)]' },
+/** Muted level colours: errors red, warnings yellow, the rest grey. `tag` is the level column. */
+const levelStyle: Record<LogLevel, { text: string; tag: string }> = {
+  debug: { text: 'text-label-3', tag: 'DEBUG' },
+  info: { text: 'text-label-2', tag: 'INFO' },
+  warn: { text: 'text-yellow', tag: 'WARN' },
+  error: { text: 'text-red', tag: 'ERROR' },
 }
 
 interface Row {
@@ -73,37 +74,31 @@ export default function LogsTab() {
   const setPicked = (v: View) => setPick({ view: v, runKey })
 
   const sessionLabel = log.running ? 'Live' : log.launchId ? 'Last session' : 'Game output'
+  const sessionDetail = log.running ? 'Current session' : exit ? exitText(exit) : log.launchId ? 'Output of the last run' : 'Play to see output'
+  const nav = (
+    <nav aria-label="Logs" className="flex shrink-0 items-center gap-0.5">
+      <NavButton current={view === 'session'} onClick={() => setPicked('session')} title={sessionDetail} icon={log.running ? <Dot tone="green" label="Running" /> : undefined}>
+        {sessionLabel}
+      </NavButton>
+      {hasCrash && (
+        <NavButton
+          current={view === 'crash'}
+          onClick={() => setPicked('crash')}
+          title={crash.data?.kind === 'jvm' ? 'Java crash log' : crash.data ? 'Minecraft crash report' : 'Crash summary'}
+          icon={<FileWarning className="size-[13px] shrink-0 text-red" strokeWidth={1.75} />}
+        >
+          Crash report
+        </NavButton>
+      )}
+    </nav>
+  )
   return (
-    <div className="flex min-h-0 flex-1">
-      <nav aria-label="Logs" className="flex w-[220px] shrink-0 flex-col overflow-y-auto border-r border-separator bg-window-2/60 px-2 py-2">
-        <h3 className="px-2 pt-1 pb-1 text-small font-semibold text-label-3">{log.running ? 'Running' : 'This session'}</h3>
-        <ul className="flex flex-col gap-px">
-          <li>
-            <NavButton current={view === 'session'} onClick={() => setPicked('session')} icon={log.running ? <Radio className="size-4 shrink-0 text-green" /> : <FileText className="size-4 shrink-0 text-label-2" />}>
-              <span className="truncate text-body">{sessionLabel}</span>
-              <span className="truncate text-small text-label-2">
-                {log.running ? 'Current session' : exit ? exitText(exit) : log.launchId ? 'Output of the last run' : 'Play to see output'}
-              </span>
-            </NavButton>
-          </li>
-          {hasCrash && (
-            <li>
-              <NavButton current={view === 'crash'} onClick={() => setPicked('crash')} icon={<FileWarning className="size-4 shrink-0 text-red" />}>
-                <span className="truncate text-body">Crash report</span>
-                <span className="truncate text-small text-label-2">{crash.data?.kind === 'jvm' ? 'Java crash log' : crash.data ? 'Minecraft crash report' : 'Crash summary'}</span>
-              </NavButton>
-            </li>
-          )}
-        </ul>
-        <p className="mt-auto px-2 pt-3 text-small text-label-3">Older logs are in the instance’s logs folder.</p>
-      </nav>
-      <div className="flex min-w-0 flex-1 flex-col">
-        {view === 'crash' && hasCrash && exit ? (
-          <CrashView instanceId={id} exit={exit} report={crash.data} loading={crash.isPending && crash.fetchStatus !== 'idle'} error={crash.isError ? crash.error : undefined} retry={() => void crash.refetch()} />
-        ) : (
-          <LogViewer instanceId={id} key={log.launchId ?? 'none'} />
-        )}
-      </div>
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      {view === 'crash' && hasCrash && exit ? (
+        <CrashView nav={nav} instanceId={id} exit={exit} report={crash.data} loading={crash.isPending && crash.fetchStatus !== 'idle'} error={crash.isError ? crash.error : undefined} retry={() => void crash.refetch()} />
+      ) : (
+        <LogViewer nav={nav} instanceId={id} key={log.launchId ?? 'none'} />
+      )}
     </div>
   )
 }
@@ -114,19 +109,28 @@ function exitText(exit: ExitInfo): string {
   return `Exited${exit.code !== null ? ` (code ${exit.code})` : ''} after ${formatDuration(exit.durationMs)}`
 }
 
-function NavButton({ current, onClick, icon, children }: { current: boolean; onClick: () => void; icon: React.ReactNode; children: React.ReactNode }) {
+/** A chip in the toolbar's log list (the mockup's `.chip`); the current one is filled grey. */
+function NavButton({ current, onClick, icon, title, children }: { current: boolean; onClick: () => void; icon?: React.ReactNode; title: string; children: React.ReactNode }) {
   return (
     <button
       type="button"
       aria-current={current ? 'true' : undefined}
+      title={title}
       onClick={onClick}
-      className={cn('flex w-full items-center gap-2 rounded-md px-2 py-1 text-left hover:bg-fill', current && 'bg-selection')}
+      className={cn('flex h-6 items-center gap-1.5 rounded-md px-2 text-callout whitespace-nowrap text-label-2 outline-none hover:text-label focus-visible:bg-hover', current && 'bg-fill-2 text-label')}
     >
       {icon}
-      <span className="flex min-w-0 flex-col">{children}</span>
+      {children}
     </button>
   )
 }
+
+/** The slim toolbar over a log or crash view. */
+function LogToolbar({ children }: { children: React.ReactNode }) {
+  return <div className="flex h-10 shrink-0 items-center gap-2 border-b border-separator px-3">{children}</div>
+}
+
+const toolbarDivider = <span className="mx-0.5 h-4 w-px shrink-0 bg-separator" aria-hidden />
 
 async function revealLatestLog(instanceId: string) {
   try {
@@ -137,7 +141,7 @@ async function revealLatestLog(instanceId: string) {
   }
 }
 
-function LogViewer({ instanceId }: { instanceId: string }) {
+function LogViewer({ instanceId, nav }: { instanceId: string; nav: React.ReactNode }) {
   const log = useGameLog(instanceId)
   const launch = useLaunchEntry(instanceId)
   const [query, setQuery] = useState('')
@@ -182,7 +186,9 @@ function LogViewer({ instanceId }: { instanceId: string }) {
   const exit = launch?.phase === 'exited' && launch.launchId === log.launchId ? launch.exit : undefined
   return (
     <>
-      <div className="flex h-11 shrink-0 items-center gap-2 border-b border-separator px-3">
+      <LogToolbar>
+        {nav}
+        {toolbarDivider}
         <SearchField
           ref={findTargetRef}
           value={query}
@@ -197,11 +203,11 @@ function LogViewer({ instanceId }: { instanceId: string }) {
             }
           }}
           placeholder="Search log"
-          className="w-[200px]"
+          className="w-[180px] min-w-[120px] shrink"
         />
         {q && (
           <>
-            <span className="min-w-14 text-small text-label-2 tabular" aria-live="polite">
+            <span className="min-w-14 font-mono text-[11px] whitespace-nowrap text-label-2 tabular" aria-live="polite">
               {matches.length ? `${current + 1} of ${matches.length}` : 'No matches'}
             </span>
             <IconButton label="Previous Match" shortcut="shift+mod+g" size="sm" disabled={!matches.length} onClick={() => step(-1)}>
@@ -212,18 +218,18 @@ function LogViewer({ instanceId }: { instanceId: string }) {
             </IconButton>
           </>
         )}
-        <div className="ml-1 flex items-center gap-2.5" role="group" aria-label="Levels">
+        <div className="ml-1 flex shrink-0 items-center gap-2.5 text-callout" role="group" aria-label="Levels">
           {LEVELS.map((l) => (
             <Checkbox key={l.level} checked={levels.has(l.level)} onCheckedChange={(on) => toggleLevel(l.level, on)} label={l.label} />
           ))}
         </div>
-        <div className="ml-auto flex items-center gap-1">
-          <label className="flex items-center gap-1.5 pr-1 text-body">
+        <div className="ml-auto flex shrink-0 items-center gap-1 text-callout">
+          <label className="flex items-center gap-1.5 pr-1">
             <Switch size="sm" checked={follow} onCheckedChange={setFollow} aria-label="Follow tail" />
             Follow
           </label>
           <Checkbox checked={timestamps} onCheckedChange={setTimestamps} label="Time" />
-          <span className="mx-1 h-5 w-px bg-separator" aria-hidden />
+          {toolbarDivider}
           <IconButton label="Copy All" disabled={!rows.length} onClick={copyAll}>
             <Copy />
           </IconButton>
@@ -231,8 +237,8 @@ function LogViewer({ instanceId }: { instanceId: string }) {
             <FolderOpen />
           </IconButton>
         </div>
-      </div>
-      {log.dropped > 0 && <p className="shrink-0 border-b border-separator bg-fill px-3 py-1 text-small text-label-2">{log.dropped.toLocaleString()} earlier lines aren’t shown. The full log is in the logs folder.</p>}
+      </LogToolbar>
+      {log.dropped > 0 && <p className="shrink-0 border-b border-separator px-4 py-1 text-meta text-label-2">{log.dropped.toLocaleString()} earlier lines aren’t shown. The full log is in the logs folder.</p>}
       <div className="relative flex min-h-0 flex-1 flex-col bg-window">
         {log.loading && !log.rows.length ? (
           <div className="flex flex-1 items-center justify-center">
@@ -244,7 +250,7 @@ function LogViewer({ instanceId }: { instanceId: string }) {
           <EmptyState
             icon={<FileText />}
             title={log.rows.length ? 'No lines at these levels' : log.running ? 'Waiting for output…' : 'No output yet'}
-            description={log.rows.length || log.running ? undefined : 'Play this instance to see the game’s output here.'}
+            description={log.rows.length || log.running ? undefined : 'Play this instance to see the game’s output here. Older logs are in the instance’s logs folder.'}
           />
         ) : (
           <VirtualList
@@ -252,18 +258,18 @@ function LogViewer({ instanceId }: { instanceId: string }) {
             role="log"
             aria-label="Game log"
             items={rows}
-            rowHeight={18}
-            paddingY={6}
+            rowHeight={20}
+            paddingY={10}
             followTail={follow}
             onAtBottomChange={setAtBottom}
             getKey={(r) => r.line.id}
-            className="selectable flex-1 font-mono text-callout"
+            className="selectable flex-1 font-mono text-[11.5px]"
             renderRow={(r, i) => <LogRow row={r} timestamps={timestamps} query={q} current={matches[current] === i} />}
           />
         )}
         {!atBottom && rows.length > 0 && (
           <Button
-            className="absolute right-5 bottom-4 shadow-popover"
+            className="glass absolute right-4 bottom-3 shadow-popover"
             icon={<ArrowDownToLine />}
             onClick={() => {
               list.current?.scrollToBottom()
@@ -275,7 +281,7 @@ function LogViewer({ instanceId }: { instanceId: string }) {
         )}
       </div>
       {exit && (
-        <p className={cn('shrink-0 border-t border-separator px-3 py-1.5 text-small', exit.crashed ? 'text-red' : 'text-label-2')} data-log-exit>
+        <p className={cn('shrink-0 border-t border-separator px-4 py-1.5 text-meta', exit.crashed ? 'text-red' : 'text-label-2')} data-log-exit>
           {exit.killed ? 'Stopped by you' : exit.crashed ? `Game crashed${exit.code !== null ? ` (code ${exit.code})` : ''}` : `Game exited${exit.code !== null ? ` (code ${exit.code})` : ''}`} after{' '}
           {formatDuration(exit.durationMs)}
         </p>
@@ -288,17 +294,17 @@ function LogRow({ row, timestamps, query, current }: { row: Row; timestamps: boo
   const s = levelStyle[row.line.level]
   const continuation = row.line.id !== String(row.line.n)
   return (
-    <div className={cn('flex h-[18px] items-center gap-2 px-3 leading-[18px] whitespace-pre', s.row, current && 'bg-[color-mix(in_srgb,var(--color-yellow)_30%,transparent)]')}>
-      {timestamps && <span className={cn('shrink-0 text-label-3', continuation && 'invisible')}>{row.line.time}</span>}
-      <span className={cn('w-3 shrink-0 text-center', s.text, continuation && 'invisible')} aria-label={row.line.level}>
-        {s.glyph}
+    <div className={cn('flex h-5 items-center gap-3 px-4 leading-5 whitespace-pre', current && 'bg-[color-mix(in_srgb,var(--color-yellow)_22%,transparent)]')}>
+      {timestamps && <span className={cn('shrink-0 text-label-3 tabular', continuation && 'invisible')}>{row.line.time}</span>}
+      <span className={cn('w-[5ch] shrink-0', row.line.level === 'info' ? 'text-label-3' : s.text, continuation && 'invisible')} aria-label={row.line.level}>
+        {s.tag}
       </span>
       <span className={cn('w-[112px] shrink-0 truncate text-label-3', continuation && 'invisible')}>{row.line.source}</span>
-      <span className={cn('min-w-0 truncate', row.line.level === 'error' ? 'text-red' : row.line.level === 'warn' ? 'text-orange' : 'text-label')}>
+      <span className={cn('min-w-0 truncate', s.text)}>
         <Mark text={row.line.text} query={query} />
       </span>
       {row.count > 1 && (
-        <span className="shrink-0 rounded-full bg-fill-2 px-1.5 font-sans text-caption leading-4 font-semibold text-label-2" aria-label={`repeated ${row.count} times`}>
+        <span className="shrink-0 text-label-3 tabular" aria-label={`repeated ${row.count} times`}>
           ×{row.count}
         </span>
       )}
@@ -313,7 +319,7 @@ function Mark({ text, query }: { text: string; query: string }) {
   return (
     <>
       {text.slice(0, i)}
-      <mark className="rounded-[2px] bg-[color-mix(in_srgb,var(--color-yellow)_55%,transparent)] text-label">{text.slice(i, i + query.length)}</mark>
+      <mark className="rounded-[2px] bg-[color-mix(in_srgb,var(--color-yellow)_45%,transparent)] text-label">{text.slice(i, i + query.length)}</mark>
       {text.slice(i + query.length)}
     </>
   )
@@ -337,69 +343,88 @@ export function summarizeCrash(text: string, exit: ExitInfo): CrashSummary {
   return { exitCode: exit.code ?? -1, headline, suspects }
 }
 
-function CrashView({ instanceId, exit, report, loading, error, retry }: { instanceId: string; exit: ExitInfo; report: CrashReport | null | undefined; loading: boolean; error?: unknown; retry: () => void }) {
+function CrashView({
+  instanceId,
+  nav,
+  exit,
+  report,
+  loading,
+  error,
+  retry,
+}: {
+  instanceId: string
+  nav: React.ReactNode
+  exit: ExitInfo
+  report: CrashReport | null | undefined
+  loading: boolean
+  error?: unknown
+  retry: () => void
+}) {
   const { data: instances } = useInstances()
   const { data: detail } = useInstance(instanceId)
   const inst = instances?.find((i) => i.id === instanceId)
   const text = report?.text ?? ''
   const summary = summarizeCrash(text, exit)
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto" data-crash-view>
-      <section aria-label="Crash summary" className="m-4 mb-0 rounded-xl bg-[color-mix(in_srgb,var(--color-red)_7%,transparent)] p-4 shadow-[inset_0_0_0_0.5px_color-mix(in_srgb,var(--color-red)_25%,transparent)]">
-        <div className="flex items-start gap-3">
-          <XOctagon className="mt-0.5 size-5 shrink-0 text-red" />
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <h2 className="text-title3 font-semibold">Minecraft crashed</h2>
-              {exit.code !== null && <Badge tone="error">Exit code {exit.code}</Badge>}
-            </div>
-            {summary.headline && <p className="mt-1 text-body">{summary.headline}</p>}
+    <>
+      <LogToolbar>
+        {nav}
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">
+          <Button disabled={!text} onClick={() => copyToClipboard(text, 'Copied crash report')}>
+            Copy Report
+          </Button>
+          <Button
+            disabled={!report?.path && !detail}
+            onClick={() =>
+              void (report?.path ? api.shell.showItemInFolder(report.path) : detail ? api.shell.openFolder(detail.path) : Promise.resolve()).catch((e: unknown) => toastError(e, 'Couldn’t show it in Finder'))
+            }
+          >
+            Reveal in Finder
+          </Button>
+          <Button variant="primary" icon={<RotateCcw />} disabled={!inst || inst.state.kind !== 'idle'} onClick={() => inst && instanceActions.launch(inst)}>
+            Relaunch
+          </Button>
+        </div>
+      </LogToolbar>
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 pt-3.5 pb-[18px]" data-crash-view>
+        <section aria-label="Crash summary" className="overflow-hidden rounded-[10px] border border-separator">
+          <header className="flex h-8 items-center gap-2 border-b border-separator px-3">
+            <XOctagon className="size-[13px] shrink-0 text-red" strokeWidth={1.75} />
+            <h2 className="flex-1 text-meta font-semibold text-label">Minecraft crashed</h2>
+            {exit.code !== null && <span className="font-mono text-[10.5px] text-label-3 tabular">exit code {exit.code}</span>}
+          </header>
+          <div className="flex flex-col gap-1 px-3 py-2.5 text-compact">
+            <p className={summary.headline ? undefined : 'text-label-2'}>{summary.headline || 'No cause could be read from the report. The raw text is below.'}</p>
             {summary.suspects.length > 0 && (
-              <p className="mt-1.5 text-callout text-label-2">
+              <p className="text-meta text-label-2">
                 Suspected:{' '}
                 {summary.suspects.map((s, i) => (
                   <span key={s.modId}>
                     {i > 0 && ', '}
-                    <button type="button" className="font-medium text-accent hover:underline" onClick={() => openInstance(instanceId, 'mods')}>
+                    <button type="button" className="font-mono text-[11px] text-label underline decoration-separator-2 underline-offset-2 hover:decoration-label-2" onClick={() => openInstance(instanceId, 'mods')}>
                       {s.name}
                     </button>
                   </span>
                 ))}
               </p>
             )}
-            <div className="mt-3 flex flex-wrap gap-2">
-              <Button disabled={!text} onClick={() => copyToClipboard(text, 'Copied crash report')}>
-                Copy Report
-              </Button>
-              <Button
-                disabled={!report?.path && !detail}
-                onClick={() =>
-                  void (report?.path ? api.shell.showItemInFolder(report.path) : detail ? api.shell.openFolder(detail.path) : Promise.resolve()).catch((e: unknown) => toastError(e, 'Couldn’t show it in Finder'))
-                }
-              >
-                Reveal in Finder
-              </Button>
-              <Button variant="primary" icon={<RotateCcw />} disabled={!inst || inst.state.kind !== 'idle'} onClick={() => inst && instanceActions.launch(inst)}>
-                Relaunch
-              </Button>
-            </div>
           </div>
-        </div>
-      </section>
-      {loading ? (
-        <div className="flex flex-1 items-center justify-center p-8">
-          <Spinner size={20} label="Loading crash report" />
-        </div>
-      ) : error ? (
-        <QueryError error={error} onRetry={retry} what="the crash report" />
-      ) : report ? (
-        <pre className="selectable m-4 rounded-lg bg-surface p-3 font-mono text-callout leading-[18px] whitespace-pre-wrap text-label shadow-[inset_0_0_0_0.5px_var(--color-surface-border)]">
-          {text}
-          {report.truncated && '\n… (truncated; the full report is in the instance folder)'}
-        </pre>
-      ) : (
-        <p className="m-4 text-body text-label-2">The game left no crash report. Check the session log for the last lines it printed.</p>
-      )}
-    </div>
+        </section>
+        {loading ? (
+          <div className="flex flex-1 items-center justify-center p-8">
+            <Spinner size={20} label="Loading crash report" />
+          </div>
+        ) : error ? (
+          <QueryError error={error} onRetry={retry} what="the crash report" />
+        ) : report ? (
+          <pre className="selectable rounded-[10px] border border-separator px-3 py-2.5 font-mono text-[11.5px] leading-5 whitespace-pre-wrap text-label-2">
+            {text}
+            {report.truncated && '\n… (truncated; the full report is in the instance folder)'}
+          </pre>
+        ) : (
+          <p className="text-compact text-label-2">The game left no crash report. Check the session log for the last lines it printed.</p>
+        )}
+      </div>
+    </>
   )
 }

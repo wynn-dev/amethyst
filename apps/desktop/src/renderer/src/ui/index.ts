@@ -15,4 +15,4 @@ export { VirtualList, VirtualTable, nextSelection, type Column, type SortState, 
 export { Toolbar, ToolbarTitle, ToolbarDivider, Tabs, TabStrip, indicatorClass, type TabStripItem, SourceList, SourceListSection, SourceListItem, SourceListFolder, SourceListHeader, SourceListDisclosure } from './Layout'
 export { DitherProgress, DitherBar, useThemeVersion, type DitherProgressProps } from './Dither'
 export { InstanceArt, artRadius, type InstanceArtProps } from './InstanceArt'
-export { SPRING, SNAPPY, spring, reducedMotion, flyFrom, growFrom, flight, useSlidingIndicator, type Spring } from './motion'
+export { SPRING, SNAPPY, spring, reducedMotion, flyFrom, growFrom, flight, recentTrigger, useSlidingIndicator, type Spring } from './motion'

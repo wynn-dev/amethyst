@@ -55,6 +55,22 @@ export function Popover({ trigger, children, open, onOpenChange, side = 'bottom'
   )
 }
 
+/**
+ * A ref callback that grows the mounting surface out of `origin()`. Runs once per opening, when
+ * the content mounts (`origin` must be stable). The script animation takes precedence over the
+ * CSS entrance, which still plays when there is no origin.
+ */
+function useGrowFrom(origin: (() => Element | null | undefined) | undefined) {
+  return useCallback(
+    (el: HTMLDivElement | null) => {
+      const from = el && origin?.()
+      if (!el || !from || !from.getClientRects().length) return
+      growFrom(el, from.getBoundingClientRect(), el.firstElementChild as HTMLElement | null)
+    },
+    [origin],
+  )
+}
+
 /* ------------------------------------------------------------------------------------------ */
 /* Sheet                                                                                      */
 /* ------------------------------------------------------------------------------------------ */
@@ -75,18 +91,25 @@ export interface SheetProps {
   hideTitle?: boolean
   className?: string
   bodyClassName?: string
+  /**
+   * The control that opened the sheet, if it is on screen: the sheet grows out of it (e.g.
+   * `recentTrigger` from ./motion). Without one it drops in. Must be a stable function.
+   */
+  origin?: () => Element | null | undefined
 }
 
 /**
  * A document-modal sheet that drops in under the toolbar on the sheet spring. Focus is trapped
  * while open; Esc and Cancel are always safe because work continues in Activity.
  */
-export function Sheet({ open, onOpenChange, title, description, children, footer, footerLeading, width = 520, hideTitle, className, bodyClassName }: SheetProps) {
+export function Sheet({ open, onOpenChange, title, description, children, footer, footerLeading, width = 520, hideTitle, className, bodyClassName, origin }: SheetProps) {
+  const grow = useGrowFrom(origin)
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-40 bg-backdrop data-[state=closed]:animate-fade-out data-[state=open]:animate-fade-in" />
         <Dialog.Content
+          ref={grow}
           style={{ width: `min(${width}px, calc(100vw - 48px))`, left: `calc(50% - min(${width}px, calc(100vw - 48px)) / 2)` }}
           className={cn(
             'fixed top-[56px] z-40 flex max-h-[calc(100vh-80px)] flex-col overflow-hidden rounded-2xl bg-sheet text-label shadow-sheet outline-none',
@@ -139,16 +162,7 @@ export interface PanelDialogProps {
 
 /** A centred floating glass panel without chrome, e.g. the command palette. */
 export function PanelDialog({ open, onOpenChange, title, children, width = 640, className, top = '18vh', origin }: PanelDialogProps) {
-  // Runs once per opening, when the content mounts (`origin` must be stable). The script
-  // animation takes precedence over the CSS pop-in, which still plays when there is no origin.
-  const grow = useCallback(
-    (el: HTMLDivElement | null) => {
-      const from = el && origin?.()
-      if (!el || !from || !from.getClientRects().length) return
-      growFrom(el, from.getBoundingClientRect(), el.firstElementChild as HTMLElement | null)
-    },
-    [origin],
-  )
+  const grow = useGrowFrom(origin)
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>

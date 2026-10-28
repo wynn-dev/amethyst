@@ -39,7 +39,7 @@ describe('ChipGroup', () => {
   })
 
   it('selects a chip on click', () => {
-    const onChange = vi.fn()
+    const onChange = vi.fn<(v: Show) => void>()
     render(<Harness onChange={onChange} />)
     fireEvent.click(screen.getByRole('radio', { name: /Disabled/ }))
     expect(onChange).toHaveBeenCalledWith('disabled')

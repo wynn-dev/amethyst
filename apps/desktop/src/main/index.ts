@@ -7,19 +7,30 @@ import type { ReportedError } from '@shared/services'
 import { serveAssetRequest } from './asset-protocol'
 import { dialogService, shellService, windowService } from './os-services'
 import { prepareE2eDataRoot, runE2eUi } from './e2e-ui'
-import { isSmokeRun } from './flags'
+import { benchOutput, isSmokeRun } from './flags'
 import { confirmQuit, installAppMenu, type AppMenu } from './menu'
 import { installPermissionPolicy } from './permissions'
 import { registerMainService, startMainRpc } from './rpc/server'
 import { RuntimeSupervisor, showHiddenWindows } from './runtime'
 import { Updater } from './updater'
 import { guardNavigation, runScreenshots } from './windows'
+import { mainMark } from './bench-marks'
+
+mainMark('main-start')
 
 const isDev = !app.isPackaged
 // The smoke test runs against a throwaway data root, never the user's real one. A packaged app
 // needs `--amethyst-smoke` as well as the variable (flags.ts).
 const smoke = isSmokeRun({ env: process.env, argv: process.argv, packaged: app.isPackaged })
 if (smoke) app.setPath('userData', mkdtempSync(join(tmpdir(), 'amethyst-smoke-')))
+// `AMETHYST_BENCH=<out.json>`: the benchmark (main/bench.ts, driven by scripts/bench/run.ts), also
+// against the packaged app like the smoke test, which then needs `--amethyst-bench` too. It runs
+// in `AMETHYST_BENCH_ROOT` (a seeded data root), never the user's real one.
+const benchOut = benchOutput({ env: process.env, argv: process.argv, packaged: app.isPackaged })
+if (benchOut) {
+  app.setPath('userData', process.env.AMETHYST_BENCH_ROOT ?? mkdtempSync(join(tmpdir(), 'amethyst-bench-')))
+  app.setAppLogsPath(join(app.getPath('userData'), 'logs'))
+}
 const runtime = new RuntimeSupervisor()
 const updater = new Updater()
 
@@ -82,8 +93,12 @@ function createMainWindow(): BrowserWindow {
       spellcheck: false,
     },
   })
+  mainMark('window-created')
 
-  win.once('ready-to-show', () => win.show())
+  win.once('ready-to-show', () => {
+    mainMark('ready-to-show')
+    win.show()
+  })
 
   // `AMETHYST_SMOKE=1` (plus `--amethyst-smoke` when packaged): verify every RPC path end to end through the renderer bridge (main, the
   // runtime, its SQLite worker and the domain services), print the result, and quit. Used by CI,
@@ -186,6 +201,14 @@ function createMainWindow(): BrowserWindow {
     )
   }
 
+  if (benchOut) {
+    void import('./bench').then(({ runBench }) =>
+      runBench(win, benchOut, (ok) => {
+        void runtime.shutdown(3_000).then(() => app.exit(ok ? 0 : 1))
+      }),
+    )
+  }
+
   mainWindow = win
   win.on('closed', () => {
     if (mainWindow !== win) return
@@ -202,6 +225,7 @@ function createMainWindow(): BrowserWindow {
 }
 
 app.whenReady().then(() => {
+  mainMark('app-ready')
   installPermissionPolicy(session.defaultSession, devOrigin)
   const dataRoot = app.getPath('userData')
   protocol.handle(ASSET_SCHEME, (request) => serveAssetRequest(dataRoot, request.url, request.headers.get('range')))

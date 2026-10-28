@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { Link } from '@tanstack/react-router'
 import { ChevronRight, Clock, Compass, FolderInput, Package, Play, Plus, Square, Timer } from 'lucide-react'
 import { Badge, Button, EmptyState, IconButton, Skeleton, ToolbarTitle } from '@/ui'
@@ -14,6 +15,7 @@ import { useUi } from '@/app/ui-store'
 import { BlockIcon, formatDuration, formatRelative } from '@/app/visuals'
 import { SkinHead } from '@/app/skin/SkinHead'
 import { InstanceStateIndicator } from '@/app/AppSidebar'
+import { markOnce } from '@/lib/perf'
 
 /** Home (B3.1): continue playing, recent instances, updates. No dashboard grid. */
 export function HomePage() {
@@ -25,6 +27,10 @@ export function HomePage() {
   const ordered = [...played, ...fresh]
   const hero = ordered[0]
   const cards = ordered.slice(1, 9)
+  // Startup timing: Home shows the instances (docs/PERFORMANCE.md).
+  useEffect(() => {
+    if (!instances.isPending) markOnce('home-instances')
+  }, [instances.isPending])
 
   return (
     <>

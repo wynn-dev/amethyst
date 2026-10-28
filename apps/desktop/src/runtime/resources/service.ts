@@ -41,6 +41,7 @@ import {
 } from '@amethyst/content'
 import { mapLimit, type TaskContext } from '@amethyst/task'
 import type { BackupRow, BulkResult, DeleteResult, HostServices, ModAnalysis, ResourceDetail, ResourceKind, ResourcePage, ResourceQuery, ResourceRow, ResourcesService, ResourceSource, Settings } from '@shared/services'
+import { assetUrl } from '@shared/paths'
 import type { Emit } from '../context'
 import type { DbClient } from '../db/client'
 import type { SourceRow } from '../db/protocol'
@@ -56,7 +57,7 @@ import { readActiveShaderPack, readEnabledPacks, setPackOrder, setPacksEnabled, 
 import type { WorkerPool } from './pool'
 import { entryDetail, entryRow, packOrder, pendingRow, resourceId, rowChanged, saveRow } from './rows'
 import { InstanceWatcher, type WatchFactory } from './watcher'
-import { iconName, type ResourceWorkerHandlers } from './worker-handlers'
+import { iconName, type IconJob, type ResourceWorkerHandlers } from './worker-handlers'
 
 const log = logger('resources')
 /** Where undoable deletes wait inside an instance folder. */
@@ -128,6 +129,8 @@ interface StagedBatch {
 const KINDS: ReadonlySet<string> = new Set<ResourceKind>(['mods', 'resourcepacks', 'shaderpacks', 'saves'])
 const MAX_WATCHED = 4
 const MAX_CACHED_INSTANCES = 8
+/** Icon extraction jobs per scan, spread over the worker pool. */
+const ICON_JOBS = 4
 /** Above this many changed rows a `reset` is cheaper than listing ids. */
 const RESET_THRESHOLD = 100
 
@@ -420,8 +423,11 @@ export class ResourceManager {
       }
     }
     const sources = await this.#sources(sha1s)
+    // Only point at icons that are in the cache (one listing); the scan extracts missing ones.
+    const cached = items.some((i) => i.icon) ? await readdir(this.#d.layout.icons).then((names) => new Set(names), () => new Set<string>()) : undefined
     for (const i of items) {
-      if (i.entry) next.set(i.id, { entry: i.entry, row: entryRow(i.id, i.entry, { ...(i.icon ? { iconFile: i.icon } : {}), source: pickSource(sources.get(i.entry.hashes?.sha1 ?? '')) }) })
+      const icon = i.icon && cached?.has(i.icon) ? i.icon : undefined
+      if (i.entry) next.set(i.id, { entry: i.entry, row: entryRow(i.id, i.entry, { ...(icon ? { iconFile: icon } : {}), source: pickSource(sources.get(i.entry.hashes?.sha1 ?? '')) }) })
       else if (i.pending) next.set(i.id, { row: i.pending })
     }
     if (kind === 'resourcepacks') this.#applyPackOrder(next, enabledList)
@@ -509,6 +515,27 @@ export class ResourceManager {
       next.set(id, { entry, row: entryRow(id, entry, { ...(iconFile ? { iconFile } : {}), source: pickSource(sources.get(entry.hashes?.sha1 ?? '')) }) })
     }
     if (kind === 'resourcepacks') this.#applyPackOrder(next, enabledList)
+    this.#commit(st, col, next)
+    if (res.missingIcons.length > 0) await this.#extractIcons(st, col, res.missingIcons, signal)
+  }
+
+  /**
+   * Extract icons that are not in the cache yet, after the rows were published: thumbnails are
+   * made across the pool's workers and the rows that got one are announced as changed.
+   */
+  async #extractIcons(st: InstanceState, col: Collection, jobs: IconJob[], signal: AbortSignal): Promise<void> {
+    const parts = Math.min(ICON_JOBS, jobs.length)
+    const chunks = Array.from({ length: parts }, (_, i) => jobs.filter((_, j) => j % parts === i))
+    const results = await Promise.all(chunks.map((chunk) => this.#d.pool.call('extractIcons', { jobs: chunk, iconsDir: this.#d.layout.icons }, signal).catch(() => ({}))))
+    if (signal.aborted) return
+    const icons = new Map(results.flatMap((r) => Object.entries(r)))
+    if (icons.size === 0) return
+    // Patch the current rows (a newer scan may have replaced them meanwhile).
+    const next = new Map<string, Item>()
+    for (const [id, item] of col.items) {
+      const name = item.entry ? icons.get(item.entry.path) : undefined
+      next.set(id, name && !item.row.iconUrl ? { ...item, row: { ...item.row, iconUrl: assetUrl(`cache/icons/${name}`) } } : item)
+    }
     this.#commit(st, col, next)
   }
 

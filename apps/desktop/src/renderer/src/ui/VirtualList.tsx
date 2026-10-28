@@ -4,6 +4,7 @@ import {
   useEffect,
   useImperativeHandle,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent,
@@ -250,7 +251,8 @@ export function VirtualTable<T>({
   const scrollRef = useRef<HTMLDivElement>(null)
   const [active, setActive] = useState(-1)
   const anchor = useRef(0)
-  const visible = columns.filter((c) => !hiddenColumns.has(c.id))
+  // Stable between scroll frames, so the memoised rows below only render when they change.
+  const visible = useMemo(() => columns.filter((c) => !hiddenColumns.has(c.id)), [columns, hiddenColumns])
   const template = visible.map((c) => c.width).join(' ')
   const keys = rows.map((r) => (groupHeader?.(r) != null ? null : getKey(r)))
 
@@ -341,7 +343,7 @@ export function VirtualTable<T>({
     }
   }
 
-  const onRowMouseDown = (index: number, e: MouseEvent) => {
+  const onRowMouseDown = useLatest((index: number, e: MouseEvent) => {
     if (e.button === 2) {
       // Right-click on an unselected row selects it first, like Finder.
       const key = keys[index]
@@ -350,7 +352,9 @@ export function VirtualTable<T>({
     }
     if (e.button !== 0) return
     select(index, e.shiftKey ? 'range' : e.metaKey ? 'toggle' : 'replace')
-  }
+  })
+  const onRowActivate = useLatest((row: T) => onActivate?.(row))
+  const menuFor = useLatest((key: string) => rowMenu?.(selection.has(key) ? [...selection] : [key]) ?? [])
 
   const headerMenu: MenuEntry[] = [
     { kind: 'label', label: 'Columns' },
@@ -369,6 +373,8 @@ export function VirtualTable<T>({
       })),
   ]
 
+  // The frosted header is a deliberate design choice; it costs GPU memory while a long table is
+  // scrolled (docs/PERFORMANCE.md, "What remains").
   const header = (
     <div
       role="row"
@@ -452,29 +458,23 @@ export function VirtualTable<T>({
             )
           }
           const key = keys[v.index]!
-          const rowEl = (
+          return (
             <TableRow
               key={v.key}
-              id={rowId(key)}
+              rowKey={key}
               index={v.index}
-              style={style}
+              top={v.start - HEADER_HEIGHT}
+              height={rowHeight}
               template={template}
               columns={visible}
               row={row}
               selected={selection.has(key)}
               active={v.index === active}
-              striped={v.index % 2 === 1}
               className={rowClassName?.(row)}
               onMouseDown={onRowMouseDown}
-              onDoubleClick={onActivate}
+              onDoubleClick={onRowActivate}
+              menu={rowMenu ? menuFor : undefined}
             />
-          )
-          return rowMenu ? (
-            <ContextMenu key={v.key} items={() => rowMenu(selection.has(key) ? [...selection] : [key])}>
-              {rowEl}
-            </ContextMenu>
-          ) : (
-            rowEl
           )
         })}
       </div>
@@ -485,51 +485,49 @@ export function VirtualTable<T>({
 const EMPTY: ReadonlySet<string> = new Set()
 const rowId = (key: string) => `row-${key.replace(/[^\w-]/g, '_')}`
 
+/** A callback with a stable identity that always runs the latest `fn` (keeps memoised rows memoised). */
+function useLatest<A extends unknown[], R>(fn: (...args: A) => R): (...args: A) => R {
+  const ref = useRef(fn)
+  useLayoutEffect(() => {
+    ref.current = fn
+  })
+  return useCallback((...args: A) => ref.current(...args), [])
+}
+
 interface TableRowProps<T> {
-  id: string
+  rowKey: string
   index: number
-  style: React.CSSProperties
+  /** Offset inside the row group and height, in px. */
+  top: number
+  height: number
   template: string
   columns: Column<T>[]
   row: T
   selected: boolean
   active: boolean
-  striped: boolean
   className?: string
   onMouseDown: (index: number, e: MouseEvent) => void
-  onDoubleClick?: (row: T) => void
+  onDoubleClick: (row: T) => void
+  /** The row's context menu entries (for the selection when the row is part of it). */
+  menu?: (key: string) => MenuEntry[]
 }
 
-// Memoised on row identity and selection, so scrolling and selection changes re-render only the rows that changed.
-const TableRow = memo(function TableRow<T>({
-  id,
-  index,
-  style,
-  template,
-  columns,
-  row,
-  selected,
-  active,
-  striped,
-  className,
-  onMouseDown,
-  onDoubleClick,
-  ...rest
-}: TableRowProps<T>) {
-  return (
+// Memoised on plain props (row identity, position, selection) and stable callbacks: while
+// scrolling only the rows that enter the window render; the context menu lives inside the memo.
+const TableRow = memo(function TableRow<T>({ rowKey, index, top, height, template, columns, row, selected, active, className, onMouseDown, onDoubleClick, menu }: TableRowProps<T>) {
+  const el = (
     <div
-      {...rest}
-      id={id}
+      id={rowId(rowKey)}
       role="row"
       aria-rowindex={index + 2}
       aria-selected={selected}
       data-active={active || undefined}
       onMouseDown={(e) => onMouseDown(index, e)}
-      onDoubleClick={() => onDoubleClick?.(row)}
-      style={{ ...style, gridTemplateColumns: template }}
+      onDoubleClick={() => onDoubleClick(row)}
+      style={{ position: 'absolute', top: 0, left: 0, width: '100%', height, transform: `translateY(${top}px)`, gridTemplateColumns: template }}
       className={cn(
         'grid items-center text-body',
-        striped && 'bg-row-alt',
+        index % 2 === 1 && 'bg-row-alt',
         selected && 'bg-selection group-focus/table:bg-accent-fill group-focus/table:text-on-accent',
         className,
       )}
@@ -545,4 +543,5 @@ const TableRow = memo(function TableRow<T>({
       ))}
     </div>
   )
+  return menu ? <ContextMenu items={() => menu(rowKey)}>{el}</ContextMenu> : el
 }) as <T>(props: TableRowProps<T>) => ReactNode

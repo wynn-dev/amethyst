@@ -81,4 +81,40 @@ describe('VirtualTable', () => {
     expect(onToggle.mock.lastCall?.[0]).toHaveLength(500)
     cleanup()
   })
+
+  it('re-renders only the rows that changed, and builds row menus only when one opens', () => {
+    const renders = new Map<string, number>()
+    const memoColumns: Column<{ id: string; name: string }>[] = [
+      {
+        id: 'name',
+        title: 'Name',
+        header: 'Name',
+        width: '1fr',
+        cell: (r) => {
+          renders.set(r.id, (renders.get(r.id) ?? 0) + 1)
+          return r.name
+        },
+      },
+    ]
+    const rowMenu = vi.fn<(keys: string[]) => { label: string }[]>((keys) => [{ label: `Open ${keys.join(',')}` }])
+    function Memo({ tick, selection }: { tick: number; selection: Set<string> }) {
+      // Inline callbacks, as real callers pass them: they must not defeat the row memo.
+      return (
+        <div data-tick={tick}>
+          <VirtualTable rows={rows.slice(0, 500)} columns={memoColumns} getKey={(r) => r.id} aria-label="Memo" selection={selection} onSelectionChange={() => {}} onActivate={() => {}} rowMenu={rowMenu} />
+        </div>
+      )
+    }
+    const none = new Set<string>()
+    const { rerender } = render(<Memo tick={0} selection={none} />)
+    expect(renders.size).toBeGreaterThan(0)
+    const before = [...renders.values()].reduce((a, b) => a + b, 0)
+    rerender(<Memo tick={1} selection={none} />)
+    expect([...renders.values()].reduce((a, b) => a + b, 0)).toBe(before)
+    rerender(<Memo tick={2} selection={new Set(['r1'])} />)
+    expect([...renders.values()].reduce((a, b) => a + b, 0)).toBe(before + 1)
+    expect(renders.get('r1')).toBe(2)
+    expect(rowMenu).not.toHaveBeenCalled()
+    cleanup()
+  })
 })

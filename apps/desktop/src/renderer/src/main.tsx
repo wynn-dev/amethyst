@@ -9,7 +9,10 @@ import { installEventBridge } from '@/data/events'
 import { applyTheme, readCachedTheme } from '@/lib/theme'
 import { router } from '@/app/router'
 import { installErrorReporting } from './lib/errors'
+import { markOnce } from './lib/perf'
 import './styles.css'
+
+markOnce('entry')
 
 installErrorReporting()
 // Runtime and main-process events → cache invalidation and live stores (once per window).

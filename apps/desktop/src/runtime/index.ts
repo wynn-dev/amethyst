@@ -58,6 +58,8 @@ import { TaskRegistry, tasksService } from './tasks/registry'
 import { errorMessage } from './util/errors'
 
 const startedAt = Date.now()
+// Dev flag: profile the runtime from here to shutdown (see cpu-profile.ts).
+if (process.env.AMETHYST_RUNTIME_CPU_PROF) void import('./cpu-profile').then((p) => p.startCpuProfile())
 const log = logger('runtime')
 
 const userData = process.env[RUNTIME_ENV.userData]
@@ -125,6 +127,7 @@ const telemetryHooks: TelemetryHooks = { capture, redact: redactFromReports, rep
 
 let index: IndexStatus = { ok: false, error: 'not opened yet' }
 let bootMs = 0
+let bootedAt = 0
 
 const booted = (async () => {
   await setLogFile(path.join(layout.logs, 'runtime.log')).catch(() => {})
@@ -146,7 +149,8 @@ const booted = (async () => {
       }),
     ]),
   )
-  bootMs = Date.now() - startedAt
+  bootedAt = Date.now()
+  bootMs = bootedAt - startedAt
 })()
 booted.catch((e: unknown) => log.error('boot failed', e))
 
@@ -159,7 +163,13 @@ const pool = once(async () => {
   const { WorkerPool } = await import('./resources/pool')
   const size = Math.max(2, Math.min(4, Math.floor(availableParallelism() / 2)))
   // Scans and hashes time out (default 10 min); world zips run as cancellable tasks of any length.
-  return new WorkerPool<ResourceWorkerHandlers>(() => new Worker(new URL('./scan-worker.js', import.meta.url)), { size, timeouts: { importWorld: 0, exportWorld: 0 } })
+  // Workers grow while they hash and make icon thumbnails; stop them soon after the last job
+  // (respawning one costs ~30 ms) so an idle launcher does not keep their heaps resident.
+  return new WorkerPool<ResourceWorkerHandlers>(() => new Worker(new URL('./scan-worker.js', import.meta.url)), {
+    size,
+    idleMs: 30_000,
+    timeouts: { importWorld: 0, exportWorld: 0 },
+  })
 })
 
 let resourceManager: ResourceManager | undefined
@@ -325,7 +335,16 @@ process.on('unhandledRejection', (reason) => {
 registerService('runtime', {
   async ping() {
     await booted.catch(() => {})
-    return { pid: process.pid, uptimeMs: Date.now() - startedAt, memoryRss: process.memoryUsage.rss(), bootMs, index }
+    return {
+      pid: process.pid,
+      uptimeMs: Date.now() - startedAt,
+      memoryRss: process.memoryUsage.rss(),
+      heapUsed: process.memoryUsage().heapUsed,
+      bootMs,
+      processStartedAt: Math.round(performance.timeOrigin),
+      bootedAt,
+      index,
+    }
   },
 })
 useConsentSource({
@@ -565,6 +584,7 @@ async function shutdown(): Promise<void> {
   resourceManager?.dispose()
   for (const s of settled) if (s.status === 'rejected') log.warn('shutdown step failed', s.reason)
   await db.close().catch(() => {})
+  if (process.env.AMETHYST_RUNTIME_CPU_PROF) await import('./cpu-profile').then((p) => p.stopCpuProfile()).catch(() => {})
   // Give consented telemetry a bounded chance to go out.
   await shutdownTelemetry(1_000)
   process.exit(0)

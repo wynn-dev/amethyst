@@ -7,7 +7,7 @@
  */
 import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { lstat, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import {
   ContentStore,
@@ -31,6 +31,7 @@ import {
   type WorkerScanOptions,
 } from '@amethyst/content'
 import { curseforgeFingerprint } from '@amethyst/marketplace'
+import { THUMBNAIL_SIZE, iconThumbnail } from './thumbnail'
 
 /** A scan-cache record as stored in the index (`placements` row). */
 export interface PlacementUpsert {
@@ -56,8 +57,17 @@ export interface ScanFolderResult {
   result: ScanResult
   upserts: [string, PlacementUpsert][]
   deletes: string[]
-  /** Entry path → icon file name inside `iconsDir`. */
+  /** Entry path → icon file name inside `iconsDir`, for icons already in the cache. */
   icons: Record<string, string>
+  /** Icons to extract with `extractIcons`. */
+  missingIcons: IconJob[]
+}
+
+/** One icon to extract: the archive, the icon's path inside it and its cache file name. */
+export interface IconJob {
+  path: string
+  rel: string
+  name: string
 }
 
 export interface ScanSavesResult {
@@ -68,6 +78,8 @@ export interface ScanSavesResult {
 /** Every job the pool can run. */
 export interface ResourceWorkerHandlers {
   scanFolder(args: ScanFolderArgs, signal?: AbortSignal): Promise<ScanFolderResult>
+  /** Extract icons into the cache as thumbnails; resolves with entry path → file name of those written. */
+  extractIcons(args: { jobs: IconJob[]; iconsDir: string }, signal?: AbortSignal): Promise<Record<string, string>>
   scanSaves(args: { savesDir: string; iconsDir: string }, signal?: AbortSignal): Promise<ScanSavesResult>
   /** CurseForge murmur2 fingerprints (two streaming passes per file). */
   fingerprints(args: { files: { path: string; sha1: string }[] }, signal?: AbortSignal): Promise<[string, number][]>
@@ -78,15 +90,24 @@ export interface ResourceWorkerHandlers {
   exportWorld(args: { source: string; output: string }, signal?: AbortSignal): Promise<{ path: string; size: number }>
 }
 
+/** World icons are copied as they are. */
 const ICON_MAX_BYTES = 2 * 1024 * 1024
+/** Mod and pack icons are read whole, then shrunk to a thumbnail. */
+const ICON_SOURCE_MAX_BYTES = 8 * 1024 * 1024
 const ICON_EXT = /\.(png|jpe?g|gif|webp)$/i
+/** Suffix of the marker for content without a usable icon. */
+const NO_ICON = '.none'
 
-/** File name of an entry's extracted icon in the icon cache. */
+/**
+ * File name of an entry's extracted icon in the icon cache. The `-t128` tag marks icons stored as
+ * thumbnails (see `thumbnail.ts`); full-size icons cached by older versions are never reused.
+ */
 export function iconName(entry: Pick<ContentEntry, 'hashes' | 'path' | 'mtimeMs'>, rel: string): string {
   const ext = (ICON_EXT.exec(rel)?.[0] ?? '.png').toLowerCase()
-  if (entry.hashes?.sha1) return `${entry.hashes.sha1}${ext}`
+  const tag = `-t${THUMBNAIL_SIZE}`
+  if (entry.hashes?.sha1) return `${entry.hashes.sha1}${tag}${ext}`
   // Folder packs are not content-hashed: key by path and modification time.
-  return `f-${createHash('sha1').update(`${pathKey(entry.path)}:${entry.mtimeMs}`).digest('hex')}${ext}`
+  return `f-${createHash('sha1').update(`${pathKey(entry.path)}:${entry.mtimeMs}`).digest('hex')}${tag}${ext}`
 }
 
 async function writeAtomic(file: string, data: Uint8Array): Promise<void> {
@@ -95,20 +116,27 @@ async function writeAtomic(file: string, data: Uint8Array): Promise<void> {
   await rename(tmp, file)
 }
 
-/** Extract an entry's icon into the icon cache (once per content), returning its file name. */
-async function extractIcon(entry: ContentEntry, iconsDir: string): Promise<string | undefined> {
+/** The icon an entry would have in the cache, if it has one. */
+function iconOf(entry: ContentEntry): IconJob | undefined {
   const rel = entry.mod?.icon ?? entry.resourcePack?.icon
   if (!rel || !ICON_EXT.test(rel) || entry.problem) return undefined
-  const name = iconName(entry, rel)
-  const target = path.join(iconsDir, name)
-  if (await stat(target).catch(() => undefined)) return name
+  return { path: entry.path, rel, name: iconName(entry, rel) }
+}
+
+/**
+ * Extract one icon into the icon cache as a thumbnail; false when the archive has no usable icon.
+ * That outcome is remembered with an empty `<name>.none` marker (names are content-addressed), so
+ * a missing, oversized or corrupt icon is not read again on every scan.
+ */
+async function extractIcon(job: IconJob, iconsDir: string, signal?: AbortSignal): Promise<boolean> {
+  await mkdir(iconsDir, { recursive: true }).catch(() => undefined)
   try {
-    const bytes = await readPackFile(entry.path, rel, { maxBytes: ICON_MAX_BYTES })
-    await mkdir(iconsDir, { recursive: true })
-    await writeAtomic(target, bytes)
-    return name
+    const bytes = await readPackFile(job.path, job.rel, { maxBytes: ICON_SOURCE_MAX_BYTES })
+    await writeAtomic(path.join(iconsDir, job.name), iconThumbnail(bytes))
+    return true
   } catch {
-    return undefined
+    if (!signal?.aborted) await writeFile(path.join(iconsDir, `${job.name}${NO_ICON}`), '').catch(() => undefined)
+    return false
   }
 }
 
@@ -132,13 +160,27 @@ export function createResourceWorkerHandlers(): ResourceWorkerHandlers & Record<
           { ino: record.ino, size: record.size, mtimeMs: record.mtimeMs, parserVersion: record.parserVersion, ...(record.hashes?.sha1 ? { sha1: record.hashes.sha1 } : {}), record },
         ])
       const deletes = records.map(([key]) => key).filter((key) => !present.has(key))
+      // Icons already in the cache are listed now; missing ones are extracted by separate
+      // `extractIcons` jobs, so new rows never wait for thumbnails.
+      const cached = await readdir(iconsDir).then((names) => new Set(names), () => new Set<string>())
       const icons: Record<string, string> = {}
+      const missingIcons: IconJob[] = []
       for (const entry of result.entries) {
-        if (signal?.aborted) break
-        const name = await extractIcon(entry, iconsDir)
-        if (name) icons[entry.path] = name
+        const job = iconOf(entry)
+        if (!job) continue
+        if (cached.has(job.name)) icons[entry.path] = job.name
+        else if (!cached.has(`${job.name}${NO_ICON}`)) missingIcons.push(job)
       }
-      return { result, upserts, deletes, icons }
+      return { result, upserts, deletes, icons, missingIcons }
+    },
+
+    async extractIcons({ jobs, iconsDir }, signal) {
+      const done: Record<string, string> = {}
+      for (const job of jobs) {
+        if (signal?.aborted) break
+        if (await extractIcon(job, iconsDir, signal)) done[job.path] = job.name
+      }
+      return done
     },
 
     async scanSaves({ savesDir, iconsDir }, signal) {

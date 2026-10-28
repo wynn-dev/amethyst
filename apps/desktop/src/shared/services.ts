@@ -59,7 +59,18 @@ export interface IndexStatus {
 /** Diagnostics of the runtime process itself. */
 export interface RuntimeStatusService {
   /** Liveness plus boot health (`bootMs`: process start to services ready). Waits for boot to finish. */
-  ping(): Promise<{ pid: number; uptimeMs: number; memoryRss: number; bootMs: number; index: IndexStatus }>
+  ping(): Promise<{
+    pid: number
+    uptimeMs: number
+    memoryRss: number
+    /** JS heap in use (bytes), without forcing a collection. */
+    heapUsed: number
+    bootMs: number
+    /** Epoch ms: when the runtime process started (`performance.timeOrigin`) and when boot finished. */
+    processStartedAt: number
+    bootedAt: number
+    index: IndexStatus
+  }>
 }
 
 // =============================================================================================

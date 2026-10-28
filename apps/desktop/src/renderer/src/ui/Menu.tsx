@@ -136,6 +136,14 @@ export interface ContextMenuProps {
   onOpenChange?: (open: boolean) => void
 }
 
+/**
+ * The entries of a context menu, built only while it is open: a function `items` is not called
+ * when the trigger renders (every row of a list has a context menu).
+ */
+function ContextEntries({ items }: Pick<ContextMenuProps, 'items'>) {
+  return renderEntries(CM, typeof items === 'function' ? items() : items)
+}
+
 /** Right-click (and ⌃-click / Shift+F10) menu for any element. */
 export function ContextMenu({ items, children, onOpenChange }: ContextMenuProps) {
   return (
@@ -143,7 +151,7 @@ export function ContextMenu({ items, children, onOpenChange }: ContextMenuProps)
       <CM.Trigger asChild>{children}</CM.Trigger>
       <CM.Portal>
         <CM.Content collisionPadding={8} className={menuSurface}>
-          {renderEntries(CM, typeof items === 'function' ? items() : items)}
+          <ContextEntries items={items} />
         </CM.Content>
       </CM.Portal>
     </CM.Root>

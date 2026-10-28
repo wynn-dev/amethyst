@@ -53,6 +53,17 @@ export interface Bridge {
   platform: string
   /** The absolute path of a dropped or picked `File` (Electron `webUtils.getPathForFile`), `''` when it has none. */
   pathForFile?(file: File): string
+  /** Dev flag `AMETHYST_IPC_STATS=1` only: message counts and bytes through this window's bridge. */
+  ipcStats?: { read(): IpcStats; reset(): void }
+}
+
+/** Traffic through one renderer's bridge since the last reset (`AMETHYST_IPC_STATS=1`). Bytes are JSON lengths. */
+export interface IpcStats {
+  sinceMs: number
+  /** Per direction and transport: `runtime:req`, `runtime:res`, `runtime:evt`, `main:invoke`, `main:res`, `main:evt`. */
+  channels: Record<string, { count: number; bytes: number }>
+  /** Per RPC method (`service.method`) or event name. */
+  names: Record<string, { count: number; bytes: number }>
 }
 
 export function toRpcError(e: unknown): RpcError {

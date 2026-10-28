@@ -36,3 +36,10 @@ AMETHYST_E2E_UI=content:/tmp/e2e-content pnpm --filter @amethyst/desktop exec el
 `AMETHYST_E2E_UI=<dir>` without a prefix runs `core`. Set `AMETHYST_E2E_CACHE=<data root>` to
 clone an existing data root's `minecraft/` and `runtimes/` folders in (APFS clones), so game files
 are not downloaded again. The drivers print `E2E …` lines and exit non-zero when a step fails.
+
+## Performance
+
+`pnpm --filter @amethyst/desktop bench` measures the dev build and the packaged app (build them
+first with `pnpm build` and `pnpm dist`) against a seeded data root: cold start, memory, idle CPU,
+IPC traffic, the Mods tab, scrolling, navigation and Play → spawn. `--quick` shortens it and
+`--compare <summary.json>` prints a before/after table. See [docs/PERFORMANCE.md](docs/PERFORMANCE.md).

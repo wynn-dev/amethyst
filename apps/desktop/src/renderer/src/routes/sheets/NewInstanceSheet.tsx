@@ -392,6 +392,7 @@ const CHECK_TEXT: Record<Exclude<ImportCandidate['check'], 'ok'>, string> = {
   'no-permission': 'macOS doesn’t let Amethyst read this folder. Allow access in System Settings → Privacy & Security → Files and Folders, or move it.',
   'already-registered': 'This folder is already an instance in Amethyst.',
   'inside-managed-root': 'This folder is inside Amethyst’s own data folder.',
+  'contains-data-root': 'This folder contains Amethyst’s own data folder. Choose the game folder itself.',
   'is-volume-root': 'Choose the game folder itself, not a whole disk or your home folder.',
   'inside-app-bundle': 'Folders inside an app can’t be imported.',
   bad: 'Its Amethyst settings file is damaged.',
@@ -463,6 +464,18 @@ function useFolderImport(): { candidate: ImportCandidate | undefined; valid: boo
         <Button onClick={() => void pick()}>Choose Another…</Button>
       </div>
       {candidate.check !== 'ok' && <Banner tone="error" title="This folder can’t be imported">{CHECK_TEXT[candidate.check]}</Banner>}
+      {candidate.check === 'ok' && candidate.removedLaunchSettings && candidate.removedLaunchSettings.length > 0 && (
+        <Banner tone="warning" title="These launch settings won’t be imported">
+          <p>They run programs or load code into the game. Add them again in the instance’s settings if you trust them.</p>
+          <ul className="selectable mt-1 list-disc pl-4 font-mono text-small">
+            {candidate.removedLaunchSettings.map((r) => (
+              <li key={r} className="break-all">
+                {r}
+              </li>
+            ))}
+          </ul>
+        </Banner>
+      )}
       <div className="grid grid-cols-[120px_1fr] items-center gap-x-3 gap-y-3">
         <span className="text-right text-body text-label-2">Found</span>
         <span className="text-body">

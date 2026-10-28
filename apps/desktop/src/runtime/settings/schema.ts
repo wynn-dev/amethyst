@@ -5,6 +5,7 @@
  */
 import path from 'node:path'
 import type { Settings } from '@shared/services'
+import { isUnsafeEnvKey } from '../util/env'
 import { isRecord, readBool, readColor, readInt, readOneOf, readStringArray, readStringRecord } from '../util/parse'
 
 interface Leaf<T> {
@@ -61,7 +62,8 @@ const SPEC: Spec<Settings> = {
     gameArgs: args(),
     env: leaf<Record<string, string>>({}, (v) => {
       const r = readStringRecord(v)
-      return r && Object.keys(r).every((k) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) ? r : undefined
+      // Code-injecting keys (DYLD_*, JAVA_TOOL_OPTIONS…) are never accepted (util/env.ts).
+      return r && Object.keys(r).every((k) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(k) && !isUnsafeEnvKey(k)) ? r : undefined
     }),
     wrapperCommand: text(''),
     preLaunchCommand: text(''),

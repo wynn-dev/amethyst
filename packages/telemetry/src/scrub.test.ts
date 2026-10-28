@@ -63,6 +63,27 @@ describe('scrubber', () => {
     expect(scrub('key phc_a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8 used')).toBe('key <token> used')
   })
 
+  it('removes standard-base64 Microsoft tokens (EwA…) even when they contain / + and = padding', () => {
+    const tokens = [
+      'EwBwA+l3BAAUWm1xSeJRIJK8txKfRnJfHsjj8iQAAc8u/0FVpLqpHZd/T7Z6EaQ2kZ3vX9yB',
+      'EwA4A/l3BAAUw0Lz9Hd8Kk2PmYxQnVb7RtUeJcGfA1sWoIpZ3vX9yB4nT6mKqLdE5rFhG2jC',
+      'EwB4A/l3BAAU/w0Lz9Hd8Kk2PmYxQnVb7RtUeJcGfA1sWoIpZ3vX9yB4nT6mKqLdE5rF==',
+      'AbCdEfGh/IjKlMnOpQrStUvWxYz0123456789',
+    ]
+    for (const t of tokens) {
+      expect(scrub(`MSA token ${t} rejected`)).toBe('MSA token <token> rejected')
+      expect(scrub(`{"access_token_x": ${t}}`)).not.toContain(t.slice(0, 12))
+    }
+  })
+
+  it('keeps long paths and class names that contain digits', () => {
+    for (const p of [
+      'net/minecraft/client/renderer/GameRenderer1',
+      'org/lwjgl/opengl/GL11/glBegin/GL15/glBufferData',
+      'out/renderer/assets/index-BxY12abc.js/chunk-77aa.js',
+    ]) expect(scrub(`at ${p}`)).toBe(`at ${p}`)
+  })
+
   it('removes IPv4 and IPv6 addresses', () => {
     expect(scrub('connect ECONNREFUSED 192.168.1.20:25565')).toBe('connect ECONNREFUSED <ip>:25565')
     expect(scrub('from 2001:0db8:85a3:0000:0000:8a2e:0370:7334 and fe80::1 and ::1')).toBe('from <ip> and <ip> and <ip>')

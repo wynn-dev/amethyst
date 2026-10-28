@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Events } from '@shared/events'
 import { dataLayout, type DataLayout } from '../layout'
 import { applySettingsPatch, defaultSettings, parseSettings } from './schema'
-import { SettingsStore } from './service'
+import { settingsService, SettingsStore } from './service'
 
 let root: string
 let layout: DataLayout
@@ -69,6 +69,14 @@ describe('settings schema', () => {
     expect(r.invalid.toSorted()).toEqual(['appearance.accentColor', 'appearance.bogus', 'game.memory.minMB', 'network.maxConnectionsPerHost'])
   })
 
+  it('rejects code-injecting variables in the game env', () => {
+    for (const key of ['DYLD_INSERT_LIBRARIES', 'LD_PRELOAD', 'JAVA_TOOL_OPTIONS', '_JAVA_OPTIONS', 'JDK_JAVA_OPTIONS', 'NODE_OPTIONS', 'ELECTRON_RUN_AS_NODE']) {
+      expect(applySettingsPatch(defaultSettings(), { game: { env: { [key]: 'x' } } }).invalid).toEqual(['game.env'])
+    }
+    expect(applySettingsPatch(defaultSettings(), { game: { env: { MESA_DEBUG: '1' } } }).next.game.env).toEqual({ MESA_DEBUG: '1' })
+    expect(parseSettings({ game: { env: { DYLD_INSERT_LIBRARIES: '/tmp/x.dylib' } } }).game.env).toEqual({})
+  })
+
   it('uses null to reset keys and whole sections', () => {
     const base = applySettingsPatch(defaultSettings(), { appearance: { theme: 'dark', blur: { card: 5 } }, game: { jvmArgs: ['-Dx=1'] } }).next
     const r = applySettingsPatch(base, { appearance: { blur: null }, game: { jvmArgs: null } })
@@ -119,6 +127,35 @@ describe('SettingsStore', () => {
     expect(settings).toEqual(defaultSettings())
     expect(store.loadResult?.outcome).toBe('reset')
     expect((await readdir(root)).some((n) => n.startsWith('settings.json.corrupt-'))).toBe(true)
+  })
+
+  it('tells the user once when settings.json was moved aside, even if no window was listening yet', async () => {
+    await writeFile(layout.settings, '{ "appearance": ')
+    const store = new SettingsStore(layout, emit)
+    await store.load()
+    expect(events.map((e) => e.event)).toEqual(['settings:notice'])
+    const service = settingsService(store, layout)
+    const notice = await service.takeNotice()
+    expect(notice?.kind).toBe('reset')
+    expect(path.basename(notice?.corruptPath ?? '')).toMatch(/^settings\.json\.corrupt-\d+$/)
+    expect((await readdir(root)).includes(path.basename(notice?.corruptPath ?? ''))).toBe(true)
+    // Taken once: a second window (or a reconnect) gets nothing.
+    expect(await service.takeNotice()).toBeNull()
+  })
+
+  it('says the settings were restored when the backup copy was used, and has nothing to say otherwise', async () => {
+    const first = new SettingsStore(layout, emit)
+    await first.load()
+    await first.patch({ appearance: { theme: 'dark' } })
+    await first.flush()
+    await first.patch({ appearance: { theme: 'light' } })
+    await first.flush()
+    expect(first.takeNotice()).toBeNull()
+    await writeFile(layout.settings, 'garbage')
+    const second = new SettingsStore(layout, emit)
+    await second.load()
+    expect(second.loadResult?.outcome).toBe('recovered')
+    expect(second.takeNotice()?.kind).toBe('recovered')
   })
 
   it('reset restores settings.json defaults and removes the background, keeping the privacy answer', async () => {

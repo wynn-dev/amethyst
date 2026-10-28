@@ -16,7 +16,7 @@ import { assetIndexCandidates, assetObjectPath, parseAssetIndex, type AssetIndex
 import { resolveDirs, type GameDirs } from './command'
 import { throwIfAborted } from './errors'
 import { hashFile } from './hash'
-import type { ResolvedLibrary } from './libraries'
+import { libraryFile, type ResolvedLibrary } from './libraries'
 import { planNatives, type NativesPlan, type PlanNativesOptions } from './natives/plan'
 import type { ResolvedVersion } from './resolve'
 
@@ -107,7 +107,7 @@ async function check(e: Expect, mode: NonNullable<DiagnoseOptions['hash']>, trus
 
 function libraryExpect(lib: ResolvedLibrary, librariesDir: string): Expect {
   const native = lib.isNative || !!lib.coordinate.classifier?.startsWith('natives-')
-  const e: Expect = { kind: native ? 'native' : 'library', name: lib.name, path: path.join(librariesDir, lib.download.path), url: lib.download.url, policy: 'unlessTrusted' }
+  const e: Expect = { kind: native ? 'native' : 'library', name: lib.name, path: libraryFile(librariesDir, lib), url: lib.download.url, policy: 'unlessTrusted' }
   if (lib.download.sha1) e.sha1 = lib.download.sha1
   if (lib.download.sha1Alternatives) e.sha1Alternatives = lib.download.sha1Alternatives
   if (lib.download.sha256) e.sha256 = lib.download.sha256

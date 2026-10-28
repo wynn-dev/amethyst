@@ -5,7 +5,7 @@ import path from 'node:path'
 import { serveScanWorker, type ScanWorkerHandlers } from '@amethyst/content'
 import { nbt, writeNbt } from '@amethyst/nbt'
 import { createZip } from '@amethyst/zip'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Events } from '@shared/events'
 import type { DbClient } from '../db/client'
 import { fakeWorker, testDbClient } from '../db/test-utils'
@@ -393,6 +393,57 @@ describe('ResourceManager', () => {
     m.dispose()
   })
 
+  it('refuses destructive world operations and backups while a world is open (session.lock), and clears stale snapshots', async () => {
+    const inst = await instances.create({ name: 'Open World', runtime: { minecraft: '1.21.1' } })
+    const worldDir = path.join(inst.path, 'saves', 'Live')
+    await world(worldDir, 'Live')
+    let open: boolean | undefined = false
+    let running = false
+    const probed: string[][] = []
+    const m = new ResourceManager({
+      layout,
+      emit,
+      host: { trash: async (p) => void trashed.push(p) },
+      instances,
+      db,
+      pool,
+      tasks,
+      settings: { value: defaultSettings() },
+      isRunning: () => running,
+      worldsOpen: async (dirs) => {
+        probed.push(dirs)
+        return open
+      },
+    })
+    await m.refresh(inst.id, 'saves')
+    // A crashed backup left a snapshot folder behind: the first backup listing removes it.
+    const stale = path.join(layout.backups, inst.id, 'Live', '.snapshot-0123456789ab')
+    await mkdir(path.join(stale, 'region'), { recursive: true })
+    const backup = await m.createBackup(inst.id, 'live')
+    expect(await exists(stale)).toBe(false)
+    expect(probed).toEqual([[worldDir]])
+
+    open = true
+    await expect(m.createBackup(inst.id, 'live')).rejects.toMatchObject({ code: 'EBUSY' })
+    await expect(m.autoBackupWorlds(inst.id, 'pre-version-change')).rejects.toMatchObject({ code: 'EBUSY' })
+    await expect(m.restoreBackup(inst.id, backup.id, 'replace')).rejects.toMatchObject({ code: 'EBUSY' })
+    expect(await m.delete(inst.id, 'saves', ['live'])).toMatchObject({ done: [], failed: [{ id: 'live', code: 'EBUSY' }] })
+    expect(trashed).toEqual([])
+    expect(await exists(path.join(worldDir, 'level.dat'))).toBe(true)
+    // A copy restore never touches the open world.
+    expect((await m.restoreBackup(inst.id, backup.id, 'copy')).worldId).toMatch(/^live \(restored /)
+
+    // When the probe cannot tell, the launcher's own running game decides for backups.
+    open = undefined
+    running = true
+    await expect(m.createBackup(inst.id, 'live')).rejects.toMatchObject({ code: 'EBUSY' })
+    running = false
+    await expect(m.createBackup(inst.id, 'live')).resolves.toMatchObject({ world: 'Live' })
+    open = false
+    expect(await m.autoBackupWorlds(inst.id, 'pre-version-change')).toBe(2)
+    m.dispose()
+  })
+
   it('sets deleted files aside for Undo, then sends them to the Trash', async () => {
     const inst = await instances.create({ name: 'Undo', runtime: { minecraft: '1.21.1', fabric: '0.16.5' } })
     await fabricJar(path.join(inst.path, 'mods', 'a.jar'), 'a')
@@ -400,7 +451,12 @@ describe('ResourceManager', () => {
     const m = new ResourceManager({
       layout,
       emit,
-      host: { trash: async (p) => void trashed.push(p) },
+      host: {
+        trash: async (p) => {
+          trashed.push(p)
+          await rm(p, { recursive: true, force: true })
+        },
+      },
       instances,
       db,
       pool,
@@ -434,6 +490,67 @@ describe('ResourceManager', () => {
     // A plain delete trashes at once and offers nothing to undo.
     expect(await m.delete(inst.id, 'mods', ['b.jar'])).toMatchObject({ done: ['b.jar'], undoToken: null })
     m.dispose()
+  })
+
+  it('never erases set-aside files when the Trash refuses them: they are put back and ETRASH_FAILED is announced', async () => {
+    const inst = await instances.create({ name: 'NoTrash', runtime: { minecraft: '1.21.1', fabric: '0.16.5' } })
+    await fabricJar(path.join(inst.path, 'mods', 'a.jar'), 'a')
+    await fabricJar(path.join(inst.path, 'mods', 'b.jar'), 'b')
+    const original = await readFile(path.join(inst.path, 'mods', 'a.jar'))
+    let refuse = true
+    const deps = (undoGraceMs: number) =>
+      new ResourceManager({
+        layout,
+        emit,
+        host: {
+          trash: async (p) => {
+            if (refuse) throw Object.assign(new Error('The Trash is not available on this volume'), { code: 'ETRASH_FAILED' })
+            trashed.push(p)
+            await rm(p, { recursive: true, force: true })
+          },
+        },
+        instances,
+        db,
+        pool,
+        tasks,
+        settings: { value: defaultSettings() },
+        undoGraceMs,
+      })
+    const m = deps(40)
+    await m.refresh(inst.id, 'mods')
+    const res = await m.delete(inst.id, 'mods', ['a.jar'], { undoable: true })
+    expect(res.done).toEqual(['a.jar'])
+    await new Promise((r) => setTimeout(r, 200))
+    // The file is back, byte for byte, and nothing is left in the set-aside folder.
+    expect(await readFile(path.join(inst.path, 'mods', 'a.jar'))).toEqual(original)
+    expect(await exists(path.join(inst.path, '.amethyst', 'trash', res.undoToken ?? ''))).toBe(false)
+    expect(events.find((e) => e.event === 'resources:trash-failed')?.payload).toMatchObject({ instanceId: inst.id, kind: 'mods', code: 'ETRASH_FAILED', restored: ['a.jar'], kept: [] })
+    expect((await m.list(inst.id, 'mods')).items.map((r) => r.id).toSorted()).toEqual(['a.jar', 'b.jar'])
+    m.dispose()
+
+    // A session that quit inside the undo window: the next session's sweep puts the file back
+    // too (from the origins manifest) when the Trash still refuses it.
+    const quitting = deps(60_000)
+    await quitting.refresh(inst.id, 'mods')
+    const left = await quitting.delete(inst.id, 'mods', ['b.jar'], { undoable: true })
+    quitting.dispose()
+    expect(await exists(path.join(inst.path, 'mods', 'b.jar'))).toBe(false)
+    events = []
+    const next = deps(60_000)
+    await next.list(inst.id, 'mods')
+    await vi.waitFor(() => expect(events.some((e) => e.event === 'resources:trash-failed')).toBe(true))
+    expect(await exists(path.join(inst.path, 'mods', 'b.jar'))).toBe(true)
+    expect(await exists(path.join(inst.path, '.amethyst', 'trash', left.undoToken ?? ''))).toBe(false)
+    next.dispose()
+
+    // Once the Trash works again, only what it took is removed.
+    refuse = false
+    const last = deps(10)
+    await last.refresh(inst.id, 'mods')
+    await last.delete(inst.id, 'mods', ['b.jar'], { undoable: true })
+    await vi.waitFor(() => expect(trashed.map((p) => path.basename(p))).toEqual(['b.jar']))
+    await vi.waitFor(async () => expect(await readdir(path.join(inst.path, '.amethyst', 'trash'))).toEqual([]))
+    last.dispose()
   })
 
   it('orders resource packs through options.txt and pages with filters', async () => {

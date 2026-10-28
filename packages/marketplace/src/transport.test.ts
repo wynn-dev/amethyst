@@ -294,3 +294,31 @@ describe('parseRetryAfter', () => {
     expect(parseRetryAfter('soon')).toBeUndefined()
   })
 })
+
+describe('redirects', () => {
+  it('never sends the CurseForge API key to another host after a redirect', async () => {
+    const { fetch, calls } = mockFetch((call) => {
+      if (call.url.hostname === 'api.curseforge.com') return { status: 302, headers: { location: 'https://edge.example.net/v1/mods/1' } }
+      return json({ data: { id: 1 } })
+    })
+    const c = new CurseForgeClient({ fetch, limiter: false, cache: false, apiKey: 'cf-secret', retries: 0 })
+    await c.getMod(1).catch(() => undefined)
+    expect(calls.map((x) => x.url.hostname)).toEqual(['api.curseforge.com', 'edge.example.net'])
+    expect(calls[0]?.headers['x-api-key']).toBe('cf-secret')
+    expect(calls[1]?.headers['x-api-key']).toBeUndefined()
+    expect(calls[1]?.headers.accept).toBe('application/json')
+  })
+
+  it('keeps headers on a same-origin redirect and refuses HTTPS to HTTP', async () => {
+    const { fetch, calls } = mockFetch((call) => {
+      if (call.url.pathname === '/v1/mods/1') return { status: 301, headers: { location: '/v1/mods/2' } }
+      if (call.url.pathname === '/v1/mods/2') return json({ data: { id: 2 } })
+      return { status: 302, headers: { location: 'http://api.curseforge.com/v1/mods/2' } }
+    })
+    const c = new CurseForgeClient({ fetch, limiter: false, cache: false, apiKey: 'cf-secret', retries: 0 })
+    await c.getMod(1).catch(() => undefined)
+    expect(calls[1]?.headers['x-api-key']).toBe('cf-secret')
+    await expect(c.getMod(3)).rejects.toMatchObject({ code: 'EBAD_RESPONSE' })
+    expect(calls.filter((x) => x.url.protocol === 'http:')).toHaveLength(0)
+  })
+})

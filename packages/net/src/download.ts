@@ -18,6 +18,8 @@ const MAX_CONTINUATIONS = 5
 const WRITE_BATCH = 64 * 1024
 /** Files at least this large are fsynced before the rename. */
 const SYNC_MIN_BYTES = MiB
+/** Default {@link DownloadOptions.stallTimeoutMs}. */
+const DEFAULT_STALL_MS = 30_000
 
 /** Receives byte progress for one item (internal; `downloadMany` aggregates it). */
 export interface ProgressSink {
@@ -43,8 +45,13 @@ interface Job {
   part: string
   meta: string
   client: HttpClient
+  /** The caller's signal, or (while a URL is being tried) that combined with its stall watchdog. */
   signal: AbortSignal | undefined
   sink: ProgressSink | undefined
+  /** Abort a URL after this long without a response or a body byte (0: never). */
+  stallMs: number
+  /** When the current URL last made progress (a response arrived or bytes were received). */
+  lastProgressAt: number
   /** Backoff for continuations after body failures. */
   retry: RetryOptions
   /** Per-call retry override passed to the client (undefined keeps the client's policy). */
@@ -176,6 +183,8 @@ export async function downloadItem(item: DownloadItem, options: DownloadOptions,
     bytes: 0,
     totalReported: false,
     metaOnDisk: false,
+    stallMs: options.stallTimeoutMs ?? DEFAULT_STALL_MS,
+    lastProgressAt: 0,
   }
   const promise: Promise<DownloadResult> = run(job, urls, item.existing ?? options.existing ?? 'verify').finally(() => {
     if (inflight.get(slot)?.promise === promise) inflight.delete(slot)
@@ -225,8 +234,35 @@ async function isValid(path: string, item: DownloadItem, policy: ExistingFilePol
   return item.size !== undefined
 }
 
-/** One URL's ladder: one restart from zero after a range failure, a few continuations after body failures. */
+/**
+ * One URL, under a no-progress watchdog: a host that accepts connections but never answers, or
+ * stops sending mid-body, would otherwise take every timeout times every retry (minutes) before
+ * the next mirror is tried. After `stallMs` without a response or a body byte the URL fails with
+ * `ESTALLED`.
+ */
 async function fromUrl(job: Job, url: string): Promise<DownloadResult> {
+  if (job.stallMs <= 0) return tryUrl(job, url)
+  const outer = job.signal
+  const watchdog = new AbortController()
+  job.lastProgressAt = Date.now()
+  const tick = Math.max(10, Math.min(1000, Math.floor(job.stallMs / 4)))
+  const timer = setInterval(() => {
+    if (Date.now() - job.lastProgressAt >= job.stallMs) {
+      watchdog.abort(new NetError('ESTALLED', `no progress from ${sanitizeUrl(url)} for ${Math.round(job.stallMs / 1000)} s`, sanitizeUrl(url)))
+    }
+  }, tick)
+  timer.unref?.()
+  job.signal = anySignal(outer, watchdog.signal)
+  try {
+    return await tryUrl(job, url)
+  } finally {
+    clearInterval(timer)
+    job.signal = outer
+  }
+}
+
+/** One URL's ladder: one restart from zero after a range failure, a few continuations after body failures. */
+async function tryUrl(job: Job, url: string): Promise<DownloadResult> {
   let fresh = false
   for (let continuations = 0; ; ) {
     try {
@@ -240,7 +276,9 @@ async function fromUrl(job: Job, url: string): Promise<DownloadResult> {
       }
       if (bodyErrors.has(e as object) && continuations < MAX_CONTINUATIONS) {
         continuations++
-        await sleep(backoffDelay(continuations, job.retry), job.signal)
+        const delay = backoffDelay(continuations, job.retry)
+        job.lastProgressAt += delay
+        await sleep(delay, job.signal)
         continue
       }
       throw e
@@ -262,7 +300,7 @@ async function attempt(job: Job, url: string, fresh: boolean): Promise<DownloadR
   }
   let res: HttpResponse
   try {
-    res = await job.client.request(url, { headers, signal, retry: job.retryOverride })
+    res = await job.client.request(url, { headers, signal, retry: job.retryOverride, ...watch(job) })
   } catch (e) {
     if (offset > 0 && e instanceof HttpError && e.status === 416) throw new RangeRestart(url, 'HTTP 416')
     throw e
@@ -310,6 +348,26 @@ async function attempt(job: Job, url: string, fresh: boolean): Promise<DownloadR
 
 /** Stream one response into the `.part` file, hashing inline, then verify and rename. */
 async function single(
+  job: Job,
+  url: string,
+  res: HttpResponse,
+  start: number,
+  total: number | undefined,
+  etag: string | undefined,
+  lastModified: string | undefined,
+): Promise<DownloadResult> {
+  const { signal } = job
+  // Make sure a stalled body is torn down even if the stream does not observe the request signal.
+  const onAbort = () => res.body.destroy(abortReason(signal as AbortSignal))
+  signal?.addEventListener('abort', onAbort, { once: true })
+  try {
+    return await singleBody(job, url, res, start, total, etag, lastModified)
+  } finally {
+    signal?.removeEventListener('abort', onAbort)
+  }
+}
+
+async function singleBody(
   job: Job,
   url: string,
   res: HttpResponse,
@@ -413,7 +471,7 @@ async function segmented(job: Job, first: HttpResponse, total: number, validator
       if (i === 0) return writeRange(job, fh, first, s, e, signal)
       const headers: Record<string, string> = { ...item.headers, range: `bytes=${s}-${e}` }
       if (validator) headers['if-range'] = validator
-      const res = await job.client.request(first.url, { headers, signal, retry: job.retryOverride })
+      const res = await job.client.request(first.url, { headers, signal, retry: job.retryOverride, ...watch(job) })
       const cr = res.status === 206 ? parseContentRange(res.headers['content-range']) : undefined
       if (!cr || cr.start !== s || cr.end !== e) {
         discardBody(res.body)
@@ -540,7 +598,20 @@ function setProgress(job: Job, value: number): void {
   job.counted = value
 }
 
+/** Request hooks for the stall watchdog: a response resets it, and retry waits do not count as stalling. */
+function watch(job: Job): { onResponse: () => void; onRetryWait: (delayMs: number) => void } {
+  return {
+    onResponse: () => {
+      job.lastProgressAt = Math.max(job.lastProgressAt, Date.now())
+    },
+    onRetryWait: (delayMs) => {
+      job.lastProgressAt += delayMs
+    },
+  }
+}
+
 function addProgress(job: Job, delta: number): void {
+  job.lastProgressAt = Math.max(job.lastProgressAt, Date.now())
   job.counted += delta
   job.sink?.progress(delta)
 }

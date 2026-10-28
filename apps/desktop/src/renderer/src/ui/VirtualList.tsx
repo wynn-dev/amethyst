@@ -373,14 +373,13 @@ export function VirtualTable<T>({
       })),
   ]
 
-  // Opaque, not a translucent backdrop blur: a backdrop filter on a sticky header inside the
-  // scroller kept ~200 MB of GPU textures resident (and cost GPU time every scroll frame) for a
-  // 10 % see-through that is hardly visible. See docs/PERFORMANCE.md.
+  // The frosted header is a deliberate design choice; it costs GPU memory while a long table is
+  // scrolled (docs/PERFORMANCE.md, "What remains").
   const header = (
     <div
       role="row"
       aria-rowindex={1}
-      className="sticky top-0 z-10 grid items-center border-b border-separator bg-window"
+      className="sticky top-0 z-10 grid items-center border-b border-separator bg-window/90 backdrop-blur-xl"
       style={{ gridTemplateColumns: template, height: HEADER_HEIGHT }}
     >
       {visible.map((c, i) => {

@@ -9,6 +9,7 @@ import type { DownloadItem, DownloadStats } from './types'
  * - `EBADRESPONSE`: the response was malformed (invalid JSON, too large, unexpected 2xx status,
  *   bad `Content-Range`, redirect loop or HTTPS to HTTP downgrade).
  * - `ECONFLICT`: two concurrent downloads target the same path with different expectations.
+ * - `ESTALLED`: a download URL made no progress (no response, no body bytes) for too long.
  * - `EDOWNLOAD`: one or more items of a batch failed ({@link DownloadError}).
  *
  * Network-level failures (DNS, connection refused, timeouts) are rethrown as produced by Node and
@@ -16,7 +17,7 @@ import type { DownloadItem, DownloadStats } from './types'
  * Cancellation surfaces as the signal's abort reason, or a `CancelledError` if the reason is not an
  * `Error`.
  */
-export type NetErrorCode = 'EHTTP' | 'ECHECKSUM' | 'ESIZE' | 'EBADRESPONSE' | 'ECONFLICT'
+export type NetErrorCode = 'EHTTP' | 'ECHECKSUM' | 'ESIZE' | 'EBADRESPONSE' | 'ECONFLICT' | 'ESTALLED'
 
 /** Base class of the typed errors thrown by this package. */
 export class NetError extends Error {

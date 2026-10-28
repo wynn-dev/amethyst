@@ -257,6 +257,14 @@ export interface SystemInfo {
 }
 
 /** Global settings (runtime). */
+/** `settings.json` could not be read at startup and was moved aside. */
+export interface SettingsNotice {
+  /** `recovered`: the last good copy (`.bak`) was used. `reset`: nothing was readable, so the defaults are in use. */
+  kind: 'recovered' | 'reset'
+  /** Where the unreadable file was kept. */
+  corruptPath: string
+}
+
 export interface SettingsService {
   /** The current settings (always complete; invalid or missing fields read as defaults). */
   get(): Promise<Settings>
@@ -278,6 +286,11 @@ export interface SettingsService {
   getPaths(): Promise<DataPaths>
   /** Memory and CPU facts for the memory slider. */
   getSystemInfo(): Promise<SystemInfo>
+  /**
+   * The pending one-time notice about the settings file, or `null`. The first caller takes it, so
+   * only one window shows it. `settings:notice` announces a new one.
+   */
+  takeNotice(): Promise<SettingsNotice | null>
 }
 
 // =============================================================================================
@@ -458,6 +471,8 @@ export type FolderCheck =
   | 'already-registered'
   /** Inside Amethyst's own data folder. */
   | 'inside-managed-root'
+  /** Contains Amethyst's own data folder (for example `~/Library`). */
+  | 'contains-data-root'
   /** A disk root (`/`, `/Volumes/X`) or the home folder itself. */
   | 'is-volume-root'
   /** Inside an application bundle. */
@@ -481,6 +496,12 @@ export interface ImportCandidate {
   modCount: number
   /** Worlds in `saves/`. */
   worldCount: number
+  /**
+   * Launch settings of an Amethyst instance folder that importing removes because they run code
+   * (pre-launch or wrapper command, Java path, agent-style JVM arguments, `DYLD_*`-style env).
+   * Each entry describes one setting.
+   */
+  removedLaunchSettings?: string[]
 }
 
 /** Input for {@link InstancesService.import}. */
@@ -1978,4 +1999,10 @@ export interface HostServices {
    * again. The launch service calls it; main keeps the app in the Dock so it can be reopened.
    */
   setLauncherHidden(hidden: boolean): Promise<void>
+  /**
+   * Use this proxy (`http://`, `https://` or `socks5://` host and port) for Electron's own
+   * traffic (the sign-in window and remote images), or go direct with `null`. Loopback and
+   * local names always go direct.
+   */
+  setProxy(url: string | null): Promise<void>
 }

@@ -8,10 +8,13 @@
  * and cached under `cache/natives/`. Without a fallback, the first use waits for the fetch and a
  * failure is `ENATIVES_UNAVAILABLE` with a clear message (never a crash). A manifest that lacks
  * the artifact a version needs also ends in `ENATIVES_UNAVAILABLE` (from the natives plan).
+ *
+ * The fetched (and cached) manifest is never trusted for *what* runs: it is restricted to the
+ * pinned artifacts (`restrictLwjgl2ToPinned`), so it can only move a pinned jar's download URL.
  */
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { parseLwjgl2Arm64Source, type Lwjgl2Arm64Source } from '@amethyst/game'
+import { DEFAULT_LWJGL2_ARM64_SOURCE, parseLwjgl2Arm64Source, restrictLwjgl2ToPinned, type Lwjgl2Arm64Source } from '@amethyst/game'
 import { logger } from '../log'
 import { AppError, errorMessage, isAbortError } from '../util/errors'
 
@@ -40,6 +43,8 @@ export interface NativesSourceOptions {
   url?: string
   /** Used at once when there is no fresh cached manifest (the pinned release). */
   fallback?: Lwjgl2Arm64Source
+  /** The only artifacts (by sha256) a fetched or cached manifest may supply. Default: the pinned release. */
+  pinned?: Lwjgl2Arm64Source
   now?: () => number
 }
 
@@ -58,6 +63,10 @@ export class Lwjgl2NativesSource {
     this.#now = options.now ?? Date.now
   }
 
+  #restrict(source: Lwjgl2Arm64Source): Lwjgl2Arm64Source {
+    return restrictLwjgl2ToPinned(source, this.#o.pinned ?? DEFAULT_LWJGL2_ARM64_SOURCE)
+  }
+
   get #file(): string {
     return path.join(this.#o.cacheDir, 'lwjgl2-arm64.json')
   }
@@ -67,7 +76,7 @@ export class Lwjgl2NativesSource {
     try {
       const raw = JSON.parse(await readFile(this.#file, 'utf8')) as Partial<CacheFile>
       if (raw.v !== 1 || raw.url !== this.#url || typeof raw.fetchedAt !== 'number') return undefined
-      this.#memory = { v: 1, url: this.#url, fetchedAt: raw.fetchedAt, source: parseLwjgl2Arm64Source(raw.source) }
+      this.#memory = { v: 1, url: this.#url, fetchedAt: raw.fetchedAt, source: this.#restrict(parseLwjgl2Arm64Source(raw.source)) }
       return this.#memory
     } catch {
       return undefined
@@ -119,7 +128,7 @@ export class Lwjgl2NativesSource {
 
   async #fetch(signal?: AbortSignal): Promise<Lwjgl2Arm64Source> {
     try {
-      const source = parseLwjgl2Arm64Source(await this.#o.fetchJson(this.#url, signal ? { signal } : {}))
+      const source = this.#restrict(parseLwjgl2Arm64Source(await this.#o.fetchJson(this.#url, signal ? { signal } : {})))
       await this.#writeCache({ v: 1, url: this.#url, fetchedAt: this.#now(), source })
       return source
     } catch (e) {

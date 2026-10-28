@@ -18,10 +18,12 @@ import path from 'node:path'
 import { ModpackError, throwIfAborted } from './errors'
 import {
   assertSameInstance,
+  beginOperation,
   buildTargets,
   cleanupOperation,
   commitChanges,
   diskState,
+  enterCritical,
   instanceIdentity,
   lockEntry,
   newBackupDir,
@@ -251,7 +253,7 @@ export async function applyModpackUpdate(plan: ModpackUpdatePlan, options: Apply
     const toStage = targets.filter((t) => t.source.type !== 'none')
 
     const opId = operationId('update', plan.manifest.sha1)
-    await writeRecord(instanceDir, { schemaVersion: 1, id: opId, kind: 'update', packSha1: plan.manifest.sha1, createdAt: Date.now(), state: 'staging' })
+    await beginOperation(instanceDir, { schemaVersion: 1, id: opId, kind: 'update', packSha1: plan.manifest.sha1, createdAt: Date.now(), state: 'staging' })
     const { staged, failed } = await (options.ctx
       ? options.ctx.child('stage', (ctx) => stageTargets(instanceDir, opId, toStage, { ...options, ctx }), { weight: 4 })
       : stageTargets(instanceDir, opId, toStage, options))
@@ -270,78 +272,84 @@ export async function applyModpackUpdate(plan: ModpackUpdatePlan, options: Apply
       ...[...removing, ...renamed].map((c): CommitChange => ({ path: c.previous?.path ?? c.path, action: 'remove', kind: 'file' })),
       ...staged.map((s): CommitChange => ({ path: s.target.path, action: 'place', kind: s.target.kind, staged: s.staged })),
     ]
-    await writeRecord(instanceDir, {
-      schemaVersion: 1,
-      id: opId,
-      kind: 'update',
-      packSha1: plan.manifest.sha1,
-      createdAt: Date.now(),
-      state: 'committing',
-      backupDir: backupRel,
-      changes: changes.map(({ path: p, action, kind }) => ({ path: p, action, kind })),
-    })
-    const commit = () => commitChanges(instanceDir, opId, backupRel, changes, options.hooks)
-    const backedUp = await (options.ctx ? options.ctx.child('commit', commit) : commit())
+    // From the committing record to the cleanup, files move: shutdown waits for this section.
+    const leave = enterCritical()
+    try {
+      await writeRecord(instanceDir, {
+        schemaVersion: 1,
+        id: opId,
+        kind: 'update',
+        packSha1: plan.manifest.sha1,
+        createdAt: Date.now(),
+        state: 'committing',
+        backupDir: backupRel,
+        changes: changes.map(({ path: p, action, kind }) => ({ path: p, action, kind })),
+      })
+      const commit = () => commitChanges(instanceDir, opId, backupRel, changes, options.hooks)
+      const backedUp = await (options.ctx ? options.ctx.child('commit', commit) : commit())
 
-    // New lock: the new pack's file list, with the hashes now on disk where we know them.
-    const stagedByKey = new Map(staged.map((s) => [pathKey(s.target.path), s.hashes]))
-    const files: ModpackLockFile[] = []
-    for (const c of [...plan.add, ...plan.update, ...plan.conflicts, ...plan.keep]) {
-      if (!c.target && c.action === 'keep' && c.previous) files.push(c.previous)
-      if (!c.target || c.conflict === 'modified-removed') continue
-      const key = pathKey(c.path)
-      const local = stagedByKey.get(key) ?? (c.action === 'keep' ? c.disk : undefined)
-      if (!local && c.target.source.type === 'none' && !isExcluded(c)) continue
-      if (!local && !c.target.hashes.sha1 && !c.target.hashes.crc32 && !c.target.hashes.sha512 && !c.target.hashes.md5) continue
-      files.push(lockEntry(c.target, local))
-    }
-    const lock: ModpackLock = {
-      schemaVersion: 1,
-      source: plan.manifest.format,
-      // The upstream is the version the user chose, never cached metadata (pitfall 10).
-      upstream: options.upstream ? { ...options.upstream, packSha1: plan.manifest.sha1 } : plan.previousLock?.upstream,
-      pack: {
-        name: plan.manifest.name,
-        version: plan.manifest.version,
-        sha1: plan.manifest.sha1,
-        minecraft: plan.manifest.minecraft,
-        loader: plan.manifest.loader,
-      },
-      installedAt: Date.now(),
-      files,
-      deselected: plan.deselected,
-    }
+      // New lock: the new pack's file list, with the hashes now on disk where we know them.
+      const stagedByKey = new Map(staged.map((s) => [pathKey(s.target.path), s.hashes]))
+      const files: ModpackLockFile[] = []
+      for (const c of [...plan.add, ...plan.update, ...plan.conflicts, ...plan.keep]) {
+        if (!c.target && c.action === 'keep' && c.previous) files.push(c.previous)
+        if (!c.target || c.conflict === 'modified-removed') continue
+        const key = pathKey(c.path)
+        const local = stagedByKey.get(key) ?? (c.action === 'keep' ? c.disk : undefined)
+        if (!local && c.target.source.type === 'none' && !isExcluded(c)) continue
+        if (!local && !c.target.hashes.sha1 && !c.target.hashes.crc32 && !c.target.hashes.sha512 && !c.target.hashes.md5) continue
+        files.push(lockEntry(c.target, local))
+      }
+      const lock: ModpackLock = {
+        schemaVersion: 1,
+        source: plan.manifest.format,
+        // The upstream is the version the user chose, never cached metadata (pitfall 10).
+        upstream: options.upstream ? { ...options.upstream, packSha1: plan.manifest.sha1 } : plan.previousLock?.upstream,
+        pack: {
+          name: plan.manifest.name,
+          version: plan.manifest.version,
+          sha1: plan.manifest.sha1,
+          minecraft: plan.manifest.minecraft,
+          loader: plan.manifest.loader,
+        },
+        installedAt: Date.now(),
+        files,
+        deselected: plan.deselected,
+      }
 
-    await writeJournal(path.join(instanceDir, ...backupRel.split('/')), {
-      schemaVersion: 1,
-      kind: 'update',
-      createdAt: Date.now(),
-      packSha1: plan.manifest.sha1,
-      previousLock: plan.previousLock ?? null,
-      changes: changes.map((c) => ({
-        path: c.path,
-        action: c.action,
-        kind: c.kind,
-        hadPrevious: backedUp.includes(c.path),
-        placedSha1: c.action === 'place' && c.kind === 'file' ? stagedByKey.get(pathKey(c.path))?.sha1 : undefined,
-      })),
-    })
-    await writeModpackLock(instanceDir, lock)
-    await writeUnresolved(instanceDir, unresolved)
-    await cleanupOperation(instanceDir, opId)
+      await writeJournal(path.join(instanceDir, ...backupRel.split('/')), {
+        schemaVersion: 1,
+        kind: 'update',
+        createdAt: Date.now(),
+        packSha1: plan.manifest.sha1,
+        previousLock: plan.previousLock ?? null,
+        changes: changes.map((c) => ({
+          path: c.path,
+          action: c.action,
+          kind: c.kind,
+          hadPrevious: backedUp.includes(c.path),
+          placedSha1: c.action === 'place' && c.kind === 'file' ? stagedByKey.get(pathKey(c.path))?.sha1 : undefined,
+        })),
+      })
+      await writeModpackLock(instanceDir, lock)
+      await writeUnresolved(instanceDir, unresolved)
+      await cleanupOperation(instanceDir, opId)
 
-    const placedKeys = new Set(staged.map((s) => pathKey(s.target.path)))
-    const pick = (list: UpdateChange[]) => list.filter((c) => placedKeys.has(pathKey(c.path))).map((c) => c.path)
-    return {
-      backupId,
-      added: pick(plan.add),
-      updated: [...pick(plan.update), ...pick(plan.conflicts)],
-      removed: removing.map((c) => c.path),
-      backedUp,
-      excluded: rows.filter(isExcluded).map((c) => c.path),
-      unresolved,
-      rejectedManualFiles,
-      lock,
+      const placedKeys = new Set(staged.map((s) => pathKey(s.target.path)))
+      const pick = (list: UpdateChange[]) => list.filter((c) => placedKeys.has(pathKey(c.path))).map((c) => c.path)
+      return {
+        backupId,
+        added: pick(plan.add),
+        updated: [...pick(plan.update), ...pick(plan.conflicts)],
+        removed: removing.map((c) => c.path),
+        backedUp,
+        excluded: rows.filter(isExcluded).map((c) => c.path),
+        unresolved,
+        rejectedManualFiles,
+        lock,
+      }
+    } finally {
+      leave()
     }
   })
 }

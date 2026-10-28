@@ -10,7 +10,7 @@
  * a scan runs. Open instances get one coalescing file watcher (see `watcher.ts`).
  */
 import { randomBytes } from 'node:crypto'
-import { lstat, mkdir, readdir, rename, rm, stat } from 'node:fs/promises'
+import { lstat, mkdir, readdir, readFile, rename, rm, rmdir, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import {
   backupWorld,
@@ -27,6 +27,7 @@ import {
   restoreBackup,
   sanitizeFileName,
   scanCacheKey,
+  sessionLockHolders,
   setEnabled as setModEnabled,
   stripDisabled,
   uniqueName,
@@ -62,6 +63,55 @@ const log = logger('resources')
 /** Where undoable deletes wait inside an instance folder. */
 const TRASH_DIR = path.join('.amethyst', 'trash')
 const UNDO_GRACE_MS = 30_000
+/** Inside a batch folder: where each set-aside file came from (relative paths). */
+const TRASH_MANIFEST = 'origins.json'
+
+interface TrashManifest {
+  kind: ResourceKind
+  /** `staged` is relative to the batch folder, `from` to the instance folder. */
+  files: { staged: string; from: string }[]
+}
+
+async function readTrashManifest(batchDir: string): Promise<TrashManifest | undefined> {
+  try {
+    const j = JSON.parse(await readFile(path.join(batchDir, TRASH_MANIFEST), 'utf8')) as Partial<TrashManifest>
+    if (typeof j.kind !== 'string' || !Array.isArray(j.files)) return undefined
+    const files = j.files.filter((f): f is TrashManifest['files'][number] => typeof f?.staged === 'string' && typeof f.from === 'string')
+    return { kind: j.kind, files }
+  } catch {
+    return undefined
+  }
+}
+
+/** Move a set-aside file back to `from`, or next to it when something new took the name. */
+async function putBack(staged: string, from: string): Promise<string> {
+  const dir = path.dirname(from)
+  await mkdir(dir, { recursive: true })
+  const taken = await lstat(from).then(
+    () => true,
+    () => false,
+  )
+  const dest = taken ? path.join(dir, await uniqueName(dir, path.basename(from))) : from
+  await rename(staged, dest)
+  return dest
+}
+
+/** Remove the empty folders below and including `dir` (never a file). */
+async function pruneEmptyDirs(dir: string): Promise<void> {
+  const entries = await readdir(dir, { withFileTypes: true }).catch(() => undefined)
+  if (!entries) return
+  for (const e of entries) if (e.isDirectory()) await pruneEmptyDirs(path.join(dir, e.name))
+  await rmdir(dir).catch(() => undefined)
+}
+
+/** Drop a batch folder once only its manifest and empty slots are left. */
+async function removeBatchDir(dir: string): Promise<void> {
+  const slots = await readdir(dir, { withFileTypes: true }).catch(() => [])
+  for (const s of slots) if (s.isDirectory()) await pruneEmptyDirs(path.join(dir, s.name))
+  const left = await readdir(dir).catch(() => [] as string[])
+  if (left.length === 1 && left[0] === TRASH_MANIFEST) await rm(path.join(dir, TRASH_MANIFEST), { force: true })
+  await rmdir(dir).catch(() => undefined)
+}
 
 interface StagedFile {
   id: string
@@ -127,6 +177,11 @@ export interface ResourceManagerDeps {
   settings: { readonly value: Settings }
   /** True while the game runs from the instance (options.txt and world edits wait). */
   isRunning?: (instanceId: string) => boolean
+  /**
+   * Whether any of these worlds is open in a game (its `session.lock` is held open, by any
+   * process): `undefined` when that cannot be determined. Default: an `lsof` probe.
+   */
+  worldsOpen?: (worldDirs: string[]) => Promise<boolean | undefined>
   watchFactory?: WatchFactory
   debounceMs?: number
   /** Delay before an unwatched instance's watcher stops (default 2 s). */
@@ -169,6 +224,8 @@ export class ResourceManager {
   /** Undoable deletes waiting for their undo window to end, by token. */
   readonly #staged = new Map<string, StagedBatch>()
   readonly #now: () => number
+  /** Leftover backup snapshots are removed once per instance, before its first backup. */
+  readonly #snapshotSweeps = new Map<string, Promise<void>>()
 
   constructor(deps: ResourceManagerDeps) {
     this.#d = deps
@@ -209,7 +266,7 @@ export class ResourceManager {
     if (!st) {
       st = { id: instanceId, dir: inst.dir, collections: new Map(), watcher: undefined, refs: 0, releaseTimer: undefined, controller: new AbortController(), lastUsed: 0 }
       this.#states.set(instanceId, st)
-      void this.#sweepTrash(inst.dir)
+      void this.#sweepTrash(instanceId, inst.dir)
       this.#evictIdle()
     }
     st.lastUsed = this.#now()
@@ -652,6 +709,7 @@ export class ResourceManager {
       }
       try {
         this.#inside(col, target)
+        if (kind === 'saves' && (await this.#worldsOpen([target]))) throw new AppError('EBUSY', 'This world is open in Minecraft: leave it first')
         if (token) {
           // Set aside on the same volume (a rename), so Undo is instant and exact.
           const dir = path.join(st.dir, TRASH_DIR, token, String(staged.length))
@@ -672,9 +730,13 @@ export class ResourceManager {
       }
     }
     if (token && staged.length > 0) {
+      const dir = path.join(st.dir, TRASH_DIR, token)
+      // Where each file came from, so a later session can put back what the Trash refused.
+      const manifest: TrashManifest = { kind, files: staged.map((f) => ({ staged: path.relative(dir, f.staged), from: path.relative(st.dir, f.from) })) }
+      await writeFile(path.join(dir, TRASH_MANIFEST), JSON.stringify(manifest)).catch((e: unknown) => log.warn('cannot record where deleted files came from', e))
       const timer = setTimeout(() => void this.#finishTrash(token), this.#d.undoGraceMs ?? UNDO_GRACE_MS)
       timer.unref?.()
-      this.#staged.set(token, { instanceId, kind, dir: path.join(st.dir, TRASH_DIR, token), files: staged, timer })
+      this.#staged.set(token, { instanceId, kind, dir, files: staged, timer })
       result.undoToken = token
     }
     // Revalidate either way, so the UI shows reality even after a failure.
@@ -690,36 +752,66 @@ export class ResourceManager {
     const result: BulkResult = { done: [], failed: [] }
     for (const f of batch.files) {
       try {
-        const dir = path.dirname(f.from)
-        await mkdir(dir, { recursive: true })
-        // Something new took the name meanwhile: restore next to it instead of overwriting.
-        const taken = await lstat(f.from).then(
-          () => true,
-          () => false,
-        )
-        const dest = taken ? path.join(dir, await uniqueName(dir, path.basename(f.from))) : f.from
-        await rename(f.staged, dest)
+        const dest = await putBack(f.staged, f.from)
         result.done.push(resourceId(path.basename(dest), batch.kind))
       } catch (e) {
         result.failed.push({ id: f.id, code: errorCode(e) ?? 'EFAILED', message: errorMessage(e) })
       }
     }
-    await rm(batch.dir, { recursive: true, force: true }).catch(() => undefined)
+    // Only empty folders (and the manifest of a batch with nothing left) are removed: a file
+    // that could not be put back stays set aside, never erased.
+    await removeBatchDir(batch.dir)
     const st = this.#states.get(instanceId)
     if (st) await this.#scan(st, this.#collection(st, batch.kind))
     return result
   }
 
-  /** Move a set-aside batch to the macOS Trash (the undo window ended). */
+  /**
+   * Move a set-aside batch to the macOS Trash (the undo window ended). Files the Trash refuses
+   * are put back where they were and the failure is announced: nothing is ever erased.
+   */
   async #finishTrash(token: string): Promise<void> {
     const batch = this.#staged.get(token)
     if (!batch) return
     this.#staged.delete(token)
     clearTimeout(batch.timer)
-    for (const f of batch.files) {
-      await this.#d.host.trash(f.staged).catch((e: unknown) => log.warn(`cannot move ${f.staged} to the Trash`, e))
+    const restored = await this.#trashSetAside(
+      batch.instanceId,
+      batch.kind,
+      batch.dir,
+      batch.files.map((f) => ({ staged: f.staged, from: f.from })),
+    )
+    const st = this.#states.get(batch.instanceId)
+    if (restored > 0 && st) await this.#scan(st, this.#collection(st, batch.kind)).catch(() => undefined)
+  }
+
+  /** Trash each set-aside file; put back the ones the Trash refused; then drop the empty batch. */
+  async #trashSetAside(instanceId: string, kind: ResourceKind | null, dir: string, files: { staged: string; from: string | undefined }[]): Promise<number> {
+    const restored: string[] = []
+    const kept: string[] = []
+    let failure: unknown
+    for (const f of files) {
+      try {
+        await this.#d.host.trash(f.staged)
+        continue
+      } catch (e) {
+        failure ??= e
+        log.warn(`cannot move ${f.staged} to the Trash`, e)
+      }
+      try {
+        if (!f.from) throw new Error('unknown origin')
+        restored.push(path.basename(await putBack(f.staged, f.from)))
+      } catch (e) {
+        log.warn(`cannot put ${f.staged} back; it stays set aside`, e)
+        kept.push(path.basename(f.staged))
+      }
     }
-    await rm(batch.dir, { recursive: true, force: true }).catch(() => undefined)
+    if (kept.length === 0) await removeBatchDir(dir)
+    else await pruneEmptyDirs(dir)
+    if (failure !== undefined) {
+      this.#d.emit('resources:trash-failed', { instanceId, kind, code: 'ETRASH_FAILED', message: errorMessage(failure), restored, kept })
+    }
+    return restored.length
   }
 
   /** Finish every pending undo window of an instance now (before its folder moves). */
@@ -728,18 +820,26 @@ export class ResourceManager {
   }
 
   /** Files set aside by a previous session (it quit inside an undo window) go to the Trash. */
-  async #sweepTrash(dir: string): Promise<void> {
+  async #sweepTrash(instanceId: string, dir: string): Promise<void> {
     const root = path.join(dir, TRASH_DIR)
     const tokens = await readdir(root).catch(() => [] as string[])
     for (const token of tokens) {
       if (this.#staged.has(token)) continue
-      const slots = await readdir(path.join(root, token)).catch(() => [] as string[])
-      for (const slot of slots) {
-        for (const name of await readdir(path.join(root, token, slot)).catch(() => [] as string[])) {
-          await this.#d.host.trash(path.join(root, token, slot, name)).catch(() => undefined)
+      const batchDir = path.join(root, token)
+      const manifest = await readTrashManifest(batchDir)
+      const origins = new Map(manifest?.files.map((f) => [path.join(batchDir, f.staged), f.from]) ?? [])
+      const files: { staged: string; from: string | undefined }[] = []
+      for (const slot of await readdir(batchDir).catch(() => [] as string[])) {
+        if (slot === TRASH_MANIFEST) continue
+        for (const name of await readdir(path.join(batchDir, slot)).catch(() => [] as string[])) {
+          const staged = path.join(batchDir, slot, name)
+          const rel = origins.get(staged)
+          // Only put files back inside this instance folder.
+          const from = rel !== undefined && !path.isAbsolute(rel) && isPathInside(dir, path.join(dir, rel)) ? path.join(dir, rel) : undefined
+          files.push({ staged, from })
         }
       }
-      await rm(path.join(root, token), { recursive: true, force: true }).catch(() => undefined)
+      await this.#trashSetAside(instanceId, manifest && KINDS.has(manifest.kind) ? manifest.kind : null, batchDir, files)
     }
   }
 
@@ -864,11 +964,50 @@ export class ResourceManager {
     return info
   }
 
+  /** True/undefined (unknown) when a world is open in a game; see `ResourceManagerDeps.worldsOpen`. */
+  async #worldsOpen(worldDirs: string[]): Promise<boolean | undefined> {
+    if (worldDirs.length === 0) return false
+    if (this.#d.worldsOpen) return this.#d.worldsOpen(worldDirs)
+    const holders = await sessionLockHolders(worldDirs)
+    return holders === undefined ? undefined : holders.length > 0
+  }
+
+  /**
+   * Refuse to snapshot worlds a game has open: a copy taken mid-save can be torn. Known open
+   * (`session.lock` held) always refuses; when the probe cannot tell, the launcher's own running
+   * game decides.
+   */
+  async #assertClosedForBackup(instanceId: string, worldDirs: string[]): Promise<void> {
+    const open = await this.#worldsOpen(worldDirs)
+    if (open === true || (open === undefined && this.#d.isRunning?.(instanceId))) {
+      throw new AppError('EBUSY', 'A world is open in Minecraft: leave the world (or quit the game) before backing it up')
+    }
+  }
+
+  /** Remove `.snapshot-*` folders a crashed backup left in this instance's backups (once per session). */
+  #sweepSnapshots(instanceId: string): Promise<void> {
+    let p = this.#snapshotSweeps.get(instanceId)
+    if (!p) {
+      const dir = this.#backupsDir(instanceId)
+      p = (async () => {
+        for (const world of await readdir(dir).catch(() => [] as string[])) {
+          for (const name of await readdir(path.join(dir, world)).catch(() => [] as string[])) {
+            if (name.startsWith('.snapshot-')) await rm(path.join(dir, world, name), { recursive: true, force: true }).catch((e: unknown) => log.warn(`cannot remove ${name}`, e))
+          }
+        }
+      })()
+      this.#snapshotSweeps.set(instanceId, p)
+    }
+    return p
+  }
+
   async createBackup(instanceId: string, worldId: string): Promise<BackupRow> {
     const { col } = await this.#scanned(instanceId, 'saves')
     const save = col.items.get(worldId)?.save
     if (!save) throw notFound('World')
     const dir = this.#backupsDir(instanceId)
+    await this.#assertClosedForBackup(instanceId, [save.path])
+    await this.#sweepSnapshots(instanceId)
     const info = await this.#d.tasks.runAndWait({ name: 'resources.backup', params: { world: save.level.levelName ?? save.folderName }, instanceId }, (ctx) =>
       backupWorld(save.path, dir, { ctx, reason: 'manual' }),
     )
@@ -883,6 +1022,7 @@ export class ResourceManager {
       world = col.items.get(worldId)?.save?.folderName ?? worldId
       if (!SAFE_SEGMENT.test(world)) throw invalid('Bad world id')
     }
+    await this.#sweepSnapshots(instanceId)
     return (await listBackups(this.#backupsDir(instanceId), world)).map(backupRow)
   }
 
@@ -890,6 +1030,10 @@ export class ResourceManager {
     if (this.#d.isRunning?.(instanceId)) throw new AppError('EBUSY', 'Quit the game before restoring a world')
     const info = await this.#backupInfo(instanceId, backupId)
     const { st, col } = await this.#scanned(instanceId, 'saves')
+    // Replacing moves the current world aside: never while a game has it open.
+    if (mode === 'replace' && (await this.#worldsOpen([path.join(col.dir, sanitizeFileName(info.world, 'World'))]))) {
+      throw new AppError('EBUSY', 'This world is open in Minecraft: leave it before replacing it')
+    }
     const restored = await this.#d.tasks.runAndWait({ name: 'resources.restore', params: { world: info.worldName ?? info.world }, instanceId }, (ctx) =>
       restoreBackup(info, col.dir, { ctx, mode: mode === 'replace' ? 'replace' : 'copy', disposePrevious: (dir) => this.#d.host.trash(dir) }),
     )
@@ -911,11 +1055,16 @@ export class ResourceManager {
    * Automatic backups before a version or modpack change (when `backups.automatic` is on): every
    * world of the instance is zipped, then old automatic backups are pruned. Failures are logged,
    * never thrown, so a damaged world cannot block an update. Returns how many worlds were saved.
+   * Throws `EBUSY` up front (before anything is written) while the game runs or a world is open.
    */
   async autoBackupWorlds(instanceId: string, reason: 'pre-version-change' | 'pre-modpack-update', ctx?: TaskContext): Promise<number> {
     if (!this.#d.settings.value.backups.automatic) return 0
+    if (this.#d.isRunning?.(instanceId)) throw new AppError('EBUSY', 'Quit the game first')
     const { col } = await this.#scanned(instanceId, 'saves')
     const dir = this.#backupsDir(instanceId)
+    // A precondition, not a per-world failure: the change that needs the backup must wait.
+    await this.#assertClosedForBackup(instanceId, [...col.items.values()].flatMap((i) => (i.save ? [i.save.path] : [])))
+    await this.#sweepSnapshots(instanceId)
     let saved = 0
     for (const item of col.items.values()) {
       const save = item.save

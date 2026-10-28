@@ -213,6 +213,48 @@ describe('download', () => {
     expect((await readFile(dest)).equals(data)).toBe(true)
   })
 
+  it('gives up on a URL that stops sending, with ESTALLED, and tries the next mirror', async () => {
+    const data = bytes(64 * 1024, 41)
+    server.route('/stall-body', serveBytes(data, { stallAfter: 1000, ranges: false }))
+    server.route('/stall-good', serveBytes(data))
+    const dest = join(dir, 'stall.bin')
+    const started = Date.now()
+    const r = await download(
+      { url: [`${server.url}/stall-body`, `${server.url}/stall-good`], dest, size: data.length, checksum: { algorithm: 'sha1', value: sha('sha1', data) } },
+      { ...opts, stallTimeoutMs: 300 },
+    )
+    expect(r.url).toBe(`${server.url}/stall-good`)
+    // The 10 s body timeout (times its continuations) never had to fire.
+    expect(Date.now() - started).toBeLessThan(5000)
+    expect(await readFile(dest)).toEqual(data)
+  })
+
+  it('fails a host that accepts connections but never answers within the stall limit', async () => {
+    server.route('/silent', () => new Promise(() => {}))
+    const started = Date.now()
+    const error = await download({ url: `${server.url}/silent`, dest: join(dir, 'silent.bin') }, { ...opts, stallTimeoutMs: 300 }).catch((e: unknown) => e)
+    expect(error).toMatchObject({ code: 'ESTALLED' })
+    expect(Date.now() - started).toBeLessThan(5000)
+    expect(await exists(join(dir, 'silent.bin.part'))).toBe(false)
+  })
+
+  it('does not count retry waits (Retry-After) as stalling', async () => {
+    let n = 0
+    const data = bytes(2048, 42)
+    server.route('/retry-after', (req, res) => {
+      if (++n === 1) {
+        res.statusCode = 503
+        res.setHeader('retry-after', '1')
+        res.end()
+        return
+      }
+      serveBytes(data)(req, res)
+    })
+    const r = await download({ url: `${server.url}/retry-after`, dest: join(dir, 'ra.bin'), size: data.length }, { ...opts, stallTimeoutMs: 400 })
+    expect(r.skipped).toBe(false)
+    expect(n).toBe(2)
+  })
+
   it('skips files that are already valid', async () => {
     const data = bytes(4096, 9)
     server.route('/skip.bin', serveBytes(data))

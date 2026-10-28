@@ -39,6 +39,7 @@ import type { JavaManager } from './java/service'
 import type { LaunchManager } from './launch/service'
 import type { Lwjgl2NativesSource } from './launch/natives-source'
 import type { ModpackManager } from './modpacks/service'
+import { recoverModpackCommits, waitForModpackCommits } from './modpacks/recover'
 import type { VersionsManager } from './versions/service'
 import type { RuntimeConfig } from './context'
 import { DbClient } from './db/client'
@@ -89,8 +90,14 @@ const db = new DbClient(() => new Worker(new URL('./db-worker.js', import.meta.u
 
 /** The shared HTTP client (and its module), loaded on first use with the configured connection limit. */
 const httpClient = once(async (): Promise<HttpClient> => {
-  const { createHttpClient, setDefaultHttpClient } = await import('@amethyst/net')
-  const client = createHttpClient({ version: config.version, connectionsPerHost: settings.value.network.maxConnectionsPerHost })
+  // The proxy and connection limits come from the settings, so read them first.
+  await booted.catch(() => {})
+  const [{ createHttpClient, installGlobalDispatcher, setDefaultHttpClient }, { bindNetworkSettings }] = await Promise.all([import('@amethyst/net'), import('./settings/network')])
+  const client = createHttpClient({ version: config.version })
+  // Applied now and live on every `network.*` change. The built-in fetch (marketplace, sign-in,
+  // telemetry) shares the client's pools and proxy through the global dispatcher.
+  bindNetworkSettings(settings, client, (url) => host.setProxy(url))
+  installGlobalDispatcher(client.dispatcher)
   setDefaultHttpClient(client)
   return client
 })
@@ -109,8 +116,12 @@ let installManager: InstallManager | undefined
 let launchManager: LaunchManager | undefined
 let javaManager: JavaManager | undefined
 let modpackManager: ModpackManager | undefined
+/** Instances whose "Change Version…" (world backup, then install) is running. */
+const versionChanges = new Set<string>()
+/** A modpack operation or a version change writes into the instance: launch refuses. */
+const isChanging = (id: string) => (modpackManager?.isBusy(id) ?? false) || versionChanges.has(id)
 instances.addHooks({
-  isBusy: (id) => (installManager?.isBusy(id) ?? false) || (launchManager?.isActive(id) ?? false) || (modpackManager?.isBusy(id) ?? false),
+  isBusy: (id) => (installManager?.isBusy(id) ?? false) || (launchManager?.isActive(id) ?? false) || isChanging(id),
 })
 const telemetryHooks: TelemetryHooks = { capture, redact: redactFromReports, reportError }
 
@@ -182,8 +193,11 @@ const resources = once(async () => {
 let accountManager: AccountManager | undefined
 const accounts = once(async () => {
   await booted
+  // Sign-in and refresh requests use the built-in fetch: install the configured (proxied)
+  // dispatcher, without holding up the account list (the network is only used on demand).
+  void httpClient().catch((e: unknown) => log.warn('cannot set up the HTTP client', e))
   const { AccountManager } = await import('./accounts/service')
-  const manager = new AccountManager({ layout, emit, host, settings, fetchBytes, ...(config.msaClientId ? { msaClientId: config.msaClientId } : {}) })
+  const manager = new AccountManager({ layout, emit, host, settings, fetchBytes, redact: redactFromReports, ...(config.msaClientId ? { msaClientId: config.msaClientId } : {}) })
   await timed(log, 'accounts loaded', () => manager.load())
   accountManager = manager
   return manager
@@ -266,6 +280,8 @@ const launcher = once(async () => {
     http: httpClient,
     host,
     telemetry: telemetryHooks,
+    isChanging,
+    recoverModpack: (dir) => recoverModpackCommits(dir),
   })
   return launchManager
 })
@@ -284,6 +300,8 @@ const modpacks = once(async () => {
     http: httpClient,
     telemetry: telemetryHooks,
     ...(index.ok ? { db } : {}),
+    isRunning: (id) => launchManager?.isActive(id) ?? false,
+    isChangingVersion: (id) => versionChanges.has(id),
   })
   return modpackManager
 })
@@ -349,7 +367,7 @@ const ready = async <T>(value: T) => {
 const settingsImpl = settingsService(settings, layout)
 registerService(
   'settings',
-  deferred<SettingsService>({ get: true, patch: true, reset: true, setBackground: true, getPaths: true, getSystemInfo: true }, () => ready(settingsImpl)),
+  deferred<SettingsService>({ get: true, patch: true, reset: true, setBackground: true, getPaths: true, getSystemInfo: true, takeNotice: true }, () => ready(settingsImpl)),
 )
 const instancesImpl: InstancesService = { ...instancesService(instances), ...libraryService(library) }
 registerService(
@@ -462,6 +480,8 @@ registerService(
       instances,
       install: manager,
       isRunning: (id: string) => launchManager?.isActive(id) ?? false,
+      isModpackBusy: (id: string) => modpackManager?.isBusy(id) ?? false,
+      changing: versionChanges,
       backupWorlds: async (id: string) => (await resources()).autoBackupWorlds(id, 'pre-version-change'),
     }
     return { ...installService(manager), changeVersion: (id, runtime) => changeVersion(deps, id, runtime) }
@@ -515,6 +535,16 @@ process.parentPort.on('message', (event: { data: unknown; ports: MessagePortMain
     void java()
       .then((j) => j.scheduleInitialScan(3_000))
       .catch((e: unknown) => log.warn('cannot schedule Java discovery', e))
+    // Load the accounts once a window is up, so every player name and gamertag is registered with
+    // the telemetry scrubber before any error report (not only after a launch).
+    void accounts().catch((e: unknown) => log.warn('cannot load accounts', e))
+    // Games started before a runtime restart keep running (detached): adopt the live ones again.
+    void launcher()
+      .then(async (l) => {
+        const n = await l.adoptRunning()
+        if (n > 0) log.info(`adopted ${n} running game(s)`)
+      })
+      .catch((e: unknown) => log.warn('cannot adopt running games', e))
     return
   }
   if (data?.t === 'error' && data.error) {
@@ -534,7 +564,11 @@ async function shutdown(): Promise<void> {
   stopping = true
   // Abort running tasks first so the helper processes they spawned are stopped, not orphaned;
   // give their cleanup a brief, bounded moment (main kills the runtime after 1.5 s).
+  // A modpack commit moving files is not abortable: wait for it (bounded); one cut off anyway is
+  // rolled back before the instance is next used.
+  const commits = waitForModpackCommits(1_000, modpackManager !== undefined)
   await Promise.race([tasks.cancelAll(), new Promise((r) => setTimeout(r, 400))])
+  if (!(await commits)) log.warn('shutdown: a modpack commit is still running; it will be rolled back at the next start')
   tasks.dispose()
   launchManager?.dispose()
   javaManager?.dispose()

@@ -17,6 +17,8 @@ export interface Events {
    * `appearance.theme`); `patch` holds exactly those leaves with their new values.
    */
   'settings:changed': { keys: string[]; patch: DeepPatch<Settings> }
+  /** A one-time settings notice is waiting (e.g. `settings.json` was unreadable): call `settings.takeNotice()`. */
+  'settings:notice': { at: number }
 
   /** Instances were added, edited (including renames and play-time updates) or removed. */
   'instances:changed': { added: string[]; updated: string[]; removed: string[] }
@@ -31,6 +33,12 @@ export interface Events {
   'resources:changed': { instanceId: string; kind: ResourceKind; revision: number; changed: string[]; removed: string[]; reset: boolean }
   /** A scan of a content folder started or finished. */
   'resources:scan': { instanceId: string; kind: ResourceKind; scanning: boolean }
+  /**
+   * Files deleted with Undo could not be moved to the macOS Trash when the undo window ended.
+   * They were never erased: `restored` went back into the instance (under their names or
+   * next to them), any others stay set aside and are retried on the next start.
+   */
+  'resources:trash-failed': { instanceId: string; kind: ResourceKind | null; code: 'ETRASH_FAILED'; message: string; restored: string[]; kept: string[] }
 
   /** The account list or an account's public fields changed. */
   'accounts:changed': { ids: string[]; removed: string[]; selectedId: string | null }

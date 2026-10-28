@@ -7,10 +7,12 @@ import { mkdir } from 'node:fs/promises'
 import { ModpackError, throwIfAborted } from './errors'
 import {
   assertSameInstance,
+  beginOperation,
   buildTargets,
   cleanupOperation,
   commitChanges,
   diskState,
+  enterCritical,
   instanceIdentity,
   lockEntry,
   newBackupDir,
@@ -128,7 +130,7 @@ export async function installModpack(manifest: ModpackManifest, resolved: Resolv
     const rejectedManualFiles = await applyManualFiles(targets, options.manualFiles, signal)
 
     const opId = operationId('install', manifest.sha1)
-    await writeRecord(instanceDir, { schemaVersion: 1, id: opId, kind: 'install', packSha1: manifest.sha1, createdAt: Date.now(), state: 'staging' })
+    await beginOperation(instanceDir, { schemaVersion: 1, id: opId, kind: 'install', packSha1: manifest.sha1, createdAt: Date.now(), state: 'staging' })
 
     // Compare with what is already there.
     const kept = new Map<string, LocalHashes | undefined>()
@@ -163,65 +165,71 @@ export async function installModpack(manifest: ModpackManifest, resolved: Resolv
     const backupId = path.posix.basename(await newBackupDir(instanceDir))
     const backupRel = `.amethyst/backups/${backupId}`
     const changes: CommitChange[] = staged.map((s) => ({ path: s.target.path, action: 'place', kind: s.target.kind, staged: s.staged }))
-    await writeRecord(instanceDir, {
-      schemaVersion: 1,
-      id: opId,
-      kind: 'install',
-      packSha1: manifest.sha1,
-      createdAt: Date.now(),
-      state: 'committing',
-      backupDir: backupRel,
-      changes: changes.map(({ path: p, action, kind }) => ({ path: p, action, kind })),
-    })
-    const commit = () => commitChanges(instanceDir, opId, backupRel, changes, options.hooks)
-    const backedUp = await (options.ctx ? options.ctx.child('commit', commit) : commit())
+    // From the committing record to the cleanup, files move: shutdown waits for this section.
+    const leave = enterCritical()
+    try {
+      await writeRecord(instanceDir, {
+        schemaVersion: 1,
+        id: opId,
+        kind: 'install',
+        packSha1: manifest.sha1,
+        createdAt: Date.now(),
+        state: 'committing',
+        backupDir: backupRel,
+        changes: changes.map(({ path: p, action, kind }) => ({ path: p, action, kind })),
+      })
+      const commit = () => commitChanges(instanceDir, opId, backupRel, changes, options.hooks)
+      const backedUp = await (options.ctx ? options.ctx.child('commit', commit) : commit())
 
-    const stagedByPath = new Map(staged.map((s) => [s.target.path, s.hashes]))
-    const lockFiles: ModpackLockFile[] = []
-    for (const t of targets) {
-      if (kept.has(t.path)) lockFiles.push(lockEntry(t, kept.get(t.path)))
-      else if (stagedByPath.has(t.path)) lockFiles.push(lockEntry(t, stagedByPath.get(t.path)))
-    }
-    if (onlyKeys && previousLock) {
-      // A partial install keeps the lock entries of everything it did not touch.
-      const touched = new Set(lockFiles.map((f) => pathKey(f.path)))
-      lockFiles.unshift(...previousLock.files.filter((f) => !touched.has(pathKey(f.path))))
-    }
-    const lock: ModpackLock = {
-      schemaVersion: 1,
-      source: manifest.format,
-      upstream: options.upstream ? { ...options.upstream, packSha1: manifest.sha1 } : onlyKeys ? previousLock?.upstream : undefined,
-      pack: { name: manifest.name, version: manifest.version, sha1: manifest.sha1, minecraft: manifest.minecraft, loader: manifest.loader },
-      installedAt: Date.now(),
-      files: lockFiles,
-      deselected,
-    }
-    await writeJournal(path.join(instanceDir, ...backupRel.split('/')), {
-      schemaVersion: 1,
-      kind: 'install',
-      createdAt: Date.now(),
-      packSha1: manifest.sha1,
-      previousLock: previousLock ?? null,
-      changes: staged.map((s) => ({
-        path: s.target.path,
-        action: 'place',
-        kind: s.target.kind,
-        hadPrevious: backedUp.includes(s.target.path),
-        placedSha1: s.target.kind === 'file' ? s.hashes.sha1 : undefined,
-      })),
-    })
-    await writeModpackLock(instanceDir, lock)
-    await writeUnresolved(instanceDir, unresolved)
-    await cleanupOperation(instanceDir, opId)
-    return {
-      installed: staged.map((s) => s.target.path),
-      kept: [...kept.keys()],
-      backedUp,
-      backupId,
-      unresolved,
-      rejectedManualFiles,
-      deselected,
-      lock,
+      const stagedByPath = new Map(staged.map((s) => [s.target.path, s.hashes]))
+      const lockFiles: ModpackLockFile[] = []
+      for (const t of targets) {
+        if (kept.has(t.path)) lockFiles.push(lockEntry(t, kept.get(t.path)))
+        else if (stagedByPath.has(t.path)) lockFiles.push(lockEntry(t, stagedByPath.get(t.path)))
+      }
+      if (onlyKeys && previousLock) {
+        // A partial install keeps the lock entries of everything it did not touch.
+        const touched = new Set(lockFiles.map((f) => pathKey(f.path)))
+        lockFiles.unshift(...previousLock.files.filter((f) => !touched.has(pathKey(f.path))))
+      }
+      const lock: ModpackLock = {
+        schemaVersion: 1,
+        source: manifest.format,
+        upstream: options.upstream ? { ...options.upstream, packSha1: manifest.sha1 } : onlyKeys ? previousLock?.upstream : undefined,
+        pack: { name: manifest.name, version: manifest.version, sha1: manifest.sha1, minecraft: manifest.minecraft, loader: manifest.loader },
+        installedAt: Date.now(),
+        files: lockFiles,
+        deselected,
+      }
+      await writeJournal(path.join(instanceDir, ...backupRel.split('/')), {
+        schemaVersion: 1,
+        kind: 'install',
+        createdAt: Date.now(),
+        packSha1: manifest.sha1,
+        previousLock: previousLock ?? null,
+        changes: staged.map((s) => ({
+          path: s.target.path,
+          action: 'place',
+          kind: s.target.kind,
+          hadPrevious: backedUp.includes(s.target.path),
+          placedSha1: s.target.kind === 'file' ? s.hashes.sha1 : undefined,
+        })),
+      })
+      await writeModpackLock(instanceDir, lock)
+      await writeUnresolved(instanceDir, unresolved)
+      await cleanupOperation(instanceDir, opId)
+      return {
+        installed: staged.map((s) => s.target.path),
+        kept: [...kept.keys()],
+        backedUp,
+        backupId,
+        unresolved,
+        rejectedManualFiles,
+        deselected,
+        lock,
+      }
+    } finally {
+      leave()
     }
   })
 }

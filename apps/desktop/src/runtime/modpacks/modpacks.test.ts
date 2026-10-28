@@ -10,7 +10,7 @@ import { dataLayout, type DataLayout } from '../layout'
 import { InstanceManager } from '../instances/service'
 import { defaultSettings } from '../settings/schema'
 import { TaskRegistry } from '../tasks/registry'
-import { ModpackManager, sourceRows, type ModpackApi } from './service'
+import { ModpackManager, sourceRows, type ModpackApi, type ModpackDeps } from './service'
 
 let root: string
 let layout: DataLayout
@@ -78,7 +78,7 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true })
 })
 
-async function setup(market: { modrinth?: unknown; curseforge?: unknown } = {}) {
+async function setup(market: { modrinth?: unknown; curseforge?: unknown } = {}, extra: Partial<ModpackDeps> = {}) {
   const tasks = new TaskRegistry(() => {}, { intervalMs: 0 })
   const instances = new InstanceManager({ layout, emit, host: { trash: async () => {} }, tasks })
   await instances.load()
@@ -103,6 +103,8 @@ async function setup(market: { modrinth?: unknown; curseforge?: unknown } = {}) 
     telemetry: { capture: ((...args: unknown[]) => void captured.push(args)) as never },
     api,
     downloadsDir: downloads,
+    ...extra,
+    ...(extra.api ? { api: { ...api, ...extra.api } } : {}),
   })
   return { manager, instances, tasks, installModpack, install, captured }
 }
@@ -217,6 +219,70 @@ describe('ModpackManager import', () => {
     await writeFile(archive, 'zip')
     const result = await manager.import({ source: { path: archive } })
     expect(instances.get(result.instanceId).upstream).toBeFalsy()
+  })
+})
+
+describe('ModpackManager and the game', () => {
+  it('refuses to change pack files while the game runs or the version changes, and marks the instance busy while it works', async () => {
+    let running = false
+    let changing = false
+    const rollbackModpackUpdate = vi.fn<() => Promise<{ restored: string[]; removed: string[]; displaced: string[] }>>(async () => ({ restored: [], removed: [], displaced: [] }))
+    const { manager, installModpack } = await setup({}, { isRunning: () => running, isChangingVersion: () => changing, api: { rollbackModpackUpdate } })
+    const archive = path.join(root, 'pack.zip')
+    await writeFile(archive, 'zip')
+    const { instanceId: id } = await manager.import({ source: { path: archive } })
+    await writeFile(path.join(downloads, 'blocked-1.0.jar'), BLOCKED)
+
+    running = true
+    installModpack.mockClear()
+    await expect(manager.import({ source: { path: archive }, instanceId: id })).rejects.toMatchObject({ code: 'EBUSY' })
+    await expect(manager.rollback(id, 'modpack-20240101-000000')).rejects.toMatchObject({ code: 'EBUSY' })
+    await expect(manager.provideManualFile(path.join(downloads, 'blocked-1.0.jar'), id)).rejects.toMatchObject({ code: 'EBUSY' })
+    running = false
+    changing = true
+    await expect(manager.rollback(id, 'modpack-20240101-000000')).rejects.toMatchObject({ code: 'EBUSY' })
+    expect(installModpack).not.toHaveBeenCalled()
+    expect(rollbackModpackUpdate).not.toHaveBeenCalled()
+    expect(manager.isBusy(id)).toBe(false)
+
+    // While it works, the instance is busy: launch (and Change Version…) refuse it.
+    changing = false
+    let release!: () => void
+    rollbackModpackUpdate.mockImplementationOnce(async () => {
+      await new Promise<void>((r) => (release = r))
+      return { restored: [], removed: [], displaced: [] }
+    })
+    const rb = manager.rollback(id, 'modpack-20240101-000000')
+    await vi.waitFor(() => expect(rollbackModpackUpdate).toHaveBeenCalled())
+    expect(manager.isBusy(id)).toBe(true)
+    release()
+    await rb
+    expect(manager.isBusy(id)).toBe(false)
+  })
+
+  it('rolls back an interrupted commit before the first modpack operation on an instance, once per session', async () => {
+    const recoverInterruptedCommits = vi.fn<(dir: string) => Promise<string[]>>(async () => ['update-0123456789abcdef'])
+    const rollbackModpackUpdate = vi.fn<() => Promise<{ restored: string[]; removed: string[]; displaced: string[] }>>(async () => ({ restored: [], removed: [], displaced: [] }))
+    const { manager, instances } = await setup({}, { api: { recoverInterruptedCommits, rollbackModpackUpdate } })
+    // No operation record: nothing to recover, the module is not even asked.
+    const clean = await instances.create({ name: 'Clean', runtime: { minecraft: '1.20.1' } })
+    await manager.rollback(clean.id, 'modpack-20240101-000000')
+    expect(recoverInterruptedCommits).not.toHaveBeenCalled()
+
+    // An instance the last session was killed in the middle of a commit of.
+    const { id } = await instances.create({ name: 'Interrupted', runtime: { minecraft: '1.20.1' } })
+    rollbackModpackUpdate.mockClear()
+    const staging = path.join(instances.resolve(id).dir, '.amethyst', 'staging')
+    await mkdir(staging, { recursive: true })
+    await writeFile(path.join(staging, 'update-0123456789abcdef.json'), '{}')
+    recoverInterruptedCommits.mockRejectedValueOnce(new Error('EACCES: permission denied'))
+    await expect(manager.rollback(id, 'modpack-20240101-000000')).rejects.toMatchObject({ code: 'EMODPACK_INTERRUPTED' })
+    expect(rollbackModpackUpdate).not.toHaveBeenCalled()
+
+    await manager.rollback(id, 'modpack-20240101-000000')
+    await manager.rollback(id, 'modpack-20240101-000000')
+    expect(recoverInterruptedCommits).toHaveBeenCalledTimes(2)
+    expect(rollbackModpackUpdate).toHaveBeenCalledTimes(2)
   })
 })
 

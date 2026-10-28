@@ -61,7 +61,7 @@ type Target = 'dev' | 'packaged'
 const binaries: Record<Target, { bin: string; args: string[] }> = {
   // `electron` resolves to its binary's path (downloading it on first use).
   dev: { bin: createRequire(path.join(appDir, 'package.json'))('electron') as string, args: [appDir] },
-  packaged: { bin: path.join(appDir, 'release/mac-arm64/Amethyst.app/Contents/MacOS/Amethyst'), args: [] },
+  packaged: { bin: path.join(appDir, 'release/mac-arm64/Amethyst.app/Contents/MacOS/Amethyst'), args: ['--amethyst-bench'] },
 }
 
 async function launch(target: Target, root: string, mode: 'startup' | 'full' | 'mods', file: string, extraEnv: Record<string, string> = {}): Promise<Record<string, unknown>> {

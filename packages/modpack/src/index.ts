@@ -36,7 +36,9 @@ export { installModpack, type InstallOptions, type InstallResult } from './insta
 export {
   discardIncompleteOperation,
   listIncompleteOperations,
+  recoverInterruptedCommits,
   rollbackModpackOperation,
+  waitForCommits,
   type BackupJournal,
   type EngineHooks,
   type FetchOptions,

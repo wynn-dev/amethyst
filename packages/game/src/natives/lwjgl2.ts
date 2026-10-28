@@ -115,3 +115,19 @@ export function parseLwjgl2Arm64Source(raw: unknown): Lwjgl2Arm64Source {
   })
   return { baseUrl, artifacts: out }
 }
+
+/**
+ * Limit an untrusted manifest (fetched from the release, or read from its on-disk cache) to the
+ * pinned artifacts. A remote entry is used only when its family, version, sha256 and size match a
+ * pinned one, so it can at most move where a pinned jar is downloaded from, never change which
+ * bytes run. Pinned artifacts the remote manifest lacks (or lists differently) keep their pinned
+ * entry, so the result always holds exactly the pinned set.
+ */
+export function restrictLwjgl2ToPinned(source: Lwjgl2Arm64Source, trusted: Lwjgl2Arm64Source = DEFAULT_LWJGL2_ARM64_SOURCE): Lwjgl2Arm64Source {
+  const artifacts = trusted.artifacts.map((p): Lwjgl2Arm64Artifact => {
+    const remote = source.artifacts.find((a) => a.name === p.name && a.version === p.version && a.sha256.toLowerCase() === p.sha256 && a.size === p.size)
+    if (!remote) return { ...p, url: lwjgl2ArtifactUrl(trusted, p) }
+    return { ...p, url: lwjgl2ArtifactUrl(source, remote) }
+  })
+  return { baseUrl: trusted.baseUrl, artifacts }
+}

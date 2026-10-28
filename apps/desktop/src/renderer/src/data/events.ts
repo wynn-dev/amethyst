@@ -9,6 +9,7 @@ import { versionKeys } from './versions'
 import { updaterKey } from './updater'
 import { applyTaskUpdate, reloadTasks } from './tasks'
 import { applyLaunchState, reloadRunning } from './launch'
+import { showSettingsNotice } from './settings-notice'
 
 /*
  * Push events → cache updates, in one place (ARCHITECTURE.md IPC rules 1–3). Change events only
@@ -57,6 +58,7 @@ export function installEventBridge(): void {
     // Offline accounts are allowed in developer mode.
     if (keys.includes('general.developerMode')) invalidateSoon(accountKeys.status)
   })
+  subscribe('settings:notice', () => void showSettingsNotice())
   subscribe('accounts:changed', () => invalidateSoon(accountKeys.all))
   subscribe('accounts:login', applyLoginEvent)
   subscribe('java:changed', ({ scanning }) => {
@@ -75,8 +77,10 @@ export function installEventBridge(): void {
     void queryClient.invalidateQueries()
     void reloadTasks()
     void reloadRunning()
+    void showSettingsNotice()
   })
 
   void reloadTasks()
   void reloadRunning()
+  void showSettingsNotice()
 }

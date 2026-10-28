@@ -103,6 +103,11 @@ export interface AccountManagerDeps {
   auth?: Partial<AuthApi>
   fetchBytes?: (url: string, options: { maxBytes: number; signal?: AbortSignal }) => Promise<Uint8Array>
   now?: () => number
+  /**
+   * Remove a value from every future telemetry report. Called with each account's player name and
+   * Xbox gamertag when the accounts load and whenever they change (docs/PRIVACY.md).
+   */
+  redact?: (value: string) => void
 }
 
 const MAX_SKIN_BYTES = 256 * 1024
@@ -192,6 +197,17 @@ export class AccountManager {
   async load(): Promise<void> {
     const r = await this.#doc.load()
     if (r.corruptPath) log.warn(`accounts.json was unreadable; kept as ${r.corruptPath} (${r.outcome})`)
+    this.#registerNames(this.#doc.value.accounts)
+  }
+
+  /** Hand every player name and gamertag to the telemetry scrubber (it ignores repeats). */
+  #registerNames(accounts: readonly StoredAccount[]): void {
+    const redact = this.#d.redact
+    if (!redact) return
+    for (const a of accounts) {
+      redact(a.username)
+      if (a.kind === 'microsoft' && a.gamertag) redact(a.gamertag)
+    }
   }
 
   get secrets(): SecretStore {
@@ -259,6 +275,7 @@ export class AccountManager {
 
   /** Persist and announce account changes. */
   async #save(next: AccountsDoc, changed: { ids?: string[]; removed?: string[] }): Promise<void> {
+    this.#registerNames(next.accounts)
     await this.#doc.set(next)
     this.#d.emit('accounts:changed', { ids: changed.ids ?? [], removed: changed.removed ?? [], selectedId: next.selectedId })
   }

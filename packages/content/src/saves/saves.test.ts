@@ -1,13 +1,13 @@
 /* oxlint-disable no-await-in-loop -- backups are created in timestamp order */
 import { rmSync } from 'node:fs'
-import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, open, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { nbt, writeNbt } from '@amethyst/nbt'
 import type { TaskContext } from '@amethyst/task'
 import { openZip } from '@amethyst/zip'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { levelDat, makeWorld, makeZip, tempDir } from '../__fixtures__/build'
-import { backupWorld, deleteBackup, exportWorld, importWorld, importWorldFolder, listBackups, listSaves, pruneBackups, readLevelDat, readSave, restoreBackup } from '../index'
+import { backupWorld, deleteBackup, exportWorld, importWorld, importWorldFolder, isWorldOpen, listBackups, listSaves, pruneBackups, readLevelDat, readSave, restoreBackup, sessionLockHolders } from '../index'
 
 let tmp: string
 beforeEach(async () => {
@@ -173,6 +173,26 @@ describe('export and import', () => {
     expect(imported.folderName).toBe('Folder World')
     expect(await stat(path.join(imported.path, 'session.lock')).catch(() => undefined)).toBeUndefined()
   })
+
+  it('never copies symlinks into an imported world, and ignores a symlinked icon', async () => {
+    const secret = path.join(tmp, 'secret.txt')
+    await writeFile(secret, 'private')
+    const src = await makeWorld(path.join(tmp, 'src', 'Linked World'))
+    await symlink(secret, path.join(src, 'notes.txt'))
+    await symlink(tmp, path.join(src, 'escape'))
+    await rm(path.join(src, 'icon.png'), { force: true })
+    await symlink(secret, path.join(src, 'icon.png'))
+    expect((await readSave(src)).iconPath).toBeUndefined()
+
+    const imported = await importWorldFolder(src, path.join(tmp, 'saves'))
+    const names = await readdir(imported.path)
+    expect(names).toContain('level.dat')
+    for (const name of ['notes.txt', 'escape', 'icon.png']) expect(await lstat(path.join(imported.path, name)).catch(() => undefined)).toBeUndefined()
+    // The zip export follows the same rule.
+    const zip = path.join(tmp, 'out', 'w.zip')
+    await exportWorld(src, zip)
+    expect((await zipNames(zip)).filter((n) => /notes|escape|icon/.test(n))).toEqual([])
+  })
 })
 
 describe('backups', () => {
@@ -294,5 +314,28 @@ describe('backups', () => {
     const controller = new AbortController()
     controller.abort()
     await expect(backupWorld(world, path.join(tmp, 'bk'), { signal: controller.signal })).rejects.toMatchObject({ name: 'AbortError' })
+  })
+})
+
+describe.runIf(process.platform === 'darwin')('session.lock probe', () => {
+  it('reports a world whose session.lock a process holds open, and nothing otherwise', async () => {
+    const a = await makeWorld(path.join(tmp, 'saves', 'A'))
+    const b = await makeWorld(path.join(tmp, 'saves', 'B'))
+    const none = await makeWorld(path.join(tmp, 'saves', 'No Lock'))
+    await rm(path.join(none, 'session.lock'), { force: true })
+    await writeFile(path.join(a, 'session.lock'), '')
+    await writeFile(path.join(b, 'session.lock'), '')
+    expect(await isWorldOpen(a)).toBe(false)
+    expect(await isWorldOpen(none)).toBe(false)
+    // Minecraft keeps the lock file open while the world is loaded, as this handle does.
+    const handle = await open(path.join(a, 'session.lock'), 'r+')
+    try {
+      expect(await isWorldOpen(a)).toBe(true)
+      expect(await isWorldOpen(b)).toBe(false)
+      expect(await sessionLockHolders([b, a, none])).toEqual([process.pid])
+    } finally {
+      await handle.close()
+    }
+    expect(await sessionLockHolders([a, b])).toEqual([])
   })
 })

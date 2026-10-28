@@ -18,12 +18,12 @@ Evidence paths are relative to the repo root. Tests are written as `file > test 
 |---|---|
 | Fixed-by-design | 69 |
 | Fixed+tested | 137 |
-| Gap fixed | 65 |
-| Gap (left) | 5 |
+| Gap fixed | 66 |
+| Gap (left) | 4 |
 | N/A | 20 |
 | **Total** | **296** |
 
-The 65 gap fixes include 4 findings that are not numbered entries in the catalogue (the "extra" rows): token redaction in errors, the orphaned-`osascript` hang, NFC pack ids, and the Electron permission handler. Rows marked "partial" were fixed for the reported failure, but something remains open. Those remainders are listed under [Left open](#left-open).
+The 66 gap fixes include 4 findings that are not numbered entries in the catalogue (the "extra" rows): token redaction in errors, the orphaned-`osascript` hang, NFC pack ids, and the Electron permission handler. Rows marked "partial" were fixed for the reported failure, but something remains open. Those remainders are listed under [Left open](#left-open).
 
 ## Cross-cutting lessons (known-issues.md, top)
 
@@ -153,7 +153,7 @@ The 65 gap fixes include 4 findings that are not numbered entries in the catalog
 
 | Issue | Problem | Status | Evidence |
 |---|---|---|---|
-| #1345 #1301 #1317 #1338 #691 #678 | Emptied instance.json; settings reset | Gap fixed (partial) | `json-store.test.ts > survives a crash between writing the temp file and renaming it`, `> never overwrites an unreadable file with defaults…`, `> never moves a good file aside or resets it when reading fails with an I/O error` |
+| #1345 #1301 #1317 #1338 #691 #678 | Emptied instance.json; settings reset | Gap fixed | `json-store.test.ts > survives a crash between writing the temp file and renaming it`, `> never overwrites an unreadable file with defaults…`, `> never moves a good file aside or resets it when reading fails with an I/O error`. New: a one-time notice when `settings.json` was moved aside. `settings.test.ts > tells the user once when settings.json was moved aside, even if no window was listening yet` |
 | #1334 #968 #906 #832 #1091 #1097 | Override map; reset to global | Fixed+tested | `instances.test.ts > patches with null resets and clears the version pin when the runtime changes` |
 | #744 #911 #975 #1492 | Data-directory migration | N/A | The data root is fixed (`docs/STORAGE.md`). There is no migrate feature |
 | #1429 #1563 #1538 #663 #833 | SQLite lifecycle, corruption, GC | Gap fixed | `db.test.ts > rebuilds the index when a table goes missing or the file is damaged mid-session` |
@@ -204,7 +204,7 @@ The 65 gap fixes include 4 findings that are not numbered entries in the catalog
 | 4 | Removal left secrets and cookies | Gap fixed | `accounts.test.ts > does not resurrect secrets when an account is removed during its refresh`, plus the #1587 test (cookies) |
 | 5 | Offline custom UUID discarded | Fixed+tested | `offline.test.ts > keeps a custom UUID instead of the derived one` |
 | 6 | Offline profiles shared one record | Fixed-by-design | One record per profile (`packages/auth/src/offline.ts`); `remove(id)` deletes only that one |
-| 7 | Loopback server bound to all interfaces | Fixed+tested | `loopback.test.ts > binds to 127.0.0.1 only` |
+| 7 | Loopback server bound to all interfaces | Fixed+tested | `loopback.test.ts > answers on both loopback addresses localhost may resolve to (127.0.0.1 and [::1]), and on no other interface` |
 | 8 | No state / PKCE check | Fixed+tested | `loopback.test.ts > ignores requests with the wrong state or a foreign Host header`, `oauth.test.ts > rejects state mismatches, errors and missing codes` |
 | 9 | Launch refresh could open a window | Fixed+tested | `accounts.test.ts > never relabels another profile's tokens after a refresh, and never opens a window to recover` |
 | 10 | Error classification by class name | Fixed+tested | Structured `code`/`type`. `microsoft.test.ts > serializes errors without secrets` |
@@ -213,7 +213,7 @@ The 65 gap fixes include 4 findings that are not numbered entries in the catalog
 | 13 | Entitlement check should be advisory | Fixed+tested | `microsoft.test.ts > treats entitlements as advisory`, `> reports "no profile yet" when the game is owned but has no profile` |
 | 14 | Startup race saved an empty account list | Fixed-by-design | Accounts are loaded before the manager is published. Only user actions write. `json-store.test.ts > never overwrites an unreadable file with defaults: moves it aside and recovers the backup` |
 | 15 | Non-JWT token treated as invalid | Fixed+tested | `accounts.test.ts > treats an undecryptable blob as "sign in again", never as a crash` |
-| 16 | XUID not passed; `clientid` defaulted | Gap (left) | The XUID is passed (`runtime/launch/service.ts`). `${clientid}` is dropped instead of a stable per-install id |
+| 16 | XUID not passed; `clientid` defaulted | Gap fixed | The XUID is passed (`runtime/launch/service.ts`). `${clientid}` is a stable random per-install id, separate from telemetry's (`runtime/launch/client-id.ts`). `launch.test.ts > passes a stable per-install client id, and never a code-injecting env variable` |
 | 17 | Offline mode depended on the OS locale | Fixed+tested | `accounts.test.ts > allows offline accounts only after a Microsoft account (or in developer mode)` |
 | extra | Tokens copied into error bodies (IPC and logs) | Gap fixed | `packages/auth/src/errors.ts` `redactSecrets`. `oauth.test.ts > never copies tokens from a malformed token response into the error` |
 
@@ -227,7 +227,7 @@ The 65 gap fixes include 4 findings that are not numbered entries in the catalog
 | P4 | Progress double-counts retries | Fixed-by-design | Per-job progress is reset on retry (`download.ts` `setProgress(job, 0)`) |
 | P5 | No backpressure; small libuv pool | Gap fixed | Each 64 KiB write is awaited (BatchWriter). New: the runtime gets `UV_THREADPOOL_SIZE=16` (`apps/desktop/src/main/runtime.ts`). `main/runtime.test.ts > gives the runtime a larger libuv pool so DNS is not starved during installs (download.md P5)` |
 | P6 | In-place writes; partials discarded | Fixed+tested | `download.test.ts > never touches an existing file…`, `> resumes a .part file with Range and If-Range` |
-| P7 | Retry amplification; slow offline failure | Fixed+tested | `retry.test.ts > fails fast when offline…`, `> bounds retries for transient errors…`. Residual under Left |
+| P7 | Retry amplification; slow offline failure | Fixed+tested | `retry.test.ts > fails fast when offline…`, `> bounds retries for transient errors…`. New: a no-progress watchdog (`ESTALLED`). `download.test.ts > gives up on a URL that stops sending, with ESTALLED, and tries the next mirror`, `> fails a host that accepts connections but never answers within the stall limit` |
 | P8 | Integrity only via a second full read | Fixed-by-design | Hash while streaming plus a length check. A second pass only for segmented or resumed files |
 | P9 | Trust shortcuts hide corruption | Fixed-by-design | Size-trust is opt-in; only atomically renamed files reach the destination |
 | P10 | Checksum helper swallows read errors | Gap fixed | `packages/net/src/hash.ts` propagates errors. Write errors no longer retry: `download.test.ts > does not re-request the body after a local write failure` |
@@ -418,7 +418,7 @@ The 65 gap fixes include 4 findings that are not numbered entries in the catalog
 | 2 | Runtime state mixed into settings | Fixed-by-design | The schema holds only persisted fields |
 | 3 | "Reset all" didn't reset | Fixed+tested | `settings.test.ts > reset restores settings.json defaults and removes the background…` |
 | 4 | Export covers only localStorage | N/A | Settings export not shipped |
-| 5 | Network fields saved on unmount | Fixed-by-design | Every control saves immediately. Related gap under Left (proxy settings ignored) |
+| 5 | Network fields saved on unmount | Fixed-by-design | Every control saves immediately. New: the proxy and connection limits are applied, live (`packages/net/src/dispatcher.ts`, `runtime/settings/network.ts`). `proxy.test.ts > sends requests through the configured proxy, but never loopback ones`, `> applies proxy changes live, without a new client`, `network.test.ts > applies proxy and limit changes live, and mirrors the proxy into Electron` |
 | 6 | TLS verification disabled | Fixed-by-design | `http.ts` `rejectUnauthorized: true` |
 | 7 | Auto memory only -Xms | Fixed-by-design | `autoMemory` returns min and max |
 | 8 | nativeTheme only at startup | Fixed-by-design | Updated on every theme change (`main/os-services.ts`) |
@@ -442,14 +442,11 @@ These are deliberately not fixed in this pass:
 
 - **X2, one comparator.** Merging means moving the comparator into `@amethyst/game` and rewriting callers in installer, java and the renderer. Every existing parser was checked against 26.x, snapshots and pre-releases. The installer comparator also doesn't order weekly snapshots or alpha/beta ids by date.
 - **#1665, packs disabled after a crash.** This needs a new exit-state field and new crash-dialog copy, which is a UI change.
-- **accounts 16, `${clientid}`.** It is dropped rather than set to a stable per-install id. Wiring this in needs a stored install id.
 - **install 13, one Forge install at a time.** It is only slower. A per-Minecraft-version lock needs a concurrency fixture to prove it safe.
 - **marketplace 12, "Relevance" hint.** This is new Discover UI copy.
-- **Proxy settings ignored.** Found under settings 5. `network.proxyEnabled`, `proxyUrl` and `maxApiConnections` are never read, and `maxConnectionsPerHost` applies only after a restart. The Network pane says the proxy is used. Fixing this needs a proxy-capable agent and live reconfiguration in `packages/net`.
 
 Residuals of rows marked fixed or partial:
 
-- **#1345, settings moved aside.** When `settings.json` is moved aside as corrupt, the user is not notified; it is only logged.
 - **#1039, dependencies.**
   - A dependency isn't treated as satisfied by a mod id, so Fabric API can still be added next to QFAPI on Quilt.
   - There is no opt-out for automatic dependency install.
@@ -457,7 +454,6 @@ Residuals of rows marked fixed or partial:
 - **#740, same-name files.** An unrelated file with the same name still gets "(2)". `resources.md` §5.3 asks for that, but the original issue asks for no suffix. That is a product call.
 - **#1118, legacy Forge hashes.** There is no curated table of known-bad hashes. Accepting any listed checksum plus the Maven Central fallback covers the reported cases.
 - **#685, processor output.** It is not streamed live into the task UI. The task shows the running processor, and a failure keeps its log tail.
-- **download P7, no-progress limit.** There is no wall-clock limit on time without progress. Offline errors fail fast, but a host that silently drops connections takes about 100 s per URL.
 - **resources 25, folder packs.** Cache records key on the folder's own mtime, so an in-place edit of `pack.mcmeta` is picked up late.
 - **#951 / #1144, reset.** There is no "Reset Amethyst" action. `docs/STORAGE.md` doesn't list the updater cache, the Preferences plist or Saved Application State.
 - **#1765, Local Network prompt.** The launcher doesn't trigger the prompt ahead of time (LAN features are dropped). It fires on the game's first local-network access.

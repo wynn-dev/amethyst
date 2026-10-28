@@ -9,17 +9,18 @@ import { cn } from './cn'
 export type Tone = 'info' | 'success' | 'warning' | 'error' | 'neutral'
 
 const toneText: Record<Tone, string> = {
-  info: 'text-blue',
+  info: 'text-label-2',
   success: 'text-green',
   warning: 'text-orange',
   error: 'text-red',
   neutral: 'text-label-2',
 }
+/* Status reads from the icon and a faint tint only where it matters (warnings, errors). */
 const toneBg: Record<Tone, string> = {
-  info: 'bg-[color-mix(in_srgb,var(--color-blue)_9%,transparent)]',
-  success: 'bg-[color-mix(in_srgb,var(--color-green)_10%,transparent)]',
-  warning: 'bg-[color-mix(in_srgb,var(--color-orange)_11%,transparent)]',
-  error: 'bg-[color-mix(in_srgb,var(--color-red)_10%,transparent)]',
+  info: 'bg-fill',
+  success: 'bg-fill',
+  warning: 'bg-[color-mix(in_srgb,var(--color-orange)_8%,transparent)]',
+  error: 'bg-[color-mix(in_srgb,var(--color-red)_8%,transparent)]',
   neutral: 'bg-fill',
 }
 const toneIcon: Record<Tone, ReactNode> = {
@@ -45,12 +46,12 @@ export function Banner({ tone = 'info', title, children, actions, icon, classNam
   return (
     <div
       role={tone === 'error' || tone === 'warning' ? 'alert' : 'status'}
-      className={cn('flex items-center gap-2.5 rounded-lg px-3 py-2', toneBg[tone], className)}
+      className={cn('flex items-center gap-2.5 rounded-lg px-3 py-2 hairline', toneBg[tone], className)}
     >
       <span className={cn('flex shrink-0 [&_svg]:size-4', toneText[tone])}>{icon ?? toneIcon[tone]}</span>
       <div className="min-w-0 flex-1">
-        <p className="text-body font-medium">{title}</p>
-        {children && <div className="text-callout text-label-2">{children}</div>}
+        <p className="text-compact font-medium">{title}</p>
+        {children && <div className="text-meta text-label-2">{children}</div>}
       </div>
       {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
     </div>
@@ -82,7 +83,7 @@ export function ProgressBar({ value, label, size = 'sm', tone = 'accent', classN
       aria-valuemax={100}
       aria-valuenow={determinate ? Math.round(value * 100) : undefined}
       className={cn(
-        'relative w-full overflow-hidden rounded-full bg-fill-2',
+        'relative w-full overflow-hidden rounded-full bg-fill',
         size === 'xs' ? 'h-[3px]' : size === 'sm' ? 'h-1' : 'h-1.5',
         className,
       )}
@@ -136,7 +137,7 @@ export function ProgressRing({ value, size = 16, stroke = 2, label, className }:
   )
 }
 
-/** macOS-style indeterminate spinner (12 spokes). */
+/** Indeterminate spinner (12 spokes). */
 export function Spinner({ size = 16, className, label }: { size?: number; className?: string; label?: string }) {
   return (
     <svg
@@ -177,19 +178,22 @@ export interface BadgeProps {
 }
 
 const badgeTone: Record<Tone | 'accent', string> = {
-  ...toneBg,
-  neutral: 'bg-fill-2',
+  info: 'hairline-strong',
+  success: 'bg-[color-mix(in_srgb,var(--color-green)_12%,transparent)]',
+  warning: 'bg-[color-mix(in_srgb,var(--color-orange)_12%,transparent)]',
+  error: 'bg-[color-mix(in_srgb,var(--color-red)_12%,transparent)]',
+  neutral: 'hairline-strong',
   accent: 'bg-accent-soft',
 }
-const badgeText: Record<Tone | 'accent', string> = { ...toneText, neutral: 'text-label-2', accent: 'text-accent' }
+const badgeText: Record<Tone | 'accent', string> = { ...toneText, info: 'text-label-2', neutral: 'text-label-2', accent: 'text-accent' }
 
-/** Small capsule label (source, status, version tags). */
+/** Small outlined label (source, status, version tags). Status tones get a faint tint. */
 export function Badge({ tone = 'neutral', children, className, title }: BadgeProps) {
   return (
     <span
       title={title}
       className={cn(
-        'inline-flex h-4 shrink-0 items-center gap-1 rounded-[4px] px-1.5 text-caption font-semibold tracking-[0.01em] whitespace-nowrap uppercase [&_svg]:size-2.5',
+        'inline-flex h-4 shrink-0 items-center gap-1 rounded-[4px] px-1.5 text-[10.5px] font-medium whitespace-nowrap [&_svg]:size-2.5',
         badgeTone[tone],
         badgeText[tone],
         className,
@@ -200,10 +204,15 @@ export function Badge({ tone = 'neutral', children, className, title }: BadgePro
   )
 }
 
-/** A small status dot, e.g. "running". */
-export function Dot({ tone = 'green', label }: { tone?: 'green' | 'orange' | 'red' | 'accent' | 'gray'; label: string }) {
+/** A small status dot, e.g. "running". `pulse` adds the running ring (the one looping animation). */
+export function Dot({ tone = 'green', label, pulse }: { tone?: 'green' | 'orange' | 'red' | 'accent' | 'gray'; label: string; pulse?: boolean }) {
   const bg = { green: 'bg-green', orange: 'bg-orange', red: 'bg-red', accent: 'bg-accent', gray: 'bg-gray' }[tone]
-  return <span role="img" aria-label={label} className={cn('inline-block size-2 shrink-0 rounded-full', bg)} />
+  const ring = { green: 'border-green', orange: 'border-orange', red: 'border-red', accent: 'border-accent', gray: 'border-gray' }[tone]
+  return (
+    <span role="img" aria-label={label} className={cn('relative inline-block size-1.5 shrink-0 rounded-full', bg)}>
+      {pulse && <span aria-hidden className={cn('absolute -inset-[3px] animate-ring rounded-full border', ring)} />}
+    </span>
+  )
 }
 
 /* ------------------------------------------------------------------------------------------ */
@@ -223,12 +232,12 @@ export function EmptyState({ icon, title, description, actions, className, size 
   return (
     <div className={cn('flex flex-1 flex-col items-center justify-center px-8 py-12 text-center', className)}>
       {icon && (
-        <div className={cn('mb-3 flex items-center justify-center text-label-3', size === 'lg' ? '[&_svg]:size-14' : '[&_svg]:size-10')} aria-hidden>
+        <div className={cn('mb-3 flex items-center justify-center text-label-3', size === 'lg' ? '[&_svg]:size-10' : '[&_svg]:size-7')} aria-hidden>
           {icon}
         </div>
       )}
-      <h2 className={cn('font-semibold text-label', size === 'lg' ? 'text-title1' : 'text-title3')}>{title}</h2>
-      {description && <p className="mt-1 max-w-[380px] text-body text-label-2">{description}</p>}
+      <h2 className={cn('font-semibold text-label', size === 'lg' ? 'text-title2' : 'text-headline')}>{title}</h2>
+      {description && <p className="mt-1 max-w-[380px] text-compact text-label-2">{description}</p>}
       {actions && <div className="mt-5 flex flex-wrap items-center justify-center gap-2">{actions}</div>}
     </div>
   )
@@ -239,7 +248,7 @@ export function EmptyState({ icon, title, description, actions, className, size 
 /* ------------------------------------------------------------------------------------------ */
 
 export function Skeleton({ className, style }: { className?: string; style?: CSSProperties }) {
-  return <div aria-hidden className={cn('animate-shimmer rounded-[4px] bg-fill-2', className)} style={style} />
+  return <div aria-hidden className={cn('animate-shimmer rounded-[4px] bg-fill', className)} style={style} />
 }
 
 /** A run of skeleton table rows for loading lists. */
@@ -247,8 +256,8 @@ export function SkeletonRows({ rows = 8, className }: { rows?: number; className
   return (
     <div role="status" aria-label="Loading" className={cn('flex flex-col', className)}>
       {Array.from({ length: rows }, (_, i) => (
-        <div key={i} className="flex h-9 items-center gap-3 px-4">
-          <Skeleton className="size-6 rounded-md" />
+        <div key={i} className="flex h-8 items-center gap-3 px-4">
+          <Skeleton className="size-[18px] rounded-[5px]" />
           <Skeleton className="h-2.5" style={{ width: `${28 + ((i * 37) % 30)}%` }} />
           <Skeleton className="ml-auto h-2.5 w-16" />
         </div>

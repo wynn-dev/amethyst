@@ -1,7 +1,8 @@
-import type { ReactElement, ReactNode } from 'react'
+import { useCallback, type ReactElement, type ReactNode } from 'react'
 import { AlertDialog, Dialog, Popover as RPopover } from 'radix-ui'
 import { cn } from './cn'
 import { Button } from './Button'
+import { growFrom } from './motion'
 
 /* ------------------------------------------------------------------------------------------ */
 /* Popover                                                                                    */
@@ -21,8 +22,8 @@ export interface PopoverProps {
   arrow?: boolean
 }
 
-/** NSPopover: a translucent panel with an arrow, anchored to its trigger. Esc closes it. */
-export function Popover({ trigger, children, open, onOpenChange, side = 'bottom', align = 'center', width, label, className, arrow = true }: PopoverProps) {
+/** A frosted panel anchored to its trigger, growing out of it. Esc closes it. */
+export function Popover({ trigger, children, open, onOpenChange, side = 'bottom', align = 'center', width, label, className, arrow = false }: PopoverProps) {
   return (
     <RPopover.Root open={open} onOpenChange={onOpenChange}>
       <RPopover.Trigger asChild>{trigger}</RPopover.Trigger>
@@ -41,7 +42,7 @@ export function Popover({ trigger, children, open, onOpenChange, side = 'bottom'
           }}
           style={width ? { width } : undefined}
           className={cn(
-            'z-50 rounded-xl bg-raised text-label shadow-popover backdrop-blur-2xl outline-none',
+            'z-50 rounded-xl glass text-label shadow-popover outline-none',
             'origin-(--radix-popper-transform-origin) data-[state=closed]:animate-pop-out data-[state=open]:animate-pop-in',
             className,
           )}
@@ -77,8 +78,8 @@ export interface SheetProps {
 }
 
 /**
- * A document-modal sheet that slides down from the toolbar, like an AppKit sheet. Focus is
- * trapped while open; Esc and Cancel are always safe because work continues in Activity.
+ * A document-modal sheet that drops in under the toolbar on the sheet spring. Focus is trapped
+ * while open; Esc and Cancel are always safe because work continues in Activity.
  */
 export function Sheet({ open, onOpenChange, title, description, children, footer, footerLeading, width = 520, hideTitle, className, bodyClassName }: SheetProps) {
   return (
@@ -86,24 +87,24 @@ export function Sheet({ open, onOpenChange, title, description, children, footer
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-40 bg-backdrop data-[state=closed]:animate-fade-out data-[state=open]:animate-fade-in" />
         <Dialog.Content
-          style={{ width: `min(${width}px, calc(100vw - 48px))` }}
+          style={{ width: `min(${width}px, calc(100vw - 48px))`, left: `calc(50% - min(${width}px, calc(100vw - 48px)) / 2)` }}
           className={cn(
-            'fixed top-[52px] left-1/2 z-40 flex max-h-[calc(100vh-76px)] -translate-x-1/2 flex-col overflow-hidden rounded-b-xl rounded-t-[4px] bg-sheet text-label shadow-sheet outline-none',
+            'fixed top-[56px] z-40 flex max-h-[calc(100vh-80px)] flex-col overflow-hidden rounded-2xl bg-sheet text-label shadow-sheet outline-none',
             'data-[state=closed]:animate-sheet-out data-[state=open]:animate-sheet-in',
             className,
           )}
         >
           <div className={cn('px-5 pt-4', hideTitle && 'sr-only')}>
-            <Dialog.Title className="text-title3 font-semibold">{title}</Dialog.Title>
+            <Dialog.Title className="text-headline font-semibold">{title}</Dialog.Title>
             {description ? (
-              <Dialog.Description className="mt-0.5 text-body text-label-2">{description}</Dialog.Description>
+              <Dialog.Description className="mt-0.5 text-compact text-label-2">{description}</Dialog.Description>
             ) : (
               <Dialog.Description className="sr-only">{title}</Dialog.Description>
             )}
           </div>
           <div className={cn('min-h-0 flex-1 overflow-y-auto px-5 py-4', bodyClassName)}>{children}</div>
           {(footer || footerLeading) && (
-            <div className="flex items-center gap-2 border-t border-separator px-5 py-3">
+            <div className="flex items-center gap-2 border-t border-separator px-4 py-2.5">
               {footerLeading}
               <div className="ml-auto flex items-center gap-2">{footer}</div>
             </div>
@@ -128,19 +129,36 @@ export interface PanelDialogProps {
   width?: number
   className?: string
   top?: string
+  /**
+   * The control that opened the panel, if it is on screen: the panel grows out of it (e.g. the
+   * palette out of the sidebar's search field). Without one it pops in where it is. Must be a
+   * stable function (module-level or memoised).
+   */
+  origin?: () => Element | null | undefined
 }
 
-/** A centred floating panel without chrome, e.g. Spotlight-style palettes. */
-export function PanelDialog({ open, onOpenChange, title, children, width = 640, className, top = '18vh' }: PanelDialogProps) {
+/** A centred floating glass panel without chrome, e.g. the command palette. */
+export function PanelDialog({ open, onOpenChange, title, children, width = 640, className, top = '18vh', origin }: PanelDialogProps) {
+  // Runs once per opening, when the content mounts (`origin` must be stable). The script
+  // animation takes precedence over the CSS pop-in, which still plays when there is no origin.
+  const grow = useCallback(
+    (el: HTMLDivElement | null) => {
+      const from = el && origin?.()
+      if (!el || !from || !from.getClientRects().length) return
+      growFrom(el, from.getBoundingClientRect(), el.firstElementChild as HTMLElement | null)
+    },
+    [origin],
+  )
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-transparent" />
+        <Dialog.Overlay className="fixed inset-0 z-50 bg-[light-dark(rgb(0_0_0/0.06),rgb(0_0_0/0.2))] data-[state=closed]:animate-fade-out data-[state=open]:animate-fade-in" />
         <Dialog.Content
-          style={{ width: `min(${width}px, calc(100vw - 48px))`, top }}
+          ref={grow}
+          style={{ width: `min(${width}px, calc(100vw - 48px))`, left: `calc(50% - min(${width}px, calc(100vw - 48px)) / 2)`, top }}
           aria-describedby={undefined}
           className={cn(
-            'fixed left-1/2 z-50 -translate-x-1/2 overflow-hidden rounded-2xl bg-raised text-label shadow-sheet backdrop-blur-2xl outline-none',
+            'fixed z-50 overflow-hidden rounded-2xl glass text-label shadow-popover outline-none',
             'data-[state=closed]:animate-pop-out data-[state=open]:animate-pop-in',
             className,
           )}
@@ -173,7 +191,7 @@ export interface AlertProps {
 }
 
 /**
- * NSAlert-style confirmation. Destructive actions use a red button and are never the
+ * Alert-style confirmation. Destructive actions use a red button and are never the
  * keyboard default: Return activates Cancel unless the user tabs to the destructive button.
  */
 export function Alert({ open, onOpenChange, title, message, confirmLabel, cancelLabel = 'Cancel', destructive, onConfirm, children, icon }: AlertProps) {
@@ -183,14 +201,14 @@ export function Alert({ open, onOpenChange, title, message, confirmLabel, cancel
         <AlertDialog.Overlay className="fixed inset-0 z-50 bg-backdrop data-[state=closed]:animate-fade-out data-[state=open]:animate-fade-in" />
         <AlertDialog.Content
           className={cn(
-            'fixed top-1/2 left-1/2 z-50 flex w-[272px] -translate-x-1/2 -translate-y-1/2 flex-col items-center rounded-xl bg-sheet px-4 pt-5 pb-4 text-center text-label shadow-sheet outline-none',
+            'fixed top-1/2 left-1/2 z-50 flex w-[272px] -translate-x-1/2 -translate-y-1/2 flex-col items-center rounded-2xl bg-sheet px-4 pt-5 pb-4 text-center text-label shadow-sheet outline-none',
             'data-[state=closed]:animate-pop-out data-[state=open]:animate-pop-in',
           )}
         >
           {icon && <div className="mb-2.5">{icon}</div>}
           <AlertDialog.Title className="text-body font-semibold">{title}</AlertDialog.Title>
           {message ? (
-            <AlertDialog.Description className="mt-1.5 text-small text-label">{message}</AlertDialog.Description>
+            <AlertDialog.Description className="mt-1.5 text-meta text-label-2">{message}</AlertDialog.Description>
           ) : (
             <AlertDialog.Description className="sr-only">{title}</AlertDialog.Description>
           )}

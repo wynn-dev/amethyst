@@ -6,26 +6,28 @@ export type ButtonVariant = 'push' | 'primary' | 'borderless' | 'destructive' | 
 export type ButtonSize = 'sm' | 'md' | 'lg' | 'xl'
 
 const base =
-  'relative inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap font-[450] select-none ' +
+  'relative inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap font-medium select-none ' +
   'transition-[background-color,box-shadow,opacity,color] duration-150 ease-[var(--ease-mac)] ' +
   'disabled:pointer-events-none disabled:opacity-45 [&_svg]:shrink-0'
 
+/*
+ * The primary button is filled with the accent: with the default neutral accent that is the text
+ * colour (white with dark text in dark mode, near-black with white text in light mode), like the
+ * mockup's Play. Push buttons are outlined with a hairline and unfilled.
+ */
 const variants: Record<ButtonVariant, string> = {
-  push: 'bg-control text-label shadow-control active:bg-control-pressed',
-  primary:
-    'bg-accent-fill text-on-accent shadow-[0_0_0_0.5px_rgb(0_0_0/0.12),0_0.5px_1.5px_rgb(0_0_0/0.18),inset_0_0.5px_0_rgb(255_255_255/0.22)] ' +
-    'hover:bg-accent-hover active:brightness-95',
-  borderless: 'text-label hover:bg-fill active:bg-fill-2 data-[state=open]:bg-fill-2',
-  destructive:
-    'bg-red text-white shadow-[0_0_0_0.5px_rgb(0_0_0/0.12),0_0.5px_1.5px_rgb(0_0_0/0.18)] hover:brightness-105 active:brightness-95',
-  link: 'text-accent hover:underline underline-offset-2 !px-0 !h-auto',
+  push: 'text-label hairline-strong hover:bg-hover active:bg-fill data-[state=open]:bg-fill',
+  primary: 'bg-accent-fill text-on-accent hover:bg-accent-hover active:brightness-95',
+  borderless: 'text-label hover:bg-hover active:bg-fill data-[state=open]:bg-fill',
+  destructive: 'bg-red text-white hover:brightness-105 active:brightness-95',
+  link: 'text-accent underline decoration-current/35 underline-offset-2 hover:decoration-current !px-0 !h-auto',
 }
 
 const sizes: Record<ButtonSize, string> = {
   sm: 'h-5 rounded-[5px] px-2 text-small [&_svg]:size-3',
-  md: 'h-6 rounded-md px-2.5 text-body [&_svg]:size-3.5',
-  lg: 'h-7 rounded-[7px] px-3.5 text-body [&_svg]:size-4',
-  xl: 'h-9 rounded-lg px-5 text-title3 font-medium [&_svg]:size-4.5',
+  md: 'h-[26px] rounded-[7px] px-2.5 text-callout [&_svg]:size-3.5',
+  lg: 'h-7 rounded-lg px-3 text-compact font-semibold [&_svg]:size-3.5',
+  xl: 'h-8 rounded-lg px-4 text-body font-semibold [&_svg]:size-4',
 }
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -35,7 +37,7 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   icon?: ReactNode
 }
 
-/** macOS push button. `primary` is the default button (accent), `borderless` is a toolbar-style button. */
+/** Push button. `primary` is the default button (accent-filled), `borderless` is a toolbar-style button. */
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
   { variant = 'push', size = 'md', icon, className, children, type = 'button', ...rest },
   ref,
@@ -60,9 +62,9 @@ export interface IconButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonEle
 }
 
 const iconSizes = {
-  sm: 'size-5 rounded-[5px] [&_svg]:size-3.5',
-  md: 'size-7 rounded-md [&_svg]:size-4',
-  lg: 'size-8 rounded-[7px] [&_svg]:size-[18px]',
+  sm: 'size-5 rounded-[5px] [&_svg]:size-[13px]',
+  md: 'size-7 rounded-[7px] [&_svg]:size-[15px]',
+  lg: 'size-8 rounded-lg [&_svg]:size-4',
 }
 
 /** Icon-only button. Always has an accessible name and a tooltip that includes its shortcut. */
@@ -76,7 +78,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
       type={type}
       aria-label={label}
       aria-keyshortcuts={shortcut ? ariaShortcut(shortcut) : undefined}
-      className={cn(base, variants[variant], iconSizes[size], variant === 'borderless' && 'text-label-2 hover:text-label', className)}
+      className={cn(base, variants[variant], iconSizes[size], variant === 'borderless' && 'text-label-2 hover:text-label data-[state=open]:text-label', className)}
       {...rest}
     >
       {children}
@@ -99,10 +101,20 @@ export function ariaShortcut(shortcut: string): string {
     .join('+')
 }
 
-/** Inline keyboard shortcut, rendered with macOS glyphs. */
-export function Kbd({ shortcut, className }: { shortcut: string; className?: string }) {
+/**
+ * Inline keyboard shortcut, rendered with macOS glyphs. `boxed` draws the small outlined key cap
+ * used as a hint inside fields (the sidebar's ⌘K, the palette's esc).
+ */
+export function Kbd({ shortcut, className, boxed }: { shortcut: string; className?: string; boxed?: boolean }) {
   return (
-    <kbd className={cn('font-sans text-label-3 tracking-[0.08em] tabular', className)} aria-label={ariaShortcut(shortcut)}>
+    <kbd
+      className={cn(
+        'font-sans text-label-3 tabular',
+        boxed ? 'inline-flex h-4 items-center rounded-[4px] px-[5px] text-[10.5px] font-medium tracking-[0.04em] hairline-strong' : 'tracking-[0.08em]',
+        className,
+      )}
+      aria-label={ariaShortcut(shortcut)}
+    >
       {shortcutGlyphs(shortcut)}
     </kbd>
   )

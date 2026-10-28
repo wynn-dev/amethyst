@@ -15,7 +15,7 @@ export interface TooltipProps {
   children: ReactElement
 }
 
-/** macOS help tag. Appears after a short delay; includes the shortcut when one is given. */
+/** Help tag. Appears after a short delay; includes the shortcut when one is given. */
 export function Tooltip({ content, shortcut, side = 'bottom', children }: TooltipProps) {
   return (
     <R.Root>
@@ -25,10 +25,10 @@ export function Tooltip({ content, shortcut, side = 'bottom', children }: Toolti
           side={side}
           sideOffset={6}
           collisionPadding={8}
-          className="z-[60] flex items-center gap-2 rounded-[5px] bg-raised px-2 py-[3px] text-small text-label shadow-popover backdrop-blur-xl data-[state=closed]:animate-fade-out data-[state=delayed-open]:animate-fade-in"
+          className="z-[60] flex items-center gap-2 rounded-md glass px-2 py-1 text-small text-label shadow-popover data-[state=closed]:animate-fade-out data-[state=delayed-open]:animate-fade-in"
         >
           {content}
-          {shortcut && <span className="text-label-2 tracking-[0.06em]">{shortcutGlyphs(shortcut)}</span>}
+          {shortcut && <span className="text-label-3 tracking-[0.06em]">{shortcutGlyphs(shortcut)}</span>}
         </R.Content>
       </R.Portal>
     </R.Root>

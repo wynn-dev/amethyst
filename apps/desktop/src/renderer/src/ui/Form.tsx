@@ -3,9 +3,9 @@ import { ChevronRight, RotateCcw } from 'lucide-react'
 import { cn } from './cn'
 import { IconButton } from './Button'
 
-/** A page of grouped settings, like System Settings. */
+/** A page of grouped settings. */
 export function Form({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cn('mx-auto flex w-full max-w-[640px] flex-col gap-6', className)}>{children}</div>
+  return <div className={cn('mx-auto flex w-full max-w-[640px] flex-col gap-5', className)}>{children}</div>
 }
 
 export interface FormSectionProps {
@@ -21,14 +21,14 @@ export interface FormSectionProps {
   defaultOpen?: boolean
 }
 
-/** An inset rounded group of rows. */
+/** A hairline-bordered group of rows under a small muted header. */
 export function FormSection({ title, footer, action, children, className, collapsible, defaultOpen = false }: FormSectionProps) {
   const id = useId()
   const [open, setOpen] = useState(!collapsible || defaultOpen)
   return (
     <section aria-labelledby={title ? id : undefined} className={cn('flex flex-col gap-1.5', className)}>
       {(title || action) && (
-        <div className="flex items-end justify-between px-2.5">
+        <div className="flex min-h-5 items-end justify-between px-1">
           {title &&
             (collapsible ? (
               <button
@@ -36,13 +36,13 @@ export function FormSection({ title, footer, action, children, className, collap
                 id={id}
                 aria-expanded={open}
                 onClick={() => setOpen((o) => !o)}
-                className="-ml-1 flex items-center gap-1 rounded-[4px] px-1 text-body font-semibold text-label"
+                className="-ml-1 flex items-center gap-1 rounded-[4px] px-1 text-meta font-semibold text-label-2 hover:text-label"
               >
-                <ChevronRight className={cn('size-3 text-label-2 transition-transform duration-150', open && 'rotate-90')} strokeWidth={2.5} />
+                <ChevronRight className={cn('size-3 text-label-3 transition-transform duration-150', open && 'rotate-90')} strokeWidth={2} />
                 {title}
               </button>
             ) : (
-              <h3 id={id} className="text-body font-semibold text-label">
+              <h3 id={id} className="text-meta font-semibold text-label-2">
                 {title}
               </h3>
             ))}
@@ -50,9 +50,9 @@ export function FormSection({ title, footer, action, children, className, collap
         </div>
       )}
       {open && (
-        <div className="divide-y divide-separator overflow-hidden rounded-lg bg-surface shadow-[inset_0_0_0_0.5px_var(--color-surface-border)]">{children}</div>
+        <div className="divide-y divide-separator overflow-hidden rounded-xl border border-separator">{children}</div>
       )}
-      {open && footer && <div className="px-2.5 text-small text-label-2">{footer}</div>}
+      {open && footer && <div className="px-1 text-meta text-label-2">{footer}</div>}
     </section>
   )
 }
@@ -83,21 +83,21 @@ export function FormRow({ label, description, children, htmlFor, inherited, onRe
     <div
       id={id}
       className={cn(
-        'flex min-h-[38px] gap-3 px-2.5 py-[7px] transition-colors duration-500',
+        'flex min-h-[38px] gap-3 px-3 py-[7px] transition-colors duration-500',
         stacked ? 'flex-col' : 'items-center justify-between',
         highlighted && 'bg-accent-soft',
         className,
       )}
     >
       <div className="flex min-w-0 flex-col">
-        <Label htmlFor={htmlFor} className="text-body text-label">
+        <Label htmlFor={htmlFor} className="text-compact text-label">
           {label}
         </Label>
-        {description && <div className="text-small text-label-2">{description}</div>}
+        {description && <div className="text-meta text-label-2">{description}</div>}
       </div>
       {(children || inherited || onReset) && (
         <div className={cn('flex shrink-0 items-center gap-2', stacked && 'w-full')}>
-          {inherited && <span className="text-small text-label-3">Default</span>}
+          {inherited && <span className="text-meta text-label-3">Default</span>}
           {!inherited && onReset && (
             <IconButton label="Reset to default" size="sm" onClick={onReset}>
               <RotateCcw />
@@ -112,5 +112,5 @@ export function FormRow({ label, description, children, htmlFor, inherited, onRe
 
 /** Plain help text block for inside a FormSection. */
 export function FormNote({ children }: { children: ReactNode }) {
-  return <div className="px-2.5 py-2 text-small text-label-2">{children}</div>
+  return <div className="px-3 py-2 text-meta text-label-2">{children}</div>
 }

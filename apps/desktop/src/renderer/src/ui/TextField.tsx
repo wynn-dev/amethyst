@@ -2,11 +2,12 @@ import { forwardRef, useId, type InputHTMLAttributes, type ReactNode, type Texta
 import { Search, XCircle } from 'lucide-react'
 import { cn } from './cn'
 
+/** A flat field: a faint fill with an inner hairline that firms up on focus. */
 export const fieldClass =
-  'w-full rounded-[5px] bg-field text-body text-label placeholder:text-label-3 ' +
-  'shadow-[0_0_0_0.5px_var(--color-label-4),inset_0_0.5px_1px_light-dark(rgb(0_0_0/0.06),transparent)] ' +
-  'outline-none transition-shadow duration-150 focus:shadow-[0_0_0_3.5px_color-mix(in_srgb,var(--accent)_45%,transparent),0_0_0_1px_var(--accent)] ' +
-  'disabled:opacity-50 aria-[invalid=true]:shadow-[0_0_0_1px_var(--color-red)]'
+  'w-full rounded-md bg-field text-compact text-label placeholder:text-label-3 ' +
+  'shadow-[inset_0_0_0_0.5px_var(--color-separator-2)] ' +
+  'outline-none transition-shadow duration-150 focus:shadow-[inset_0_0_0_1px_var(--focus-ring),0_0_0_3px_color-mix(in_srgb,var(--accent)_10%,transparent)] ' +
+  'disabled:opacity-50 aria-[invalid=true]:shadow-[inset_0_0_0_1px_var(--color-red)]'
 
 export interface TextFieldProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'size'> {
   /** Visible label above the field. Omit it only when `aria-label` is given. */
@@ -19,7 +20,7 @@ export interface TextFieldProps extends Omit<InputHTMLAttributes<HTMLInputElemen
   monospace?: boolean
 }
 
-/** A native-looking text field with an optional label, hint and inline error. */
+/** A text field with an optional label, hint and inline error. */
 export const TextField = forwardRef<HTMLInputElement, TextFieldProps>(function TextField(
   { label, error, hint, size = 'md', monospace, className, id, ...rest },
   ref,
@@ -34,7 +35,7 @@ export const TextField = forwardRef<HTMLInputElement, TextFieldProps>(function T
       aria-invalid={error ? true : undefined}
       aria-describedby={error || hint ? msgId : undefined}
       spellCheck={false}
-      className={cn(fieldClass, size === 'md' ? 'h-[22px] px-[7px]' : 'h-7 px-2.5', monospace && 'font-mono text-callout', !label && className)}
+      className={cn(fieldClass, size === 'md' ? 'h-[26px] px-2' : 'h-[30px] rounded-lg px-2.5 text-body', monospace && 'font-mono text-meta', !label && className)}
       {...rest}
     />
   )
@@ -42,13 +43,13 @@ export const TextField = forwardRef<HTMLInputElement, TextFieldProps>(function T
   return (
     <div className={cn('flex flex-col gap-1', label ? className : undefined)}>
       {label && (
-        <label htmlFor={inputId} className="text-body text-label">
+        <label htmlFor={inputId} className="text-compact text-label">
           {label}
         </label>
       )}
       {input}
       {(error || hint) && (
-        <p id={msgId} className={cn('text-small', error ? 'text-red' : 'text-label-2')}>
+        <p id={msgId} className={cn('text-meta', error ? 'text-red' : 'text-label-2')}>
           {error ?? hint}
         </p>
       )}
@@ -62,7 +63,7 @@ export const TextArea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<H
       <textarea
         ref={ref}
         spellCheck={false}
-        className={cn(fieldClass, 'min-h-16 resize-y px-[7px] py-1', monospace && 'font-mono text-callout', className)}
+        className={cn(fieldClass, 'min-h-16 resize-y px-2 py-1.5', monospace && 'font-mono text-meta', className)}
         {...rest}
       />
     )
@@ -77,14 +78,14 @@ export interface SearchFieldProps extends Omit<InputHTMLAttributes<HTMLInputElem
   size?: 'md' | 'lg'
 }
 
-/** Rounded search field with a magnifier and a clear button. Esc clears, then blurs. */
+/** Search field with a magnifier and a clear button. Esc clears, then blurs. */
 export const SearchField = forwardRef<HTMLInputElement, SearchFieldProps>(function SearchField(
   { value, onValueChange, label, placeholder = 'Search', size = 'md', className, onKeyDown, ...rest },
   ref,
 ) {
   return (
     <div className={cn('relative flex items-center', className)}>
-      <Search aria-hidden className="pointer-events-none absolute left-2 size-3.5 text-label-2" />
+      <Search aria-hidden className={cn('pointer-events-none absolute left-2 text-label-3', size === 'md' ? 'size-[13px]' : 'left-2.5 size-3.5')} />
       <input
         ref={ref}
         type="search"
@@ -104,10 +105,10 @@ export const SearchField = forwardRef<HTMLInputElement, SearchFieldProps>(functi
           onKeyDown?.(e)
         }}
         className={cn(
-          'w-full rounded-md bg-fill pr-6 pl-7 text-body text-label outline-none placeholder:text-label-2',
-          'transition-shadow duration-150 focus:bg-field focus:shadow-[0_0_0_3.5px_color-mix(in_srgb,var(--accent)_45%,transparent),0_0_0_1px_var(--accent)]',
+          'w-full rounded-md bg-fill pr-6 text-label outline-none placeholder:text-label-3',
+          'shadow-[inset_0_0_0_0.5px_var(--color-separator)] transition-shadow duration-150 focus:shadow-[inset_0_0_0_1px_var(--focus-ring)]',
           '[&::-webkit-search-cancel-button]:hidden',
-          size === 'md' ? 'h-[26px]' : 'h-8 text-title3',
+          size === 'md' ? 'h-[26px] pl-[26px] text-callout' : 'h-[30px] rounded-lg pl-8 text-body',
         )}
         {...rest}
       />

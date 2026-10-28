@@ -3,21 +3,24 @@ import { ContextMenu as CM, DropdownMenu as DM } from 'radix-ui'
 import { Check, ChevronRight } from 'lucide-react'
 import { cn, shortcutGlyphs } from './cn'
 
-/** Shared look for every menu-like surface: dropdowns, context menus, select lists. */
+/**
+ * Shared look for every menu-like surface (dropdowns, context menus, select lists): frosted glass
+ * that grows out of its trigger, with grey highlights (never an accent slab).
+ */
 export const menuSurface =
-  'z-50 min-w-[180px] overflow-hidden rounded-[8px] bg-raised p-[5px] text-body text-label shadow-popover backdrop-blur-2xl ' +
+  'z-50 min-w-[180px] overflow-hidden rounded-[9px] glass p-1 text-compact text-label shadow-popover ' +
   'data-[state=open]:animate-pop-in data-[state=closed]:animate-pop-out origin-(--radix-popper-transform-origin)'
 
 export const menuItem =
-  'relative flex h-[22px] cursor-default items-center gap-2 rounded-[4px] pr-2.5 pl-[22px] outline-none select-none ' +
-  'data-[highlighted]:bg-accent-fill data-[highlighted]:text-on-accent data-[disabled]:text-label-3 ' +
+  'relative flex h-[26px] cursor-default items-center gap-2 rounded-[5px] pr-2 pl-6 outline-none select-none ' +
+  'data-[highlighted]:bg-fill-2 data-[disabled]:text-label-3 ' +
   '[&_svg]:size-3.5 [&_svg]:shrink-0'
 
-const separator = 'mx-2.5 my-[5px] h-px bg-separator'
-const label = 'px-[22px] pt-1 pb-0.5 text-small font-semibold text-label-2'
+const separator = 'mx-2 my-1 h-px bg-separator'
+const label = 'px-6 pt-1.5 pb-1 text-small font-semibold text-label-3'
 
 function Shortcut({ keys }: { keys: string }) {
-  return <span className="ml-auto pl-6 tracking-[0.08em] text-label-2 group-data-[highlighted]:text-on-accent/80">{shortcutGlyphs(keys)}</span>
+  return <span className="ml-auto pl-6 tracking-[0.08em] text-label-3 group-data-[highlighted]:text-label-2">{shortcutGlyphs(keys)}</span>
 }
 
 export interface MenuItemSpec {
@@ -81,7 +84,7 @@ function renderEntries(P: Parts, entries: MenuEntry[]): ReactNode {
             <P.SubTrigger disabled={e.disabled} className={cn(menuItem, 'group data-[state=open]:bg-fill-2')}>
               {e.icon}
               {e.label}
-              <ChevronRight className="ml-auto !size-3 text-label-2 group-data-[highlighted]:text-on-accent" />
+              <ChevronRight className="ml-auto !size-3 text-label-3 group-data-[highlighted]:text-label-2" />
             </P.SubTrigger>
             <P.Portal>
               <P.SubContent sideOffset={4} alignOffset={-5} className={menuSurface}>
@@ -96,9 +99,9 @@ function renderEntries(P: Parts, entries: MenuEntry[]): ReactNode {
             key={i}
             disabled={e.disabled}
             onSelect={e.onSelect}
-            className={cn(menuItem, 'group', e.destructive && 'text-red data-[highlighted]:bg-red')}
+            className={cn(menuItem, 'group', e.destructive && 'text-red data-[highlighted]:bg-[color-mix(in_srgb,var(--color-red)_14%,transparent)]')}
           >
-            {e.icon && <span className="absolute left-1 flex">{e.icon}</span>}
+            {e.icon && <span className="absolute left-1.5 flex text-label-2">{e.icon}</span>}
             {e.label}
             {e.shortcut && <Shortcut keys={e.shortcut} />}
           </P.Item>

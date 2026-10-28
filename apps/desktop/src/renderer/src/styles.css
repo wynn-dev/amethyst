@@ -351,15 +351,6 @@ textarea {
   box-shadow: inset 0 0 0 1.5px var(--focus-ring);
 }
 
-/* Secondary text inside an accent-selected table row. */
-[role='grid']:focus [aria-selected='true'] :is(.text-label-2, .text-label-3, .text-accent) {
-  color: color-mix(in srgb, var(--on-accent) 75%, transparent);
-}
-[role='grid']:focus [aria-selected='true'] .row-badge > span {
-  color: var(--on-accent);
-  background: color-mix(in srgb, var(--on-accent) 20%, transparent);
-}
-
 @utility tabular {
   font-variant-numeric: tabular-nums;
 }

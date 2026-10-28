@@ -2,6 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { app, BrowserWindow, nativeTheme, shell, type WebContents } from 'electron'
 import { MAIN_EVENT_CHANNEL } from '@shared/rpc'
+import { DEFAULT_ACCENT } from '@shared/accent'
 import type { MenuCommandEvent } from '@shared/menu'
 import { writeBackgroundFixture } from './screenshot-fixtures'
 
@@ -116,7 +117,7 @@ interface Shot {
 type RpcStep = [string, string, unknown[]]
 
 const ACCENT_SHOTS: [string, string][] = [
-  ['amethyst', '#9b5de5'],
+  ['neutral', DEFAULT_ACCENT],
   ['blue', '#007aff'],
   ['indigo', '#5856d6'],
   ['pink', '#ff2d55'],
@@ -128,7 +129,7 @@ const ACCENT_SHOTS: [string, string][] = [
 ]
 const resetAppearance: RpcStep[] = [
   ['settings', 'setBackground', [null]],
-  ['settings', 'patch', [{ appearance: { accentColor: '#9b5de5' } }]],
+  ['settings', 'patch', [{ appearance: { accentColor: DEFAULT_ACCENT } }]],
 ]
 
 const firstRun = (step: string, completed = false) =>
@@ -171,7 +172,7 @@ const SHOTS: Shot[] = [
     hash: '',
     settings: { pane: 'appearance' },
     invoke: [
-      ['settings', 'patch', [{ appearance: { accentColor: '#9b5de5' } }]],
+      ['settings', 'patch', [{ appearance: { accentColor: DEFAULT_ACCENT } }]],
       ['settings', 'setBackground', [{ path: 'BACKGROUND_FIXTURE' }]],
     ],
     wait: 300,

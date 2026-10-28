@@ -105,7 +105,7 @@ export type ThemeMode = 'light' | 'dark' | 'system'
 export interface AppearanceSettings {
   /** Colour scheme. The window chrome should follow it too (`nativeTheme.themeSource`). Default `system`. */
   theme: ThemeMode
-  /** Accent colour for buttons, links, selection and focus rings. Default `#9b5de5`. */
+  /** Accent colour for buttons, links, selection and focus rings. Default: neutral (`DEFAULT_ACCENT` in `shared/accent.ts`). */
   accentColor: string
   /** A full-window image or video behind the UI. */
   background: {

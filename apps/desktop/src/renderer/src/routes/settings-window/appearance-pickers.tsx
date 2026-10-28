@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { RadioGroup } from 'radix-ui'
 import type { ThemeMode } from '@shared/services'
 import { cn } from '@/ui'
-import { ACCENT_SWATCHES, applyAccent, normalizeHex } from '@/lib/theme'
+import { ACCENT_SWATCHES, DEFAULT_ACCENT, applyAccent, resolveAccent } from '@/lib/theme'
 import { positioned } from '@/app/visuals'
 
 /** What the miniature shows behind its content: the real media when there is one. */
@@ -39,7 +39,7 @@ export function MiniWindow({
     <div
       aria-hidden
       style={{ colorScheme: scheme, ...style }}
-      className={cn(positioned(className), 'overflow-hidden bg-[linear-gradient(135deg,#7c5bd1,#3d6fd6_55%,#2fb59b)]', className)}
+      className={cn(positioned(className), 'overflow-hidden bg-[light-dark(#d5d8de,#24272c)]', className)}
     >
       <div className="absolute inset-[9%_7%_0_7%] flex overflow-hidden rounded-t-[5px] shadow-[0_0_0_0.5px_rgb(0_0_0/0.25),0_4px_12px_rgb(0_0_0/0.3)]">
         <div className={cn('flex w-[30%] flex-col gap-[6%] p-[5%]', translucent ? 'bg-window-2/70 backdrop-blur-md' : 'bg-window-2')}>
@@ -122,7 +122,9 @@ export function ModePicker({ value, onValueChange, size = 'md' }: { value: Theme
 }
 
 const CUSTOM = 'custom'
-const RAINBOW = 'conic-gradient(from 180deg, #ff3b30, #ff9500, #ffcc00, #34c759, #007aff, #af52de, #ff3b30)'
+const RAINBOW = 'conic-gradient(from 180deg, #ff3b30, #ff9500, #ffcc00, #34c759, #30b0c7, #007aff, #ff3b30)'
+/** Neutral is the label colour, which is near-black in light mode and near-white in dark: show both halves. */
+const NEUTRAL = 'linear-gradient(135deg, #ececef 50%, #1c1c1f 50%)'
 
 function Swatch({ id, label, background, labels, onClick }: { id: string; label: string; background: string; labels: boolean; onClick?: () => void }) {
   return (
@@ -134,7 +136,7 @@ function Swatch({ id, label, background, labels, onClick }: { id: string; label:
         )}
         style={{ background }}
       >
-        <span className="size-[6px] scale-0 rounded-full bg-white transition-transform duration-150 group-data-[state=checked]:scale-100" />
+        <span className="size-[6px] scale-0 rounded-full bg-white shadow-[0_0_0_0.5px_rgb(0_0_0/0.35)] transition-transform duration-150 group-data-[state=checked]:scale-100" />
       </span>
       {labels && <span className="text-caption text-label-2 group-data-[state=checked]:text-label">{label}</span>}
     </RadioGroup.Item>
@@ -146,7 +148,7 @@ function Swatch({ id, label, background, labels, onClick }: { id: string; label:
  * previews live through the CSS variable; the value is saved once the colour settles.
  */
 export function AccentPicker({ value, onValueChange, labels = false }: { value: string; onValueChange: (v: string) => void; labels?: boolean }) {
-  const hex = normalizeHex(value) ?? ACCENT_SWATCHES[0]!.color
+  const hex = resolveAccent(value) ?? DEFAULT_ACCENT
   const colorInput = useRef<HTMLInputElement>(null)
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
   // The colour being dragged in the panel, until it is saved.
@@ -179,7 +181,7 @@ export function AccentPicker({ value, onValueChange, labels = false }: { value: 
         className={cn('flex items-start', labels ? 'gap-3' : 'gap-2')}
       >
         {ACCENT_SWATCHES.map((a) => (
-          <Swatch key={a.color} id={a.color} label={a.label} labels={labels} background={a.label === 'Amethyst' ? 'linear-gradient(135deg,#b48bf0,#7a43c9)' : a.color} />
+          <Swatch key={a.color} id={a.color} label={a.label} labels={labels} background={a.color === DEFAULT_ACCENT ? NEUTRAL : a.color} />
         ))}
         <Swatch id={CUSTOM} label="Custom…" labels={labels} background={custom ?? RAINBOW} onClick={openPanel} />
       </RadioGroup.Root>

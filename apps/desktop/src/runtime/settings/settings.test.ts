@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Events } from '@shared/events'
+import { DEFAULT_ACCENT } from '@shared/accent'
 import { dataLayout, type DataLayout } from '../layout'
 import { applySettingsPatch, defaultSettings, parseSettings } from './schema'
 import { settingsService, SettingsStore } from './service'
@@ -43,6 +44,14 @@ describe('settings schema', () => {
     // A missing file, an empty object and a reset all give the same values.
     expect(parseSettings(undefined)).toEqual(defaultSettings())
     expect(parseSettings({})).toEqual(defaultSettings())
+  })
+
+  it('migrates the old purple default accent to the neutral default, on load and in patches', () => {
+    expect(defaultSettings().appearance.accentColor).toBe(DEFAULT_ACCENT)
+    expect(parseSettings({ appearance: { accentColor: '#9B5DE5' } }).appearance.accentColor).toBe(DEFAULT_ACCENT)
+    expect(applySettingsPatch(defaultSettings(), { appearance: { accentColor: '#9b5de5' } }).next.appearance.accentColor).toBe(DEFAULT_ACCENT)
+    // Any other colour is kept as chosen.
+    expect(parseSettings({ appearance: { accentColor: '#007aff' } }).appearance.accentColor).toBe('#007aff')
   })
 
   it('falls back per field when loading', () => {
@@ -99,7 +108,7 @@ describe('SettingsStore', () => {
   it('persists patches and emits only the changed keys', async () => {
     const store = new SettingsStore(layout, emit)
     await store.load()
-    await store.patch({ appearance: { theme: 'dark', accentColor: '#9b5de5' }, game: { memory: { mode: 'auto' } } })
+    await store.patch({ appearance: { theme: 'dark', accentColor: DEFAULT_ACCENT }, game: { memory: { mode: 'auto' } } })
     expect(events).toEqual([{ event: 'settings:changed', payload: { keys: ['appearance.theme', 'game.memory.mode'], patch: { appearance: { theme: 'dark' }, game: { memory: { mode: 'auto' } } } } }])
     // A no-op patch writes and emits nothing.
     await store.patch({ appearance: { theme: 'dark' } })

@@ -5,12 +5,13 @@
  * the renderer half.
  */
 import type { AppearanceSettings, ThemeMode } from '@shared/services'
+import { DEFAULT_ACCENT, migrateAccent } from '@shared/accent'
 
-/** The default accent (the runtime's default `appearance.accentColor`). */
-export const DEFAULT_ACCENT = '#9b5de5'
+/** The default accent (the runtime's default `appearance.accentColor`): neutral. */
+export { DEFAULT_ACCENT }
 
 export const ACCENT_SWATCHES: { label: string; color: string }[] = [
-  { label: 'Amethyst', color: DEFAULT_ACCENT },
+  { label: 'Neutral', color: DEFAULT_ACCENT },
   { label: 'Blue', color: '#007aff' },
   { label: 'Indigo', color: '#5856d6' },
   { label: 'Pink', color: '#ff2d55' },
@@ -29,12 +30,21 @@ export function normalizeHex(value: string): string | null {
   return `#${hex.length === 3 ? [...hex].map((c) => c + c).join('') : hex}`
 }
 
+/** A stored accent, normalised and migrated (the old purple default reads as neutral), or `null`. */
+export function resolveAccent(value: string): string | null {
+  const hex = normalizeHex(value)
+  return hex && migrateAccent(hex)
+}
+
+/** True for the neutral default, which uses the stylesheet's light/dark pair. */
+export const isNeutralAccent = (value: string) => (resolveAccent(value) ?? DEFAULT_ACCENT) === DEFAULT_ACCENT
+
 /**
  * The `--accent` value for a colour: the colour itself in light mode and a lighter mix in dark
- * mode, so it keeps its contrast on dark surfaces. `null` keeps the stylesheet's tuned Amethyst pair.
+ * mode, so it keeps its contrast on dark surfaces. `null` keeps the stylesheet's neutral pair.
  */
 export function accentValue(color: string): string | null {
-  const hex = normalizeHex(color)
+  const hex = resolveAccent(color)
   if (!hex || hex === DEFAULT_ACCENT) return null
   return `light-dark(${hex}, color-mix(in srgb, ${hex} 84%, white))`
 }
@@ -72,7 +82,7 @@ const MIN_CONTRAST = 4.5
  * that (yellow, orange), the accent itself with black text.
  */
 export function accentFill(color: string): { fill: string; on: string } {
-  const hex = normalizeHex(color) ?? DEFAULT_ACCENT
+  const hex = resolveAccent(color) ?? DEFAULT_ACCENT
   for (let weight = 1; weight >= 0.7; weight -= 0.02) {
     const fill = weight === 1 ? hex : darken(hex, weight)
     if (contrastRatio(fill, '#ffffff') >= MIN_CONTRAST) return { fill, on: '#fff' }
@@ -82,6 +92,8 @@ export function accentFill(color: string): { fill: string; on: string } {
 
 export type ThemeInput = Pick<AppearanceSettings, 'theme' | 'accentColor'>
 
+const ACCENT_VARS = ['--accent', '--accent-fill', '--on-accent', '--accent-switch', '--on-accent-switch']
+
 /** Sets only the accent (also used for the live preview while the colour panel is dragged). */
 export function applyAccent(color: string, root: HTMLElement = document.documentElement): void {
   const accent = accentValue(color)
@@ -90,8 +102,11 @@ export function applyAccent(color: string, root: HTMLElement = document.document
     root.style.setProperty('--accent', accent)
     root.style.setProperty('--accent-fill', fill)
     root.style.setProperty('--on-accent', on)
+    // A coloured accent also colours switch tracks (neutral ones stay grey).
+    root.style.setProperty('--accent-switch', fill)
+    root.style.setProperty('--on-accent-switch', '#fff')
   } else {
-    for (const name of ['--accent', '--accent-fill', '--on-accent']) root.style.removeProperty(name)
+    for (const name of ACCENT_VARS) root.style.removeProperty(name)
   }
 }
 
@@ -117,7 +132,7 @@ export function readCachedTheme(): ThemeInput | null {
     const raw = JSON.parse(localStorage.getItem(CACHE_KEY) ?? 'null') as Partial<ThemeInput> | null
     if (!raw || typeof raw.accentColor !== 'string') return null
     const mode: ThemeMode = raw.theme === 'light' || raw.theme === 'dark' ? raw.theme : 'system'
-    return { theme: mode, accentColor: raw.accentColor }
+    return { theme: mode, accentColor: resolveAccent(raw.accentColor) ?? DEFAULT_ACCENT }
   } catch {
     return null
   }

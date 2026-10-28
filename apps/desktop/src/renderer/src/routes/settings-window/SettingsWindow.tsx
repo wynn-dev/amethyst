@@ -21,7 +21,7 @@ export const PANE_ICONS: Record<SettingsPaneId, { icon: ReactNode; color: string
   privacy: { icon: <Hand />, color: '#5856d6' },
   updates: { icon: <RefreshCw />, color: '#8e8e93' },
   advanced: { icon: <Wrench />, color: '#636366' },
-  about: { icon: <Info />, color: '#8b55d6' },
+  about: { icon: <Info />, color: '#636366' },
 }
 
 export function PaneGlyph({ pane, size = 20 }: { pane: SettingsPaneId; size?: number }) {

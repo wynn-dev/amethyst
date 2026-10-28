@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import type { Settings as AppSettings, SettingsPatch, ThemeMode } from '@shared/services'
+import { DEFAULT_ACCENT } from '@shared/accent'
 import { api } from '@/lib/rpc'
 import { toastError } from '@/lib/error-messages'
 import { queryClient } from './query'
@@ -18,7 +19,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   general: { developerMode: false, streamerMode: false, commandPaletteShortcut: '' },
   appearance: {
     theme: 'system',
-    accentColor: '#9b5de5',
+    accentColor: DEFAULT_ACCENT,
     background: { kind: 'none', file: null, fit: 'cover', blur: 0, overlay: true },
     blur: { card: 20, sidebar: 4 },
     vibrancy: true,

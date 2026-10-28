@@ -281,8 +281,9 @@ Palette colour set: every value is a hex colour with optional alpha (`#RRGGBB` o
 
 Amethyst defaults (its own brand, not XMCL's):
 
-- dark: primary is an amethyst purple (for example `#9B5DE5`), with near-black translucent `background`, `card` and `sidebar` surfaces;
-- light: primary is a deeper purple, with white or very light grey surfaces at high alpha;
+- primary is **neutral**: the label colour, near-white (`#ECECEF`) in dark mode and near-black (`#1C1C1F`) in light mode, so primary fills are white with dark text in dark mode and near-black with white text in light mode. No purple anywhere (DECISIONS.md, "Visual direction"). A stored `#9B5DE5`, the old purple default, is read as the neutral default;
+- dark: a near-black window (`#0F0F11`) and a translucent `sidebar`; cards are hairline-outlined rather than filled;
+- light: a white window and a light translucent `sidebar`;
 - status colours: conventional Material-like values. Pick them to pass WCAG AA on the default surfaces.
 
 Media object: `{ url, type: image|video|audio|font, mime }`. `url` points to a launcher-served local file (§4.5) or to a remote `https` URL.

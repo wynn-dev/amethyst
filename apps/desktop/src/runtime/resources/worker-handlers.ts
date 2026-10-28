@@ -7,7 +7,7 @@
  */
 import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { copyFile, lstat, mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import {
   ContentStore,

@@ -110,9 +110,22 @@ The packaged app, before and after (`--compare`, medians of five cold starts). T
 | **Play click → Java spawned** (installed version) | ≤ 500 ms | 54 ms | 54 ms |
 | Renderer entry JS / CSS (gzip) | ≤ 350 / 60 KB | 215 / 12.6 KB | 215 / 12.6 KB |
 
-Every budget is met after the sweep. Before it, the one budget that was missed was memory: after
-scrolling the Mods tab the app sat at ~500 MB of footprint, most of it GPU textures held for a
-translucent table header.
+The "After" column was measured with an opaque table header, and with it every budget is met.
+Before the sweep, the one budget that was missed was memory: after scrolling the Mods tab the app
+sat at ~500 MB of footprint, most of it GPU textures held for the translucent, blurred table
+header. That header was then kept by design choice (fix 2), and with it the scroll budget is
+missed again:
+
+| Metric (frosted header kept, dev build, warm index) | Budget | Value |
+|---|---:|---:|
+| **Footprint after scrolling 400 mods, then 45 s idle** | ≤ 350 MB | **476 MB** |
+| — GPU right after the scroll | | 331 MB |
+| — renderer / runtime right after the scroll | | 152 / 87 MB |
+| Mods scroll: fps / p95 frame / worst frame | 60+ fps, no task > 50 ms | 120 / 8.5 / 9.4 ms |
+| Mods scroll: renderer / GPU CPU | | 35 / 18 % |
+
+Scrolling stays smooth; only the memory budget is affected, and only after a long table has been
+scrolled.
 
 ## What was fixed
 
@@ -127,12 +140,13 @@ translucent table header.
    components per frame (only rows entering the window), renderer CPU while scrolling 52 → 36 %.
    Test: `VirtualList.test.tsx` "re-renders only the rows that changed, and builds row menus only
    when one opens".
-2. **The sticky table header's backdrop blur held ~200 MB of GPU memory** (`ui/VirtualList.tsx`).
+2. **The sticky table header's backdrop blur holds ~200 MB of GPU memory** (`ui/VirtualList.tsx`).
+   Found, measured, and kept by design choice.
    Found by bisecting effects with `AMETHYST_BENCH_CSS`: with `backdrop-blur-xl` on the sticky
    header inside the scroller, the GPU process kept ~330 MB after a scroll and ~300 MB a minute
    later; without it, ~215 MB and ~80 MB. Isolating the scroller (`will-change`, `contain`) did not
-   help. The header is now opaque `bg-window` instead of 90 % `bg-window` plus blur, a 10 %
-   see-through that is hardly visible; it is the only visual change of the sweep.
+   help. An opaque `bg-window` header removes the cost (the "After" column), but the frosted look
+   was chosen over it, so the header keeps 90 % `bg-window` plus blur; see "What remains".
 3. **Mod and pack icons were cached and served at full size** (`runtime/resources/thumbnail.ts`,
    `worker-handlers.ts`). Icons of 256–1024 px were drawn at 20–44 pt, so the renderer decoded up
    to 4 MB per icon. The scan workers now store icons larger than 128 px as 128 px thumbnails (a
@@ -192,6 +206,10 @@ translucent table header.
 
 ## What remains
 
+- **The frosted table header misses the memory budget after a long scroll** (476 MB against
+  350 MB; fix 2). The blur radius does not matter (6 px and 24 px plus saturation measured the
+  same, ~470 MB). Restructuring (the header outside the scroller, blurring only while rows are
+  under it) is to be measured with the UI redesign.
 - **Closing the Settings window blocks the main thread for ~100 ms** (`BrowserWindow.close()` on
   a vibrancy window, measured by the harness; the only main-thread task over 50 ms in the traces).
   It happens once per close, while the window animates out.

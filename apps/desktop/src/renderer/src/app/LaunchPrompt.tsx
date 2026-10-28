@@ -1,19 +1,15 @@
 import type { ReactNode } from 'react'
 import { AlertTriangle, Coffee, Cpu, KeyRound, UserRound, XOctagon } from 'lucide-react'
-import { Button, Sheet } from '@/ui'
+import { Button, Sheet, cn, recentTrigger } from '@/ui'
 import { describeError } from '@/lib/error-messages'
 import { closeLaunchPrompt, installJavaAndLaunch, launchInstance, useLaunchPrompt, type LaunchPrompt } from '@/data/launch'
 import { useUi } from './ui-store'
 import { copyToClipboard } from './clipboard'
 
-function Glyph({ children, tone }: { children: ReactNode; tone: 'accent' | 'orange' | 'red' | 'blue' }) {
-  const color = { accent: 'var(--accent)', orange: 'var(--color-orange)', red: 'var(--color-red)', blue: 'var(--color-blue)' }[tone]
+/** A plain line icon: muted for information, yellow-orange for warnings, red for errors. No tile. */
+function Glyph({ children, tone }: { children: ReactNode; tone: 'muted' | 'orange' | 'red' }) {
   return (
-    <span
-      aria-hidden
-      className="flex size-12 shrink-0 items-center justify-center rounded-xl [&_svg]:size-6"
-      style={{ background: `color-mix(in srgb, ${color} 14%, transparent)`, color }}
-    >
+    <span aria-hidden className={cn('flex size-5 shrink-0 items-center justify-center [&_svg]:size-[18px] [&_svg]:stroke-[1.5]', { muted: 'text-label-2', orange: 'text-orange', red: 'text-red' }[tone])}>
       {children}
     </span>
   )
@@ -33,7 +29,7 @@ function view(p: LaunchPrompt): View {
     case 'no-account':
       return {
         icon: (
-          <Glyph tone="blue">
+          <Glyph tone="muted">
             <UserRound />
           </Glyph>
         ),
@@ -86,7 +82,7 @@ function view(p: LaunchPrompt): View {
               Amethyst runs every Minecraft version natively on Apple silicon and never falls back to Rosetta. The native libraries this version needs haven’t been
               published for arm64 yet, so it can’t start. Newer versions work.
             </p>
-            <p className="selectable mt-2 rounded-md bg-fill px-2 py-1.5 font-mono text-small text-label-2">{p.message}</p>
+            <p className="selectable mt-2 rounded-md px-2 py-1.5 font-mono text-[11px] text-label-2 hairline">{p.message}</p>
           </>
         ),
         actions: (
@@ -197,13 +193,13 @@ export function LaunchPromptSheet() {
   const prompt = useLaunchPrompt((s) => s.prompt)
   const v = prompt ? view(prompt) : undefined
   return (
-    <Sheet open={!!prompt} onOpenChange={(o) => !o && closeLaunchPrompt()} title={v?.title ?? ''} hideTitle width={460} footer={v?.actions}>
+    <Sheet open={!!prompt} onOpenChange={(o) => !o && closeLaunchPrompt()} title={v?.title ?? ''} hideTitle width={440} footer={v?.actions} origin={recentTrigger}>
       {v && (
-        <div className="flex items-start gap-4 pt-1" data-launch-prompt={prompt?.kind}>
-          {v.icon}
+        <div className="flex items-start gap-3" data-launch-prompt={prompt?.kind}>
+          <div className="pt-px">{v.icon}</div>
           <div className="min-w-0 flex-1">
-            <h2 className="text-title3 font-semibold">{v.title}</h2>
-            <div className="mt-1.5 text-body text-label-2">{v.body}</div>
+            <h2 className="text-headline font-semibold">{v.title}</h2>
+            <div className="mt-1 text-compact text-label-2">{v.body}</div>
           </div>
         </div>
       )}

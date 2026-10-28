@@ -2,13 +2,14 @@ import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { AlertTriangle } from 'lucide-react'
 import type { InstanceRuntime, LoaderKind as RuntimeLoader } from '@shared/services'
-import { Button, Checkbox, Combobox, Segmented, Select, Sheet, Spinner } from '@/ui'
+import { Button, Checkbox, Combobox, Segmented, Select, Sheet, Spinner, recentTrigger } from '@/ui'
 import { api } from '@/lib/rpc'
 import { changeVersion, loaderName, useInstance } from '@/data/instances'
 import { useAppSettings } from '@/data/settings'
 import { useGameVersions, useLoaderVersions } from '@/data/versions'
 import type { LoaderKind } from '@/data/types'
 import { useUi } from '@/app/ui-store'
+import { Card, Row, VersionLabel } from './parts'
 
 const LOADERS: { value: LoaderKind; label: string }[] = [
   { value: 'vanilla', label: 'None' },
@@ -30,6 +31,8 @@ export default function ChangeVersionSheet({ target }: { target: { id: string; n
       title="Change Version"
       description={inst ? `Currently Minecraft ${inst.minecraft}${inst.loader.kind === 'vanilla' ? '' : ` with ${loaderName(inst.loader.kind)} ${inst.loader.version}`}.` : undefined}
       width={540}
+      origin={recentTrigger}
+      bodyClassName="!pb-0"
     >
       {inst ? (
         <VersionForm key={inst.id} inst={{ id: inst.id, name: inst.name, minecraft: inst.minecraft, loader: inst.loader, busy: inst.state.kind !== 'idle' && inst.state.kind !== 'problem' }} />
@@ -94,37 +97,35 @@ function VersionForm({ inst }: { inst: Current }) {
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-[110px_1fr] items-center gap-x-3 gap-y-3">
-        <span className="text-right text-body">Minecraft</span>
-        <div className="flex items-center gap-3">
+    <div className="flex flex-col gap-3">
+      <Card title="Version">
+        <Row label="Minecraft">
           <Combobox
             aria-label="Minecraft version"
             value={mc}
             onValueChange={setMc}
             options={options}
             placeholder={versions.isPending ? 'Loading versions…' : 'Choose a version'}
-            className="w-[200px]"
+            className="w-[180px]"
             emptyText={versions.isError ? 'Couldn’t load versions' : 'No matching versions'}
           />
-          <Checkbox checked={snapshots} onCheckedChange={setSnapshots} label="Show snapshots" />
-        </div>
-        <span className="text-right text-body">Mod loader</span>
-        <Segmented
-          aria-label="Mod loader"
-          value={loader}
-          onValueChange={(l) => {
-            setLoader(l)
-            setLoaderVersion(undefined)
-          }}
-          options={LOADERS}
-          className="justify-self-start"
-        />
+          <Checkbox checked={snapshots} onCheckedChange={setSnapshots} label="Show snapshots" className="ml-auto !items-center" />
+        </Row>
+        <Row label="Mod loader">
+          <Segmented
+            aria-label="Mod loader"
+            value={loader}
+            onValueChange={(l) => {
+              setLoader(l)
+              setLoaderVersion(undefined)
+            }}
+            options={LOADERS}
+          />
+        </Row>
         {loader !== 'vanilla' && (
-          <>
-            <span className="text-right text-body">{loaderName(loader)}</span>
+          <Row label={loaderName(loader)}>
             {loaderUnavailable ? (
-              <p className="text-callout text-orange">
+              <p className="text-meta text-orange">
                 {loaderName(loader)} isn’t available for {mc}.
               </p>
             ) : (
@@ -133,45 +134,41 @@ function VersionForm({ inst }: { inst: Current }) {
                 value={effectiveLoaderVersion ?? ''}
                 onValueChange={setLoaderVersion}
                 disabled={lv.isPending}
-                className="w-[200px]"
+                className="w-[250px]"
                 options={loaderVersions.map((v) => ({
                   value: v.version,
                   text: v.version,
-                  label: (
-                    <span className="flex items-center gap-2">
-                      {v.version}
-                      {v.recommended && <span className="text-small opacity-70">Recommended</span>}
-                      {v.latest && <span className="text-small opacity-70">Latest</span>}
-                    </span>
-                  ),
+                  label: <VersionLabel version={v.version} recommended={v.recommended} latest={v.latest} />,
                 }))}
               />
             )}
-          </>
+          </Row>
         )}
-      </div>
+      </Card>
 
-      <section aria-label="What will change" className="rounded-lg bg-surface p-3 shadow-[inset_0_0_0_0.5px_var(--color-surface-border)]">
-        <h3 className="mb-1.5 text-body font-semibold">What will change</h3>
+      <section aria-label="What will change" className="overflow-hidden rounded-[10px] border border-separator">
+        <h3 className="flex h-8 items-center border-b border-separator px-3 text-meta font-semibold text-label-2">What will change</h3>
         {unchanged ? (
-          <p className="text-callout text-label-2">Nothing yet. Pick a different version or loader.</p>
+          <p className="flex min-h-[34px] items-center px-3 text-compact text-label-2">Nothing yet. Pick a different version or loader.</p>
         ) : (
-          <ul className="flex flex-col gap-1.5 text-callout">
+          <ul className="flex flex-col divide-y divide-separator text-compact">
             {consequences.map((c) => (
-              <li key={c}>• {c}</li>
+              <li key={c} className="flex min-h-[34px] items-center px-3 py-1.5">
+                {c}
+              </li>
             ))}
             {changedMc && modCount > 0 && (
-              <li className="flex items-start gap-1.5 text-orange">
-                <AlertTriangle className="mt-px size-3.5 shrink-0" />
+              <li className="flex min-h-[34px] items-start gap-2 px-3 py-2 text-orange">
+                <AlertTriangle className="mt-px size-3.5 shrink-0" strokeWidth={1.75} />
                 {modCount} enabled {modCount === 1 ? 'mod stays' : 'mods stay'} installed. Mods without a version for {mc} may not load; review them in the Mods tab afterwards.
               </li>
             )}
-            <li className="text-label-2">{backups ? 'Your worlds are backed up first.' : 'Automatic world backups are off in Settings.'}</li>
+            <li className="flex min-h-[34px] items-center px-3 py-1.5 text-label-2">{backups ? 'Your worlds are backed up first.' : 'Automatic world backups are off in Settings.'}</li>
           </ul>
         )}
-        {inst.busy && <p className="mt-2 text-callout text-orange">Stop the game (or wait for the install) before changing the version.</p>}
+        {inst.busy && <p className="border-t border-separator px-3 py-2 text-compact text-orange">Stop the game (or wait for the install) before changing the version.</p>}
       </section>
-      <div className="-mx-5 -mb-4 flex justify-end gap-2 border-t border-separator px-5 py-3">
+      <div className="-mx-5 mt-1 flex justify-end gap-2 border-t border-separator px-4 py-2.5">
         <Button onClick={close}>Cancel</Button>
         <Button variant="primary" disabled={unchanged || loaderUnavailable || !mc || inst.busy || (loader !== 'vanilla' && !effectiveLoaderVersion)} onClick={apply}>
           Change Version

@@ -1,19 +1,22 @@
 import type { ReactNode } from 'react'
-import { AlertTriangle, CheckCircle2, Info, XOctagon } from 'lucide-react'
-import { Badge, Button, Skeleton, Spinner, cn } from '@/ui'
+import { AlertTriangle, Check, Info, XOctagon } from 'lucide-react'
+import type { ResourceRow } from '@shared/services'
+import { Button, DitherBar, Dot, Skeleton, Spinner, cn } from '@/ui'
 import { QueryError } from '@/app/RouteStates'
 import { openInstance } from '@/app/commands'
 import { formatDate, formatDuration, formatRelative } from '@/app/visuals'
-import { useContentCounts } from '@/data/content'
+import { useContentCounts, useWorlds } from '@/data/content'
 import { installInstance, instanceActions, updateInstance, useInstallStatus, useInstance } from '@/data/instances'
 import { javaActions, useJavaRecommendation } from '@/data/java'
-import { launchInstance, useLaunchEntry } from '@/data/launch'
+import { STEP_LABELS, launchInstance, useLaunchEntry } from '@/data/launch'
 import { openModpackUpdate } from '@/data/modpacks'
+import { useAppSettings, useSystemInfo } from '@/data/settings'
+import { useInstanceTask } from '@/data/tasks'
 import { describeError } from '@/lib/error-messages'
 import type { InstanceDetail, InstanceIssue } from '@/data/types'
-import { useInstanceId } from './parts'
+import { Card, CardRow, KeyValueRow, RowText, SOURCE_LABEL, StatStrip, WorldThumb, cardRowClass, useInstanceId, type StatItem } from './parts'
 
-/** Overview tab: status and fixes, summary counts and the upstream modpack (B3.2). */
+/** Overview tab: status and fixes, figures, recent worlds, the runtime and the upstream modpack (B3.2). */
 export default function OverviewTab() {
   const id = useInstanceId()
   const q = useInstance(id)
@@ -21,26 +24,37 @@ export default function OverviewTab() {
   const inst = q.data
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="mx-auto flex max-w-[860px] flex-col gap-5 px-6 py-5">
-        {inst ? <StatusCard inst={inst} /> : <Skeleton className="h-16 rounded-xl" />}
-        {inst ? <Summary inst={inst} /> : <Skeleton className="h-28 rounded-xl" />}
-        {inst?.upstream && <UpstreamCard inst={inst} />}
+      <div className="flex flex-col gap-3 px-4 pt-3.5 pb-[18px]">
+        {inst ? (
+          <>
+            <Status inst={inst} />
+            <Stats inst={inst} />
+            <div className="grid grid-cols-1 items-start gap-3 min-[900px]:grid-cols-[1.25fr_1fr]">
+              <div className="flex min-w-0 flex-col gap-3">
+                <RecentWorlds inst={inst} />
+                <Runtime inst={inst} />
+              </div>
+              <div className="flex min-w-0 flex-col gap-3">
+                <Activity inst={inst} />
+                {inst.upstream && <Modpack inst={inst} />}
+              </div>
+            </div>
+          </>
+        ) : (
+          <>
+            <Skeleton className="h-[34px] rounded-[10px]" />
+            <Skeleton className="h-[66px] rounded-[10px]" />
+            <Skeleton className="h-40 rounded-[10px]" />
+          </>
+        )}
       </div>
     </div>
   )
 }
 
-function Card({ title, children, action, className }: { title: string; children: ReactNode; action?: ReactNode; className?: string }) {
-  return (
-    <section aria-label={title} className={cn('rounded-xl bg-surface p-4 shadow-[inset_0_0_0_0.5px_var(--color-surface-border)]', className)}>
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-body font-semibold">{title}</h2>
-        {action}
-      </div>
-      {children}
-    </section>
-  )
-}
+/* ------------------------------------------------------------------------------------------ */
+/* Status                                                                                       */
+/* ------------------------------------------------------------------------------------------ */
 
 /** Problems with a fix each: install state, Java, the last launch or crash. */
 function useIssues(inst: InstanceDetail): { issues: InstanceIssue[]; notes: string[]; loading: boolean } {
@@ -74,122 +88,249 @@ function useIssues(inst: InstanceDetail): { issues: InstanceIssue[]; notes: stri
   return { issues, notes, loading: status.isPending }
 }
 
-function StatusCard({ inst }: { inst: InstanceDetail }) {
+const statusRow = 'flex min-h-[34px] items-center gap-2.5 rounded-[10px] border border-separator px-3 py-1 text-compact'
+
+/**
+ * One compact row while all is well (or while the instance is busy); a card of problems, each
+ * with its fix, when something needs attention.
+ */
+function Status({ inst }: { inst: InstanceDetail }) {
   const { issues, notes, loading } = useIssues(inst)
+  const progress = useInstanceTask(inst.state.kind === 'installing' ? inst.id : undefined)
+  const s = inst.state
+  // Busy states describe themselves; the notes are about the next launch.
+  if (s.kind === 'installing' || s.kind === 'launching' || s.kind === 'running') {
+    const pct = progress === undefined ? undefined : Math.round(progress * 100)
+    return (
+      <div className={statusRow} role="status" data-status={s.kind}>
+        {s.kind === 'running' ? <Dot tone="green" label="Running" /> : <Spinner size={14} />}
+        <span className="shrink-0 font-medium">{s.kind === 'running' ? 'Playing now' : s.kind === 'launching' ? (s.step ? `${STEP_LABELS[s.step]}…` : 'Launching…') : 'Installing…'}</span>
+        {s.kind === 'installing' ? (
+          <>
+            <DitherBar value={progress} label="Install progress" className="ml-1 max-w-[220px] flex-1" />
+            {pct !== undefined && <span className="font-mono text-[11px] text-label-2 tabular">{pct}%</span>}
+            <span className="flex-1" />
+          </>
+        ) : (
+          <span className="min-w-0 flex-1 truncate text-meta text-label-2">{notes[0]}</span>
+        )}
+      </div>
+    )
+  }
   if (loading) {
     return (
-      <div className="flex items-center gap-3 rounded-xl bg-surface px-4 py-3 shadow-[inset_0_0_0_0.5px_var(--color-surface-border)]">
-        <Spinner size={16} />
-        <p className="text-body text-label-2">Checking this instance…</p>
+      <div className={statusRow}>
+        <Spinner size={14} />
+        <span className="text-label-2">Checking this instance…</span>
       </div>
     )
   }
   if (!issues.length) {
-    const running = inst.state.kind === 'running'
     return (
-      <div className="flex items-center gap-3 rounded-xl bg-surface px-4 py-3 shadow-[inset_0_0_0_0.5px_var(--color-surface-border)]" data-status="ready">
-        <CheckCircle2 className="size-5 shrink-0 text-green" />
-        <div className="min-w-0">
-          <p className="text-body font-medium">{running ? 'Playing now' : inst.state.kind === 'installing' ? 'Installing…' : 'Ready to play'}</p>
-          <p className="text-small text-label-2">{notes[0] ?? 'No problems found with this instance.'}</p>
-        </div>
+      <div className={statusRow} data-status="ready">
+        <Check className="size-[15px] shrink-0 text-label-2" strokeWidth={1.75} />
+        <span className="shrink-0 font-medium">Ready to play</span>
+        <span className="min-w-0 flex-1 truncate text-meta text-label-2">{notes[0] ?? 'No problems found with this instance.'}</span>
       </div>
     )
   }
   return (
-    <Card title="Status">
-      <ul className="flex flex-col divide-y divide-separator">
-        {issues.map((issue) => (
-          <li key={issue.id} className="flex items-center gap-3 py-2 first:pt-0 last:pb-0">
-            {issue.severity === 'error' ? <XOctagon className="size-4 shrink-0 text-red" /> : <AlertTriangle className="size-4 shrink-0 text-orange" />}
-            <span className="min-w-0 flex-1">
-              <span className="block text-body">{issue.title}</span>
-              {issue.description && <span className="block text-small text-label-2">{issue.description}</span>}
-            </span>
-            {issue.action && (
-              <Button size="md" variant={issue.severity === 'error' ? 'primary' : 'push'} onClick={issue.action.run}>
-                {issue.action.label}
-              </Button>
-            )}
-          </li>
-        ))}
-        {notes.map((n) => (
-          <li key={n} className="flex items-center gap-3 py-2 last:pb-0">
-            <Info className="size-4 shrink-0 text-label-3" />
-            <span className="text-small text-label-2">{n}</span>
-          </li>
-        ))}
-      </ul>
+    <Card title="Status" count={issues.length}>
+      {issues.map((issue) => (
+        <CardRow key={issue.id}>
+          {issue.severity === 'error' ? <XOctagon className="size-[15px] shrink-0 text-red" strokeWidth={1.75} /> : <AlertTriangle className="size-[15px] shrink-0 text-yellow" strokeWidth={1.75} />}
+          <RowText title={<span className="font-normal">{issue.title}</span>} subtitle={issue.description} />
+          {issue.action && (
+            <Button size="md" variant={issue.severity === 'error' ? 'primary' : 'push'} onClick={issue.action.run}>
+              {issue.action.label}
+            </Button>
+          )}
+        </CardRow>
+      ))}
+      {notes.map((n) => (
+        <CardRow key={n}>
+          <Info className="size-[15px] shrink-0 text-label-3" strokeWidth={1.5} />
+          <span className="text-meta text-label-2">{n}</span>
+        </CardRow>
+      ))}
     </Card>
   )
 }
 
-function Stat({ label, value, onClick }: { label: string; value: ReactNode; onClick?: () => void }) {
-  const body = (
-    <>
-      <span className="text-small text-label-2">{label}</span>
-      <span className="text-title2 font-semibold tabular">{value}</span>
-    </>
-  )
-  return onClick ? (
-    <button type="button" onClick={onClick} className="flex min-w-0 flex-col items-start gap-0.5 rounded-lg px-2 py-1.5 text-left hover:bg-fill">
-      {body}
-    </button>
-  ) : (
-    <div className="flex min-w-0 flex-col gap-0.5 px-2 py-1.5">{body}</div>
-  )
+/* ------------------------------------------------------------------------------------------ */
+/* Figures                                                                                      */
+/* ------------------------------------------------------------------------------------------ */
+
+/** Play time as a figure and a unit: "45 min", "1.5 h", "31 h". */
+function playTimeFigure(ms: number): { value: string; unit: string } {
+  if (ms < 3_600_000) return { value: String(Math.round(ms / 60_000)), unit: ms ? 'min' : 'h' }
+  const h = ms / 3_600_000
+  return { value: h < 10 ? String(Math.round(h * 10) / 10) : String(Math.round(h)), unit: 'h' }
 }
 
-const n = (v: number | undefined) => (v === undefined ? '—' : v)
+const figure = (n: number | undefined) => (n === undefined ? '—' : n.toLocaleString())
 
-function Summary({ inst }: { inst: InstanceDetail }) {
+function Stats({ inst }: { inst: InstanceDetail }) {
   const modded = inst.loader.kind !== 'vanilla'
   const { data: c } = useContentCounts(inst.id, modded)
-  const small = (text: string) => <span className="block truncate text-body font-medium">{text}</span>
+  const played = playTimeFigure(inst.playTimeMs)
+  const off = c?.mods !== undefined && c.modsEnabled !== undefined ? c.mods - c.modsEnabled : 0
+  const open = (tab: Parameters<typeof openInstance>[1]) => () => openInstance(inst.id, tab)
+  const packs: StatItem = { label: 'Resource packs', value: figure(c?.resourcePacks), onClick: open('resource-packs') }
+  const items: StatItem[] = [
+    { label: 'Played', value: played.value, unit: played.unit },
+    ...(modded ? [{ label: 'Mods', value: figure(c?.mods), ...(off > 0 ? { unit: `${off} off` } : {}), onClick: open('mods') }] : []),
+    { label: 'Worlds', value: figure(c?.worlds), onClick: open('worlds') },
+    packs,
+    ...(modded ? [] : [{ label: 'Shaders', value: figure(c?.shaders), onClick: open('shaders') }]),
+  ]
+  return <StatStrip label="Summary" items={items} />
+}
+
+/* ------------------------------------------------------------------------------------------ */
+/* Worlds                                                                                       */
+/* ------------------------------------------------------------------------------------------ */
+
+const WORLDS_SHOWN = 3
+const playedAt = (w: ResourceRow) => w.world?.lastPlayed ?? w.mtimeMs
+
+function RecentWorlds({ inst }: { inst: InstanceDetail }) {
+  const worlds = useWorlds(inst.id)
+  const list = (worlds.data ?? []).toSorted((a, b) => playedAt(b) - playedAt(a))
   return (
-    <Card
-      title="Summary"
-      action={
-        <Button variant="borderless" size="sm" onClick={() => void instanceActions.revealInFinder(inst)}>
-          Show in Finder
-        </Button>
-      }
-    >
-      <div className="grid grid-cols-4 gap-1">
-        <Stat label="Mods" value={!modded ? '—' : c?.mods === undefined ? '—' : `${n(c.modsEnabled)} / ${c.mods}`} onClick={modded ? () => openInstance(inst.id, 'mods') : undefined} />
-        <Stat label="Resource Packs" value={n(c?.resourcePacks)} onClick={() => openInstance(inst.id, 'resource-packs')} />
-        <Stat label="Shaders" value={n(c?.shaders)} onClick={() => openInstance(inst.id, 'shaders')} />
-        <Stat label="Worlds" value={n(c?.worlds)} onClick={() => openInstance(inst.id, 'worlds')} />
-        <Stat label="Last Played" value={small(inst.lastPlayedAt ? formatRelative(inst.lastPlayedAt) : 'Never')} />
-        <Stat label="Play Time" value={small(inst.playTimeMs ? formatDuration(inst.playTimeMs) : '—')} />
-        <Stat label="Game Version" value={small(inst.versionId || 'Not installed')} />
-        <Stat label="Created" value={small(formatDate(inst.createdAt))} />
-      </div>
+    <Card title="Worlds" count={worlds.data ? list.length : undefined}>
+      {worlds.isPending ? (
+        <CardRow tall>
+          <Skeleton className="h-[30px] w-[52px] rounded-[5px]" />
+          <Skeleton className="h-2.5 w-32" />
+        </CardRow>
+      ) : list.length === 0 ? (
+        <CardRow tall className="text-label-2">
+          No worlds yet. Worlds you create in the game appear here.
+        </CardRow>
+      ) : (
+        <>
+          {list.slice(0, WORLDS_SHOWN).map((w) => (
+            <button key={w.id} type="button" onClick={() => openInstance(inst.id, 'worlds')} className={cn(cardRowClass(true), 'text-left outline-none hover:bg-hover focus-visible:bg-hover')}>
+              <WorldThumb world={w} />
+              <span className="min-w-0 flex-1 truncate">{w.name}</span>
+              <span className="shrink-0 text-meta text-label-2">{playedAt(w) ? formatRelative(playedAt(w)) : ''}</span>
+            </button>
+          ))}
+          {list.length > WORLDS_SHOWN && (
+            <button type="button" onClick={() => openInstance(inst.id, 'worlds')} className={cn(cardRowClass(), 'text-left text-meta text-label-2 outline-none hover:bg-hover hover:text-label focus-visible:bg-hover')}>
+              Show all {list.length} worlds
+            </button>
+          )}
+        </>
+      )}
     </Card>
   )
 }
 
-function UpstreamCard({ inst }: { inst: InstanceDetail }) {
+/* ------------------------------------------------------------------------------------------ */
+/* Runtime                                                                                      */
+/* ------------------------------------------------------------------------------------------ */
+
+const VENDORS: [RegExp, string][] = [
+  [/azul/i, 'Zulu'],
+  [/adoptium|temurin|eclipse/i, 'Temurin'],
+  [/amazon|corretto/i, 'Corretto'],
+  [/microsoft/i, 'Microsoft'],
+  [/graal/i, 'GraalVM'],
+  [/oracle/i, 'Oracle'],
+]
+const vendorName = (v: string | null) => (v ? (VENDORS.find(([re]) => re.test(v))?.[1] ?? v.replace(/,? (Inc|Ltd|Corporation|Systems)\.?/g, '')) : 'Java')
+const gb = (mb: number) => `${Math.round((mb / 1024) * 10) / 10} GB`
+const tilde = (path: string) => path.replace(/^\/Users\/[^/]+/, '~')
+
+function Runtime({ inst }: { inst: InstanceDetail }) {
+  const rec = useJavaRecommendation(inst.id)
+  const status = useInstallStatus(inst.id)
+  const global = useAppSettings().game
+  const system = useSystemInfo()
+  const mem = inst.overrides.memory ?? (global.memory.mode === 'manual' ? global.memory : { mode: 'auto' as const, maxMB: 0 })
+  const total = system.data ? `of ${gb(system.data.totalMemoryMB)}` : undefined
+  const java = rec.data?.java
+  const mono = 'font-mono text-[11.5px]'
+  return (
+    <Card title="Runtime">
+      <KeyValueRow label="Version" trailing={status.data && !status.data.installed ? 'Not installed' : undefined}>
+        <span className={mono}>{inst.versionId || inst.minecraft || '—'}</span>
+      </KeyValueRow>
+      <KeyValueRow label="Java" trailing={java ? <span className={mono}>{java.arch === 'x64' ? 'x86_64' : java.arch}</span> : rec.data?.willInstall ? 'downloads on first launch' : undefined}>
+        {rec.isPending ? <span className="text-label-3">…</span> : java ? `${vendorName(java.vendor)} ${java.version}` : rec.data ? `Java ${rec.data.major}` : <span className="text-label-2">Chosen when the version is known</span>}
+      </KeyValueRow>
+      <KeyValueRow label="Memory" trailing={total}>
+        {mem.mode === 'auto' ? 'Automatic' : gb(mem.maxMB)}
+      </KeyValueRow>
+      <button type="button" title="Show in Finder" onClick={() => void instanceActions.revealInFinder(inst)} className={cn(cardRowClass(), 'group text-left outline-none hover:bg-hover focus-visible:bg-hover')}>
+        <span className="w-[76px] shrink-0 text-meta text-label-2">Folder</span>
+        <span className={cn('selectable min-w-0 flex-1 truncate', mono)}>{tilde(inst.path)}</span>
+      </button>
+    </Card>
+  )
+}
+
+/* ------------------------------------------------------------------------------------------ */
+/* Activity and the modpack                                                                     */
+/* ------------------------------------------------------------------------------------------ */
+
+function Activity({ inst }: { inst: InstanceDetail }) {
+  const launch = useLaunchEntry(inst.id)
+  const exit = launch?.exit
+  const rows: { key: string; text: ReactNode; at: string }[] = []
+  if (exit) {
+    const verb = exit.crashed ? 'Crashed after' : exit.killed ? 'Stopped after' : 'Played for'
+    rows.push({ key: 'session', text: `${verb} ${formatDuration(exit.durationMs)}`, at: formatRelative(exit.at) })
+  } else if (inst.lastPlayedAt) {
+    rows.push({ key: 'played', text: 'Last played', at: formatRelative(inst.lastPlayedAt) })
+  }
+  if (inst.playTimeMs > 0) rows.push({ key: 'total', text: `${formatDuration(inst.playTimeMs)} played in total`, at: '' })
+  if (inst.upstream) {
+    rows.push({
+      key: 'pack',
+      text: (
+        <>
+          Installed {inst.upstream.projectName} <span className="font-mono text-[11.5px] text-label-2">{inst.upstream.version}</span>
+        </>
+      ),
+      at: '',
+    })
+  }
+  rows.push({ key: 'created', text: inst.upstream ? `Created from ${SOURCE_LABEL[inst.upstream.source]}` : 'Created', at: formatDate(inst.createdAt) })
+  return (
+    <Card title="Activity">
+      {rows.map((r) => (
+        <CardRow key={r.key}>
+          <span className="min-w-0 flex-1 truncate">{r.text}</span>
+          {r.at && <span className="shrink-0 text-meta text-label-2">{r.at}</span>}
+        </CardRow>
+      ))}
+    </Card>
+  )
+}
+
+function Modpack({ inst }: { inst: InstanceDetail }) {
   const up = inst.upstream!
+  const newer = up.latestVersion && up.latestVersion !== up.version ? up.latestVersion : undefined
   return (
     <Card
       title="Modpack"
       action={
-        <Button variant="borderless" size="sm" onClick={() => openModpackUpdate(inst.id, inst.name)}>
+        <Button variant="borderless" size="sm" className="-mr-1.5" onClick={() => openModpackUpdate(inst.id, inst.name)}>
           Version History…
         </Button>
       }
     >
-      <div className="flex items-center gap-3">
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-body font-medium">{inst.homepageUrl || up.projectName}</p>
-          <p className="mt-0.5 flex items-center gap-1.5 text-small text-label-2">
-            <Badge tone={up.source === 'modrinth' ? 'success' : 'warning'}>{up.source === 'modrinth' ? 'Modrinth' : 'CurseForge'}</Badge>
-            Installed version {up.version}
-          </p>
-        </div>
+      <KeyValueRow label="Project">{inst.homepageUrl || up.projectName}</KeyValueRow>
+      <KeyValueRow label="Source">{SOURCE_LABEL[up.source]}</KeyValueRow>
+      <KeyValueRow label="Version" trailing={newer && <span className="font-mono text-[11.5px] text-label">→ {newer}</span>}>
+        <span className="font-mono text-[11.5px]">{up.version}</span>
+      </KeyValueRow>
+      <CardRow className="justify-end">
         <Button onClick={() => openModpackUpdate(inst.id, inst.name)}>Check for Updates…</Button>
-      </div>
+      </CardRow>
     </Card>
   )
 }

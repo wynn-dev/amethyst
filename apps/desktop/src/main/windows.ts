@@ -96,6 +96,8 @@ export function guardNavigation(contents: WebContents): void {
 interface Shot {
   name: string
   hash: string
+  /** RPC calls made before `setup` (e.g. settings the page reads as it loads after the reload). */
+  before?: RpcStep[]
   /** JavaScript to run before navigating (e.g. set the fixture mode). Triggers a reload when `reload`. */
   setup?: string
   reload?: boolean
@@ -107,6 +109,8 @@ interface Shot {
   wait?: number
   /** RPC calls made through the main window's bridge before the shot (awaited, in order). */
   invoke?: RpcStep[]
+  /** JavaScript run in the main window after navigating and before `command` (e.g. open an instance the command acts on). */
+  prepare?: string
   /** JavaScript run in the captured window before settling (e.g. scroll a row into view). */
   script?: string
   /** RPC calls made after the shot, to leave the state as it was. */
@@ -121,7 +125,6 @@ type RpcStep = [string, string, unknown[]]
 const ACCENT_SHOTS: [string, string][] = [
   ['neutral', DEFAULT_ACCENT],
   ['blue', '#007aff'],
-  ['indigo', '#5856d6'],
   ['pink', '#ff2d55'],
   ['red', '#ff3b30'],
   ['orange', '#ff9500'],
@@ -154,6 +157,10 @@ const seedInstances = `(async () => {
 const openSample = (name: string, tab: string) =>
   `window.amethyst.invoke('instances', 'list', []).then((l) => { const i = l.ok && l.value.find((x) => x.name === ${JSON.stringify(name)}); if (i) location.hash = '#/instances/' + i.id + '/${tab}' })`
 
+/** Clicks the first element matching `selector` whose text includes `text` (in the shot's window). */
+const clickText = (selector: string, text: string) =>
+  `[...document.querySelectorAll(${JSON.stringify(selector)})].find((e) => e.textContent.includes(${JSON.stringify(text)}))?.click()`
+
 /** Installs a sample instance (a real download in the screenshot profile) to show the Play button's progress pill. */
 const installSample = (name: string) =>
   `window.amethyst.invoke('instances', 'list', []).then((l) => { const i = l.ok && l.value.find((x) => x.name === ${JSON.stringify(name)}); if (i) { location.hash = '#/instances/' + i.id + '/overview'; window.amethyst.invoke('install', 'install', [i.id]) } })`
@@ -162,11 +169,16 @@ const cancelTasks = `window.amethyst.invoke('tasks', 'list', []).then((l) => { f
 const firstRun = (step: string, completed = false) =>
   `localStorage.setItem('amethyst:first-run', ${JSON.stringify(JSON.stringify({ state: { completed, step }, version: 1 }))})`
 
+// First run shows only while Privacy is unanswered (the Home shot answers it).
+const unanswered: RpcStep[] = [['settings', 'patch', [{ privacy: { prompted: false } }]]]
+
 const SHOTS: Shot[] = [
-  { name: 'firstrun-welcome', hash: '#/welcome', setup: firstRun('welcome'), reload: true },
-  { name: 'firstrun-appearance', hash: '#/welcome', setup: firstRun('appearance'), reload: true },
-  { name: 'firstrun-privacy', hash: '#/welcome', setup: firstRun('privacy'), reload: true },
-  { name: 'firstrun-done', hash: '#/welcome', setup: firstRun('done'), reload: true },
+  { name: 'firstrun-welcome', hash: '#/welcome', before: unanswered, setup: firstRun('welcome'), reload: true },
+  { name: 'firstrun-appearance', hash: '#/welcome', before: unanswered, setup: firstRun('appearance'), reload: true },
+  { name: 'firstrun-account', hash: '#/welcome', before: unanswered, setup: firstRun('account'), reload: true },
+  { name: 'firstrun-java', hash: '#/welcome', before: unanswered, setup: firstRun('java'), reload: true },
+  { name: 'firstrun-privacy', hash: '#/welcome', before: unanswered, setup: firstRun('privacy'), reload: true },
+  { name: 'firstrun-done', hash: '#/welcome', before: unanswered, setup: firstRun('done'), reload: true },
   { name: 'home', hash: '#/', setup: `${firstRun('done', true)}; localStorage.removeItem('amethyst:fixtures')`, reload: true, invoke: [['settings', 'patch', [{ privacy: { prompted: true } }]]], script: seedInstances, wait: 400 },
   { name: 'discover', hash: '#/discover?type=modpack' },
   { name: 'discover-target', hash: '#/discover?type=mod&target=survival' },
@@ -186,6 +198,14 @@ const SHOTS: Shot[] = [
   { name: 'activity', hash: '#/', command: { command: 'view.activity' } },
   { name: 'shortcuts', hash: '#/', command: { command: 'help.shortcuts' } },
   { name: 'new-instance', hash: '#/', command: { command: 'file.newInstance' }, wait: 600 },
+  { name: 'new-instance-fabric', hash: '#/', command: { command: 'file.newInstance' }, wait: 900, script: `${clickText('[role=radio]', 'Fabric')}; ${clickText('button', 'Advanced')}` },
+  { name: 'new-instance-url', hash: '#/', command: { command: 'file.newInstance' }, wait: 400, script: clickText('[role=tab]', 'From URL') },
+  { name: 'new-instance-folder', hash: '#/', command: { command: 'file.addExistingFolder' }, wait: 600 },
+  { name: 'change-version', hash: '#/', prepare: openSample('Survival', 'overview'), command: { command: 'instance.changeVersion' }, wait: 600 },
+  { name: 'export-modpack', hash: '#/', prepare: openSample('Survival', 'overview'), command: { command: 'file.exportModpack' }, wait: 600 },
+  { name: 'import-url', hash: '#/', command: { command: 'file.importUrl' }, wait: 400 },
+  { name: 'add-account', hash: '#/', command: { command: 'account.add' }, wait: 400 },
+  { name: 'launch-prompt', hash: '#/', prepare: openSample('Vanilla', 'overview'), command: { command: 'instance.play' }, wait: 800 },
   { name: 'home-empty', hash: '#/', setup: `localStorage.setItem('amethyst:fixtures', 'empty')`, reload: true },
   { name: 'mods-loading', hash: '#/instances/survival/mods', setup: `localStorage.setItem('amethyst:fixtures', 'loading')`, reload: true },
   { name: 'discover-error', hash: '#/discover?type=mod', setup: `localStorage.setItem('amethyst:fixtures', 'error')`, reload: true },
@@ -193,6 +213,12 @@ const SHOTS: Shot[] = [
   { name: 'settings-accounts', hash: '', settings: { pane: 'accounts' } },
   { name: 'settings-appearance', hash: '', settings: { pane: 'appearance' } },
   { name: 'settings-privacy', hash: '', settings: { pane: 'privacy' } },
+  { name: 'settings-java', hash: '', settings: { pane: 'java' } },
+  { name: 'settings-game', hash: '', settings: { pane: 'game' } },
+  { name: 'settings-network', hash: '', settings: { pane: 'network' } },
+  { name: 'settings-updates', hash: '', settings: { pane: 'updates' } },
+  { name: 'settings-advanced', hash: '', settings: { pane: 'advanced' } },
+  { name: 'settings-about', hash: '', settings: { pane: 'about' } },
   // Skins and appearance. The skin pages are dev-only routes (run the screenshot mode under `electron-vite dev`).
   { name: 'skins-viewers', hash: '#/dev/skins', wait: 800 },
   { name: 'skins-editors', hash: '#/dev/skins?view=editors', wait: 1200 },
@@ -272,6 +298,7 @@ export async function runScreenshots(main: BrowserWindow, dir: string, onDone: (
   onDone()
 
   async function captureShot(shot: Shot, theme: 'light' | 'dark') {
+    await call(shot.before)
     if (shot.setup) await bounded(contents.executeJavaScript(`${shot.setup}; true`))
     if (shot.reload) await reload(contents)
     await call(shot.invoke)
@@ -293,6 +320,10 @@ export async function runScreenshots(main: BrowserWindow, dir: string, onDone: (
       getSettingsWindow()?.hide()
       main.focus()
       await bounded(contents.executeJavaScript(`location.hash = ${JSON.stringify(shot.hash)}; true`))
+      if (shot.prepare) {
+        await settle(contents)
+        await bounded(contents.executeJavaScript(`${shot.prepare}; true`))
+      }
       if (shot.command) {
         await settle(contents)
         sendMenuCommand(contents, shot.command)

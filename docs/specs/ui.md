@@ -763,7 +763,7 @@ There is no menu bar integration and no shortcut cheatsheet.
    - Flat surfaces separated by hairlines; cards are outlined, not filled. Blur only on the sidebar (vibrancy), the ⌘K palette, popovers and menus, and the sticky table header.
    - 13px base type; 26px sidebar rows, 32px table rows; monospaced figures for versions, sizes and dates.
    - Ordered (Bayer) dithering for progress and for placeholder art when an instance or project has no icon.
-   - Purposeful spring motion only (Play → progress → Running, sliding selection, surfaces growing from their trigger, the instance tile flying into the header). Everything honours Reduce Motion; nothing loops except the small running indicator.
+   - Purposeful spring motion only (Play → progress → Running, sliding selection, surfaces growing from their trigger, the instance tile flying into the header). Everything honours Reduce Motion; nothing loops (the small running indicator pulses three times when the game starts, then rests).
 
 ## B1. Window and layout
 

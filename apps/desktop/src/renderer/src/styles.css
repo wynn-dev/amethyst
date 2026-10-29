@@ -138,8 +138,8 @@
   --animate-enter: enter 200ms var(--ease-mac);
   --animate-spin: spin 0.9s linear infinite;
   --animate-shimmer: shimmer 1.4s ease-in-out infinite;
-  /* The running indicator: the only looping animation in the app. */
-  --animate-ring: ring 1.6s ease-out infinite;
+  /* The running indicator: a ring that pulses three times when the game starts, then rests (hidden). */
+  --animate-ring: ring 1.6s ease-out 3 forwards;
 
   @keyframes fade-in {
     from {

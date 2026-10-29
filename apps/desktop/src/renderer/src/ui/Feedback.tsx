@@ -207,7 +207,7 @@ export function Badge({ tone = 'neutral', children, className, title }: BadgePro
   )
 }
 
-/** A small status dot, e.g. "running". `pulse` adds the running ring (the one looping animation). */
+/** A small status dot, e.g. "running". `pulse` adds the running ring: three pulses when it appears, then the dot rests. */
 export function Dot({ tone = 'green', label, pulse }: { tone?: 'green' | 'orange' | 'red' | 'accent' | 'gray'; label: string; pulse?: boolean }) {
   const bg = { green: 'bg-green', orange: 'bg-orange', red: 'bg-red', accent: 'bg-accent', gray: 'bg-gray' }[tone]
   const ring = { green: 'border-green', orange: 'border-orange', red: 'border-red', accent: 'border-accent', gray: 'border-gray' }[tone]

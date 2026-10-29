@@ -23,7 +23,7 @@ import {
   type MenuEntry,
   type SortState,
 } from '@/ui'
-import { ChipGroup, chipButtonClass } from '@/ui/Chips'
+import { ChipGroup, ToggleChip, chipButtonClass } from '@/ui/Chips'
 import { QueryError } from '@/app/RouteStates'
 import { openInstance } from '@/app/commands'
 import { findTargetRef } from '@/app/ui-store'
@@ -59,9 +59,8 @@ import {
 import { InspectorHeader, InspectorSection, SplitView, copyText, sideLabel, useInstanceId, useSelection } from './parts'
 import { UpdatesSheet } from './updates-sheet'
 
+/** The radio chips; "has an update" is a separate toggle chip that combines with them. */
 type Show = 'all' | 'enabled' | 'disabled'
-/** The filter chips: the three "show" states, plus "has an update". */
-type Chip = Show | 'updates'
 type SourceFilter = MarketPlatform | 'local'
 interface Filters {
   show: Show
@@ -115,10 +114,13 @@ export default function ModsTab() {
   const problems = useMemo(() => problemIndex(analysis.data), [analysis.data])
   const updates = useUpdateCandidates(id, 'mods', checked)
   const updateById = useMemo(() => new Map((updates.data ?? []).map((u) => [u.resourceId, u])), [updates.data])
+  // The Updates chip filters on results already known (cached from a check); it never checks itself.
+  const updatesKnown = updates.data !== undefined
+  const hasUpdate = filters.hasUpdate && updatesKnown
 
   const listQuery = useMemo<ListQuery>(() => {
     let ids: string[] | undefined
-    if (filters.hasUpdate) ids = [...updateById.keys()]
+    if (hasUpdate) ids = [...updateById.keys()]
     if (filters.problems) ids = (ids ?? [...problems.keys()]).filter((x) => problems.has(x))
     return {
       ...(search ? { search } : {}),
@@ -127,7 +129,7 @@ export default function ModsTab() {
       ...(ids ? { ids } : {}),
       ...(filters.sources.size < ALL_SOURCES.length ? { sources: [...filters.sources] } : {}),
     }
-  }, [search, sort, filters, updateById, problems])
+  }, [search, sort, filters, hasUpdate, updateById, problems])
   const list = usePagedResources(id, 'mods', listQuery)
   const unfiltered = usePagedResources(id, 'mods', {})
   const disabledCount = useResourceCount(id, 'mods', { enabled: false }, !vanilla)
@@ -325,20 +327,25 @@ export default function ModsTab() {
         }
       >
         <SearchField ref={findTargetRef} value={query} onValueChange={setQuery} placeholder="Filter mods" label="Search mods" className="mr-1 w-[190px]" />
-        <ChipGroup<Chip>
+        <ChipGroup<Show>
           aria-label="Show"
-          value={filters.hasUpdate ? 'updates' : filters.show}
-          onValueChange={(v) => {
-            if (v === 'updates') setChecked(true)
-            setFilters({ ...filters, show: v === 'updates' ? 'all' : v, hasUpdate: v === 'updates' })
-          }}
+          value={filters.show}
+          onValueChange={(show) => setFilters({ ...filters, show })}
           options={[
             { value: 'all', label: 'All', count: total },
             { value: 'enabled', label: 'Enabled', count: disabledCount === undefined ? undefined : total - disabledCount },
             { value: 'disabled', label: 'Disabled', count: disabledCount },
-            { value: 'updates', label: 'Updates', count: updates.data ? updateById.size : undefined },
           ]}
         />
+        <ToggleChip
+          pressed={hasUpdate}
+          onPressedChange={(on) => setFilters({ ...filters, hasUpdate: on })}
+          count={updatesKnown ? updateById.size : undefined}
+          disabled={!updatesKnown}
+          title={updatesKnown ? 'Show only mods with an update' : 'Check for Updates first'}
+        >
+          Updates
+        </ToggleChip>
         <FilterPopover filters={filters} onChange={setFilters} count={filterCount} />
         {!list.isPending && (list.total !== total || selection.size > 1) && <CountLabel kind="mods" total={list.total} all={total} selected={selection.size} />}
         {checked && updates.isFetching && (

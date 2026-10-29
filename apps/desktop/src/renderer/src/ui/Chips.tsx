@@ -60,6 +60,42 @@ export function ChipGroup<V extends string>({ value, onValueChange, options, cla
   )
 }
 
+export interface ToggleChipProps {
+  pressed: boolean
+  onPressedChange: (pressed: boolean) => void
+  children: ReactNode
+  /** A count shown after the label in small monospaced figures. */
+  count?: number
+  disabled?: boolean
+  /** Tooltip, e.g. why the chip is disabled. */
+  title?: string
+  className?: string
+}
+
+/**
+ * A quiet chip that turns a filter on and off on its own (a toggle button, `aria-pressed`), next to
+ * a `ChipGroup` it combines with. Pressed, it carries the same grey pill as the group's selection.
+ */
+export function ToggleChip({ pressed, onPressedChange, children, count, disabled, title, className }: ToggleChipProps) {
+  return (
+    <button
+      type="button"
+      aria-pressed={pressed}
+      disabled={disabled}
+      title={title}
+      onClick={() => onPressedChange(!pressed)}
+      className={cn(
+        'relative flex h-6 shrink-0 items-center gap-[5px] rounded-md px-[9px] text-callout whitespace-nowrap text-label-2 outline-none transition-colors duration-150',
+        'hover:text-label focus-visible:shadow-[inset_0_0_0_1.5px_var(--focus-ring)] aria-pressed:bg-selection aria-pressed:text-label disabled:opacity-40 disabled:hover:text-label-2',
+        className,
+      )}
+    >
+      {children}
+      {count !== undefined && <span className="font-mono text-[10.5px] text-label-3 tabular">{count}</span>}
+    </button>
+  )
+}
+
 /** An outlined chip button (the mockup's `.chip.ol`): a filter or scope that opens something. */
 export const chipButtonClass =
   'inline-flex h-6 shrink-0 items-center gap-[5px] rounded-md px-2 text-callout whitespace-nowrap text-label-2 hairline-strong outline-none transition-colors duration-150 hover:bg-hover hover:text-label data-[state=open]:bg-fill data-[state=open]:text-label [&_svg]:size-[13px] [&_svg]:shrink-0'

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { Plus, Sun, Trash2 } from 'lucide-react'
+import { ChevronDown, Plus, Sun, Trash2 } from 'lucide-react'
 import type { LoaderKind, ResourceRow } from '@shared/services'
 import { Button, EmptyState, IconButton, Menu, SearchField, Sheet, SkeletonRows, VirtualTable, cn, type Column, type MenuEntry } from '@/ui'
 import { QueryError } from '@/app/RouteStates'
@@ -16,6 +16,7 @@ import { api } from '@/lib/rpc'
 import { errorCode, toastError } from '@/lib/error-messages'
 import {
   AddFromInstanceSheet,
+  ContentBar,
   DropOverlay,
   FileSection,
   PlaceholderCell,
@@ -29,7 +30,7 @@ import {
   useFileDrop,
   type ContentRow,
 } from './content-parts'
-import { InspectorHeader, InspectorSection, SplitView, SubToolbar, copyText, useInstanceId, useSelection } from './parts'
+import { InspectorHeader, InspectorSection, SplitView, copyText, useInstanceId, useSelection } from './parts'
 
 const NONE = '__none__'
 type Row = ContentRow | { id: typeof NONE }
@@ -95,8 +96,8 @@ export default function ShadersTab() {
     {
       id: 'active',
       title: 'Active',
-      header: 'Active',
-      width: '56px',
+      header: <span className="sr-only">Active</span>,
+      width: '42px',
       align: 'center',
       cell: (r) => {
         if (!isNone(r) && isPlaceholder(r)) return null
@@ -110,9 +111,12 @@ export default function ShadersTab() {
             aria-label={`Use ${name}`}
             onMouseDown={(e) => e.stopPropagation()}
             onClick={() => void activate(r)}
-            className={cn('flex size-[14px] items-center justify-center rounded-full shadow-control', on ? 'bg-accent-fill shadow-none' : 'bg-field')}
+            className={cn(
+              'flex size-[14px] items-center justify-center rounded-full transition-colors duration-150',
+              on ? 'bg-(--accent-switch)' : 'bg-fill hairline-strong hover:bg-fill-2',
+            )}
           >
-            {on && <span className="size-[5px] rounded-full bg-on-accent" />}
+            <span className={cn('size-[6px] rounded-full bg-(--on-accent-switch) transition-transform duration-(--duration-spring) ease-spring', on ? 'scale-100' : 'scale-0')} />
           </button>
         )
       },
@@ -124,18 +128,22 @@ export default function ShadersTab() {
       width: 'minmax(220px,1fr)',
       cell: (r) =>
         isNone(r) ? (
-          <span className="pl-[34px] text-label-2">None (vanilla graphics)</span>
+          <span className="flex items-baseline gap-2 pl-[27px]">
+            <span className="font-medium text-label-2">None</span>
+            <span className="text-meta text-label-3">Vanilla graphics</span>
+          </span>
         ) : isPlaceholder(r) ? (
           <PlaceholderCell index={r.index} request={request} />
         ) : (
-          <div className="flex min-w-0 items-center gap-2.5">
+          <div className="flex min-w-0 items-center gap-[9px]">
             <ResourceIcon row={r} />
-            <span className="truncate">{r.name}</span>
+            <span className="truncate font-medium">{r.name}</span>
+            {r.problem && <span className="truncate text-meta text-orange">{r.problem.message}</span>}
           </div>
         ),
     },
-    { id: 'source', title: 'Source', header: 'Source', width: '96px', cell: (r) => (isNone(r) || isPlaceholder(r) ? null : <RowSource row={r} />) },
-    { id: 'size', title: 'Size', header: 'Size', width: '80px', align: 'end', cell: (r) => (isNone(r) || isPlaceholder(r) ? null : <span className="text-label-2">{r.isDirectory ? 'Folder' : formatBytes(r.size)}</span>) },
+    { id: 'source', title: 'Source', header: 'Source', width: '92px', cell: (r) => (isNone(r) || isPlaceholder(r) ? null : <RowSource row={r} />) },
+    { id: 'size', title: 'Size', header: 'Size', width: '80px', align: 'end', cell: (r) => (isNone(r) || isPlaceholder(r) ? null : <span className="pr-1 mono text-label-2">{r.isDirectory ? 'Folder' : formatBytes(r.size)}</span>) },
   ]
 
   const rowMenu = (keys: string[]): MenuEntry[] => {
@@ -161,10 +169,12 @@ export default function ShadersTab() {
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col" {...drop.props}>
-      <SubToolbar
+      <ContentBar
         trailing={
-          <>
-            {addButton}
+          <div className="flex">
+            <Button variant="primary" icon={<Plus />} onClick={browse} className="!rounded-r-none">
+              Add Shaders
+            </Button>
             <Menu
               align="end"
               items={[
@@ -172,32 +182,30 @@ export default function ShadersTab() {
                 { label: 'Add from Another Instance…', onSelect: () => setFromInstance(true) },
               ]}
               trigger={
-                <IconButton label="More ways to add" variant="push" size="sm" className="!size-6">
-                  <Plus />
+                <IconButton label="More ways to add" variant="primary" tooltip={false} className="ml-px !h-[26px] !w-[22px] !rounded-l-none">
+                  <ChevronDown />
                 </IconButton>
               }
             />
-          </>
+          </div>
         }
       >
-        <SearchField ref={findTargetRef} value={query} onValueChange={setQuery} placeholder="Search shader packs" className="w-[200px]" />
-        <span className="text-small text-label-2">
+        <SearchField ref={findTargetRef} value={query} onValueChange={setQuery} placeholder="Filter shader packs" label="Search shader packs" className="mr-1 w-[190px]" />
+        <span className="truncate pl-1 text-callout text-label-2">
           {loader === null ? 'Shaders need a mod loader and Iris or Oculus.' : shaderMod ? `Shaders load through ${shaderMod.name}.` : 'No shader loader installed.'}
         </span>
         <ScanningNote scanning={list.scanning} />
-      </SubToolbar>
+      </ContentBar>
       <SplitView
         inspectorLabel="Shader pack details"
         inspector={
           selected ? (
             <ShaderInspector key={selected.id} instanceId={id} pack={selected} active={selected.id === activeId} onActivate={() => void activate(selected.id === activeId ? { id: NONE } : selected)} onTrash={() => setPendingTrash([selected.id])} />
-          ) : (
-            <p className="m-auto px-6 text-center text-body text-label-3">Select a shader pack to see its details</p>
-          )
+          ) : undefined
         }
       >
         {list.isPending ? (
-          <SkeletonRows rows={5} className="pt-2" />
+          <SkeletonRows rows={5} />
         ) : list.isError ? (
           <QueryError error={list.error} onRetry={list.refetch} what="shader packs" />
         ) : list.total === 0 && !query.trim() ? (
@@ -218,7 +226,7 @@ export default function ShadersTab() {
             rows={rows}
             columns={columns}
             getKey={(r) => r.id}
-            rowHeight={36}
+            rowHeight={32}
             selection={selection}
             onSelectionChange={(s) => setSelection(new Set([...s].slice(-1)))}
             onActivate={(r) => void activate(r)}
@@ -259,7 +267,7 @@ export default function ShadersTab() {
         footer={<Button onClick={() => setGate(null)}>Cancel</Button>}
       >
         {compatible.length && inst ? (
-          <ul className="flex flex-col divide-y divide-separator rounded-lg bg-surface shadow-[inset_0_0_0_0.5px_var(--color-surface-border)]">
+          <ul className="flex flex-col divide-y divide-separator rounded-[10px] border border-separator">
             {compatible.map((s) => (
               <ShaderLoaderRow
                 key={s.name}
@@ -292,11 +300,11 @@ export default function ShadersTab() {
 function ShaderLoaderRow({ loader, target, onInstalled }: { loader: (typeof SHADER_LOADERS)[number]; target: Parameters<typeof installProject>[1]; onInstalled: () => void }) {
   const state = useInstallState(target.id, `modrinth:${loader.slug}`)
   return (
-    <li className="flex items-center gap-3 px-3 py-2.5">
+    <li className="flex min-h-[46px] items-center gap-2.5 px-3">
       <BlockIcon hue={loader.hue} label={loader.name} size={28} />
-      <div className="flex-1">
-        <p className="text-body font-medium">{loader.name}</p>
-        <p className="text-small text-label-2">From Modrinth · for {loader.loaders.map(loaderLabel).join(', ')}</p>
+      <div className="min-w-0 flex-1">
+        <p className="text-compact font-medium">{loader.name}</p>
+        <p className="truncate text-meta text-label-2">From Modrinth · for {loader.loaders.map(loaderLabel).join(', ')}</p>
       </div>
       <Button
         variant="primary"
@@ -315,7 +323,7 @@ function ShaderInspector({ instanceId, pack, active, onActivate, onTrash }: { in
   const detail = useResourceDetail(instanceId, 'shaderpacks', pack.id)
   return (
     <>
-      <InspectorHeader icon={<ResourceIcon row={pack} size={44} />} title={pack.name} subtitle={active ? 'Active' : 'Not active'} />
+      <InspectorHeader icon={<ResourceIcon row={pack} size={40} />} title={pack.name} subtitle={active ? 'Active' : 'Not active'} />
       <div className="px-4 pb-3">
         <Button variant={active ? 'push' : 'primary'} onClick={onActivate}>
           {active ? 'Turn Off' : 'Activate'}
@@ -325,7 +333,7 @@ function ShaderInspector({ instanceId, pack, active, onActivate, onTrash }: { in
         <InspectorSection>
           <ProblemNote row={pack} />
           {detail.data?.warnings.map((w) => (
-            <p key={w} className="text-callout text-orange">
+            <p key={w} className="text-compact text-orange">
               {w}
             </p>
           ))}

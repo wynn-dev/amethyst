@@ -1,18 +1,19 @@
 import { useDeferredValue, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
-import { AlertTriangle, Download, Heart, LayoutGrid, List, PanelLeftClose, PanelLeftOpen, SearchX, Star, Target, WifiOff, X } from 'lucide-react'
+import { AlertTriangle, Box, LayoutGrid, List, ListFilter, PanelLeftClose, SearchX, Star, WifiOff, X } from 'lucide-react'
 import type { MarketPlatform, MarketProjectRow, MarketProjectType, MarketSearchQuery } from '@shared/services'
-import { Banner, Button, Checkbox, EmptyState, IconButton, SearchField, Segmented, Select, Skeleton, Spinner, ToolbarTitle, VirtualList, cn } from '@/ui'
+import { Banner, Button, Checkbox, EmptyState, IconButton, SearchField, Segmented, Select, Skeleton, Spinner, TabStrip, VirtualList, cn } from '@/ui'
+import { chipButtonClass } from '@/ui/Chips'
 import { useQuery } from '@tanstack/react-query'
 import { PageToolbar } from '@/app/PageToolbar'
 import { QueryError } from '@/app/RouteStates'
 import { findTargetRef } from '@/app/ui-store'
-import { formatCount, formatRelative, heroTone } from '@/app/visuals'
+import { formatCount, formatDate } from '@/app/visuals'
 import { useInstanceRows, runtimeLabel, type RuntimeInstanceRow } from '@/data/instance-info'
 import { useFavourites, useMarketSearch, useMarketStatus, type Favourite } from '@/data/market'
 import { api } from '@/lib/rpc'
 import { errorMessage } from '@/lib/error-messages'
-import { FavouriteButton, InstallButton, ProjectIcon, SourceBadge, TYPE_LABELS, eligible, hueOf } from './discover-parts'
+import { FavouriteButton, InstallButton, ProjectIcon, SourceBadge, TYPE_LABELS, eligible, shortAgo } from './discover-parts'
 
 type Sort = NonNullable<MarketSearchQuery['sort']>
 type View = 'list' | 'grid'
@@ -105,7 +106,8 @@ export function DiscoverPage() {
   const [query, setQuery] = useState(search.q ?? '')
   const deferred = useDeferredValue(query.trim())
   const [view, setView] = useState<View>('list')
-  const [filtersOpen, setFiltersOpen] = useState(true)
+  // Results get the full width; the filter column opens from the Filters chip.
+  const [filtersOpen, setFiltersOpen] = useState(false)
   const { data: instances = [] } = useInstanceRows()
   const target = instances.find((i) => i.id === search.target)
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS)
@@ -157,19 +159,38 @@ export function DiscoverPage() {
   const failed = (Object.entries(errors) as [MarketPlatform, { code: string; message: string }][]).filter(([p]) => !(p === 'curseforge' && cfOff))
 
   const filtered = JSON.stringify(filters) !== JSON.stringify(DEFAULT_FILTERS)
+  // Active filters in the filter column (sort lives in the tab row).
+  const filterCount =
+    (filters.gameVersion !== DEFAULT_FILTERS.gameVersion ? 1 : 0) +
+    (filters.loader !== DEFAULT_FILTERS.loader ? 1 : 0) +
+    (filters.environment !== 'any' ? 1 : 0) +
+    filters.categories.length +
+    (filters.hideInstalled ? 1 : 0) +
+    (filters.favouritesOnly ? 1 : 0)
   const clearFilters = () => setFilters(DEFAULT_FILTERS)
   const landing = !deferred && !filtered && !filters.favouritesOnly
   const totalLabel = results.data ? results.data.pages[0]?.total : undefined
 
   return (
     <>
+      <h1 className="sr-only">Discover</h1>
       <PageToolbar
-        leading={<ToolbarTitle title="Discover" />}
+        separator={false}
+        leading={
+          <SearchField
+            ref={findTargetRef}
+            value={query}
+            onValueChange={setQuery}
+            placeholder={`Search ${TYPE_LABELS[type].many.toLowerCase()}`}
+            size="lg"
+            className="w-[360px] min-w-0 shrink"
+          />
+        }
         trailing={
           <>
-            <SearchField ref={findTargetRef} value={query} onValueChange={setQuery} placeholder={`Search ${TYPE_LABELS[type].many.toLowerCase()}`} className="w-[220px]" />
             <Select
               aria-label="Source"
+              variant="borderless"
               value={source}
               onValueChange={(v) => navigate({ search: (s) => ({ ...s, source: v === 'all' ? undefined : (v as MarketPlatform) }) })}
               options={[
@@ -177,10 +198,11 @@ export function DiscoverPage() {
                 { value: 'modrinth', label: 'Modrinth' },
                 { value: 'curseforge', label: cfOff ? 'CurseForge (unavailable)' : 'CurseForge', text: 'CurseForge' },
               ]}
-              className="w-[118px]"
+              className="text-label-2"
             />
             <Segmented
               aria-label="View as"
+              size="sm"
               value={view}
               onValueChange={setView}
               options={[
@@ -191,28 +213,49 @@ export function DiscoverPage() {
           </>
         }
       />
-      <div className="flex shrink-0 items-center justify-center border-b border-separator py-2">
-        <Segmented
+      <div className="flex h-9 shrink-0 items-center gap-1.5 border-b border-separator pr-3 pl-2.5">
+        <TabStrip
           aria-label="Project type"
           value={type}
           onValueChange={(t) => {
             setFilters((f) => ({ ...f, categories: [] }))
             navigate({ search: (s) => ({ ...s, type: t }) })
           }}
-          options={(Object.keys(TYPE_LABELS) as MarketProjectType[]).map((t) => ({ value: t, label: TYPE_LABELS[t].many }))}
+          items={(Object.keys(TYPE_LABELS) as MarketProjectType[]).map((t) => ({ value: t, label: TYPE_LABELS[t].many }))}
+          className="min-w-0"
+        />
+        <div className="flex-1" />
+        {target && <TargetBar target={target} instances={eligible(instances, type === 'modpack' ? 'mod' : type)} />}
+        <button
+          type="button"
+          aria-expanded={filtersOpen}
+          aria-controls="discover-filters"
+          aria-label={filterCount ? `Filters, ${filterCount} active` : 'Filters'}
+          onClick={() => setFiltersOpen((o) => !o)}
+          className={cn(chipButtonClass, (filtersOpen || filterCount > 0) && 'text-label', filtersOpen && 'bg-fill')}
+        >
+          <ListFilter />
+          Filters
+          {filterCount > 0 && <span className="font-mono text-[10.5px] text-label-3 tabular">{filterCount}</span>}
+        </button>
+        <Select
+          aria-label="Sort by"
+          variant="borderless"
+          value={filters.sort}
+          onValueChange={(sort) => setFilters({ ...filters, sort: sort as Filters['sort'] })}
+          options={[
+            { value: 'auto', label: 'Relevance' },
+            { value: 'downloads', label: 'Downloads' },
+            { value: 'follows', label: 'Follows' },
+            { value: 'updated', label: 'Recently Updated' },
+            { value: 'newest', label: 'Newest' },
+          ]}
+          className="text-label-2"
         />
       </div>
-      {target && <TargetBar target={target} instances={eligible(instances, type === 'modpack' ? 'mod' : type)} />}
       <div className="flex min-h-0 flex-1">
         {filtersOpen && <FilterSidebar type={type} filters={filters} setFilters={setFilters} target={target} onClose={() => setFiltersOpen(false)} />}
         <div className="flex min-w-0 flex-1 flex-col">
-          {!filtersOpen && (
-            <div className="px-4 pt-3">
-              <Button size="sm" variant="borderless" icon={<PanelLeftOpen />} onClick={() => setFiltersOpen(true)}>
-                Show Filters
-              </Button>
-            </div>
-          )}
           {!online && (
             <Banner
               tone="warning"
@@ -244,7 +287,7 @@ export function DiscoverPage() {
             </Banner>
           )}
           {cfOff && source === 'all' && type !== 'datapack' && !failed.length && (
-            <p className="mx-4 mt-2.5 text-small text-label-2">CurseForge isn’t available in this build, so results come from Modrinth.</p>
+            <p className="px-4 pt-2.5 text-meta text-label-3">CurseForge isn’t available in this build, so results come from Modrinth.</p>
           )}
           {sourceUnavailable ? (
             <EmptyState
@@ -294,23 +337,25 @@ function favouriteRow(f: Favourite): MarketProjectRow {
   return { key: f.key, platform: f.platform, id: f.id, slug: f.id, title: f.title, author: f.author, summary: f.summary, iconUrl: f.iconUrl, projectType: f.projectType, downloads: 0, followers: 0, categories: [], loaders: [], updatedAt: null, websiteUrl: '', linked: null, installed: false }
 }
 
+/** "Installing to: [Instance] · 1.21.1 Fabric ✕": the target instance, as an outlined chip in the tab row. */
 function TargetBar({ target, instances }: { target: RuntimeInstanceRow; instances: RuntimeInstanceRow[] }) {
   const navigate = useNavigate({ from: '/discover/' })
   const options = instances.some((i) => i.id === target.id) ? instances : [target, ...instances]
   return (
-    <div className="flex shrink-0 items-center gap-2 border-b border-separator bg-accent-soft px-4 py-1.5 text-body">
-      <Target className="size-3.5 text-accent" />
-      <span className="text-label-2">Installing to:</span>
+    <div className="flex h-6 min-w-0 shrink items-center gap-1 rounded-md pr-0.5 pl-2 text-callout text-label-2 hairline-strong">
+      <Box aria-hidden className="size-[13px] shrink-0" strokeWidth={1.5} />
+      <span className="shrink-0">Installing to:</span>
       <Select
         aria-label="Target instance"
         variant="borderless"
+        size="sm"
         value={target.id}
         onValueChange={(id) => navigate({ search: (s) => ({ ...s, target: id }) })}
         options={options.map((i) => ({ value: i.id, label: i.name, text: i.name }))}
-        className="font-medium"
+        className="min-w-0 !pl-1 text-callout font-medium"
       />
-      <span className="text-label-2">· {runtimeLabel(target)}</span>
-      <IconButton label="Clear target instance" size="sm" className="ml-auto" onClick={() => navigate({ search: (s) => ({ ...s, target: undefined }) })}>
+      <span className="shrink-0 font-mono text-[11px] text-label-3 tabular">{runtimeLabel(target)}</span>
+      <IconButton label="Clear target instance" size="sm" onClick={() => navigate({ search: (s) => ({ ...s, target: undefined }) })}>
         <X />
       </IconButton>
     </div>
@@ -323,28 +368,13 @@ function FilterSidebar({ type, filters, setFilters, target, onClose }: { type: M
   const categories = CATEGORIES[type] ?? []
   const loaderApplies = type === 'mod' || type === 'modpack'
   return (
-    <aside aria-label="Filters" className="flex w-[208px] shrink-0 flex-col gap-4 overflow-y-auto border-r border-separator bg-window-2 px-3 py-3">
-      <div className="flex items-center justify-between">
-        <h2 className="text-small font-semibold text-label-2">Filters</h2>
+    <aside id="discover-filters" aria-label="Filters" className="flex w-[200px] shrink-0 animate-enter flex-col gap-3.5 overflow-y-auto border-r border-separator px-3 pt-2 pb-4">
+      <div className="-mr-1 flex h-7 items-center justify-between">
+        <h2 className="text-meta font-semibold text-label-2">Filters</h2>
         <IconButton label="Hide Filters" size="sm" onClick={onClose}>
           <PanelLeftClose />
         </IconButton>
       </div>
-      <FilterGroup label="Sort by">
-        <Select
-          aria-label="Sort by"
-          value={filters.sort}
-          onValueChange={(sort) => set({ sort: sort as Filters['sort'] })}
-          className="w-full"
-          options={[
-            { value: 'auto', label: 'Relevance' },
-            { value: 'downloads', label: 'Downloads' },
-            { value: 'follows', label: 'Follows' },
-            { value: 'updated', label: 'Recently Updated' },
-            { value: 'newest', label: 'Newest' },
-          ]}
-        />
-      </FilterGroup>
       <FilterGroup label="Game version">
         <Select
           aria-label="Game version"
@@ -384,11 +414,12 @@ function FilterSidebar({ type, filters, setFilters, target, onClose }: { type: M
             { value: 'client', label: 'Client' },
             { value: 'server', label: 'Server' },
           ]}
+          className="self-start"
         />
       </FilterGroup>
       {categories.length > 0 && (
         <FilterGroup label="Categories">
-          <div className="flex flex-col gap-1.5">
+          <div className="flex flex-col gap-1">
             {categories.map(([value, label]) => (
               <Checkbox
                 key={value}
@@ -401,7 +432,7 @@ function FilterSidebar({ type, filters, setFilters, target, onClose }: { type: M
         </FilterGroup>
       )}
       <FilterGroup label="Show">
-        <div className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-1">
           <Checkbox label="Favourites only" checked={filters.favouritesOnly} onCheckedChange={(favouritesOnly) => set({ favouritesOnly })} />
           {target && <Checkbox label="Hide installed" checked={filters.hideInstalled} onCheckedChange={(hideInstalled) => set({ hideInstalled })} />}
         </div>
@@ -413,13 +444,14 @@ function FilterSidebar({ type, filters, setFilters, target, onClose }: { type: M
 function FilterGroup({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-1.5">
-      <span className="text-small font-medium text-label-2">{label}</span>
+      <span className="text-meta font-semibold text-label-3">{label}</span>
       {children}
     </div>
   )
 }
 
-const LIST_ROW = 84
+const LIST_ROW = 52
+const GRID_ROW = 146
 type Item = MarketProjectRow | { more: true }
 const isMore = (i: Item): i is { more: true } => 'more' in i
 
@@ -445,13 +477,13 @@ function Results({
   const header = (
     <>
       {featured && featured.length > 0 && (
-        <section aria-label="Featured" className="grid grid-cols-3 gap-3 px-4 pt-4">
+        <section aria-label="Featured" className="grid grid-cols-3 gap-3 px-4 pt-3.5">
           {featured.map((p) => (
             <FeaturedCard key={p.key} project={p} target={target} />
           ))}
         </section>
       )}
-      <h2 className="px-4 pt-4 pb-1 text-title3 font-semibold">{heading}</h2>
+      <h2 className={cn('flex h-8 items-end px-4 pb-2 text-meta font-semibold text-label-2', featured?.length ? 'mt-3' : 'mt-1', view === 'list' && 'border-b border-separator')}>{heading}</h2>
     </>
   )
   const more = <LoadMore hasMore={hasMore} loading={loadingMore} onLoadMore={onLoadMore} />
@@ -463,7 +495,7 @@ function Results({
     return (
       <VirtualList
         items={rows}
-        rowHeight={(r) => (r[0] && isMore(r[0]) ? 56 : 196)}
+        rowHeight={(r) => (r[0] && isMore(r[0]) ? 56 : GRID_ROW)}
         getKey={(r) => r.map((p) => (isMore(p) ? 'more' : p.key)).join()}
         aria-label="Results"
         header={header}
@@ -473,7 +505,7 @@ function Results({
           row[0] && isMore(row[0]) ? (
             more
           ) : (
-            <div className="grid h-full grid-cols-3 gap-3 px-4 pb-3">
+            <div className="grid h-full grid-cols-3 gap-3 px-4 pb-3 pt-0.5">
               {(row as MarketProjectRow[]).map((p) => (
                 <GridCard key={p.key} project={p} target={target} />
               ))}
@@ -491,7 +523,6 @@ function Results({
       getKey={(p) => (isMore(p) ? 'more' : p.key)}
       aria-label="Results"
       header={header}
-      paddingY={4}
       className="flex-1"
       renderRow={(p) => (isMore(p) ? more : <ListRow project={p} target={target} />)}
     />
@@ -519,21 +550,20 @@ function LoadMore({ hasMore, loading, onLoadMore }: { hasMore: boolean; loading:
 
 const projectLink = (p: MarketProjectRow) => ({ to: '/discover/$projectId' as const, params: { projectId: p.key }, search: (s: Record<string, unknown>) => s })
 
-function Meta({ project }: { project: MarketProjectRow }) {
+/** Downloads and last update, as muted mono figures (with full values on hover). */
+function Figures({ project, className }: { project: MarketProjectRow; className?: string }) {
   return (
-    <span className="flex items-center gap-2.5 text-small text-label-2">
-      <SourceBadge source={project.platform} />
+    <span className={cn('flex shrink-0 items-baseline gap-3 font-mono text-[11px] text-label-3 tabular', className)}>
       {project.downloads > 0 && (
-        <span className="flex items-center gap-1 tabular">
-          <Download className="size-3" /> {formatCount(project.downloads)}
+        <span title={`${project.downloads.toLocaleString('en')} downloads${project.followers > 0 ? ` · ${project.followers.toLocaleString('en')} followers` : ''}`} className="min-w-[44px] text-right">
+          {formatCount(project.downloads)}
         </span>
       )}
-      {project.followers > 0 && (
-        <span className="flex items-center gap-1 tabular">
-          <Heart className="size-3" /> {formatCount(project.followers)}
+      {project.updatedAt && (
+        <span title={`Updated ${formatDate(Date.parse(project.updatedAt))}`} className="min-w-[62px] text-right">
+          {shortAgo(Date.parse(project.updatedAt))}
         </span>
       )}
-      {project.updatedAt && <span>Updated {formatRelative(Date.parse(project.updatedAt))}</span>}
     </span>
   )
 }
@@ -550,101 +580,107 @@ function compatibleWith(project: MarketProjectRow, target?: RuntimeInstanceRow):
 function Compat({ project, target }: { project: MarketProjectRow; target?: RuntimeInstanceRow }) {
   const c = compatibleWith(project, target)
   if (c === undefined) return null
+  // Compatible is the expected case (the search is already filtered to the target); only the exception speaks.
   return c ? (
-    <span className="text-small font-medium text-green">Compatible</span>
+    <span className="sr-only">Compatible</span>
   ) : (
-    <span className="text-small font-medium text-orange" title={`Not made for ${target?.loader?.kind ?? 'vanilla'}`}>
+    <span className="shrink-0 text-meta text-orange" title={`Not made for ${target?.loader?.kind ?? 'vanilla'}`}>
       Not compatible
     </span>
   )
 }
 
+/** One result: icon, title and author, summary, then source, figures, favourite and Install (the mockup's `.row.tall`). */
 function ListRow({ project, target }: { project: MarketProjectRow; target?: RuntimeInstanceRow }) {
   return (
-    <div className="mx-2 flex h-[80px] items-center gap-3 rounded-xl px-3 hover:bg-fill">
-      <ProjectIcon project={project} size={52} />
-      <div className="min-w-0 flex-1">
-        <div className="flex items-baseline gap-2">
-          <Link {...projectLink(project)} className="truncate text-body font-semibold text-label hover:underline focus-visible:underline focus-visible:outline-none">
+    <div className="flex h-full items-center gap-3 border-b border-separator pr-3 pl-4 hover:bg-hover">
+      <ProjectIcon project={project} size={32} />
+      <div className="min-w-0 flex-1 leading-tight">
+        <div className="flex min-w-0 items-baseline gap-1.5">
+          <Link {...projectLink(project)} className="truncate text-body font-medium text-label hover:underline focus-visible:underline focus-visible:outline-none">
             {project.title}
           </Link>
-          {project.author && <span className="shrink-0 text-small text-label-2">by {project.author}</span>}
+          {project.author && <span className="truncate text-meta text-label-3">{project.author}</span>}
           <Compat project={project} target={target} />
         </div>
-        <p className="truncate text-callout text-label-2">{project.summary}</p>
-        <div className="mt-1">
-          <Meta project={project} />
-        </div>
+        <p className="mt-0.5 max-w-[560px] truncate text-callout text-label-2">{project.summary}</p>
       </div>
+      <SourceBadge source={project.platform} />
+      <Figures project={project} className="ml-2" />
       <FavouriteButton project={project} size="sm" />
-      <InstallButton project={project} target={target} compatible={compatibleWith(project, target) !== false} />
+      <InstallButton project={project} target={target} quiet compatible={compatibleWith(project, target) !== false} />
     </div>
   )
 }
 
 function GridCard({ project, target }: { project: MarketProjectRow; target?: RuntimeInstanceRow }) {
   return (
-    <div className="flex h-full flex-col gap-2 rounded-xl bg-surface p-3 shadow-[inset_0_0_0_0.5px_var(--color-surface-border)]">
-      <div className="flex items-start gap-3">
-        <ProjectIcon project={project} size={44} />
-        <div className="min-w-0 flex-1">
-          <Link {...projectLink(project)} className="line-clamp-1 text-body font-semibold hover:underline">
+    <div className="relative flex h-full flex-col gap-2 rounded-[10px] border border-separator p-3 hover:bg-hover">
+      <div className="flex items-start gap-2.5">
+        <ProjectIcon project={project} size={32} />
+        <div className="min-w-0 flex-1 leading-tight">
+          <Link {...projectLink(project)} className="line-clamp-1 text-body font-medium after:absolute after:inset-0 hover:underline">
             {project.title}
           </Link>
-          {project.author && <p className="truncate text-small text-label-2">by {project.author}</p>}
+          {project.author && <p className="truncate text-meta text-label-3">{project.author}</p>}
         </div>
-        <FavouriteButton project={project} size="sm" />
+        <span className="relative">
+          <FavouriteButton project={project} size="sm" />
+        </span>
       </div>
-      <p className="line-clamp-2 flex-1 text-callout text-label-2">{project.summary}</p>
-      <Meta project={project} />
-      <div className="flex items-center justify-between">
+      <p className="line-clamp-2 text-callout text-label-2">{project.summary}</p>
+      <div className="mt-auto flex items-center gap-2">
+        <Figures project={project} className="[&>span]:min-w-0" />
         <Compat project={project} target={target} />
-        <span className="ml-auto">
-          <InstallButton project={project} target={target} size="sm" compatible={compatibleWith(project, target) !== false} />
+        <span className="relative ml-auto">
+          <InstallButton project={project} target={target} quiet compatible={compatibleWith(project, target) !== false} />
         </span>
       </div>
     </div>
   )
 }
 
+/**
+ * The landing page's three most popular projects: hairline cards with the real icon, no backdrop
+ * art. The whole card opens the project; Install sits above the link.
+ */
 function FeaturedCard({ project, target }: { project: MarketProjectRow; target?: RuntimeInstanceRow }) {
-  const hue = hueOf(project.key)
   return (
-    <div className="relative flex h-[132px] flex-col justify-end overflow-hidden rounded-xl p-3 text-white shadow-card [color-scheme:dark]">
-      <div className="absolute inset-0" style={{ background: heroTone(hue, 20) }} />
-      {project.iconUrl && <img src={project.iconUrl} alt="" aria-hidden className="absolute -top-6 -right-6 size-36 rotate-12 rounded-3xl opacity-25 blur-[1px]" />}
-      <div className="relative flex items-end gap-2.5">
+    <div className="relative flex h-[124px] flex-col rounded-[10px] border border-separator p-3 transition-colors duration-150 hover:bg-hover">
+      <div className="flex items-start gap-3">
         <ProjectIcon project={project} size={40} />
-        <div className="min-w-0 flex-1">
-          <p className="text-caption font-semibold tracking-[0.06em] text-white/70 uppercase">Popular</p>
-          <Link {...projectLink(project)} className="block truncate text-title3 font-semibold after:absolute after:inset-0">
+        <div className="min-w-0 flex-1 leading-tight">
+          <p className="text-meta text-label-3">Popular</p>
+          <Link {...projectLink(project)} className="mt-0.5 block truncate text-headline font-semibold after:absolute after:inset-0 focus-visible:outline-none">
             {project.title}
           </Link>
-          <p className="truncate text-small text-white/75">{project.summary}</p>
         </div>
       </div>
-      <span className="relative mt-2 flex justify-end">
-        <InstallButton project={project} target={target} size="sm" />
-      </span>
+      <p className="mt-2 line-clamp-2 text-callout text-label-2">{project.summary}</p>
+      <div className="mt-auto flex items-center justify-between">
+        <Figures project={project} className="[&>span]:min-w-0" />
+        <span className="relative">
+          <InstallButton project={project} target={target} quiet />
+        </span>
+      </div>
     </div>
   )
 }
 
 function ResultsSkeleton({ view }: { view: View }) {
   return (
-    <div role="status" aria-label="Loading results" className={cn('flex-1 overflow-hidden px-4 pt-4', view === 'grid' ? 'grid grid-cols-3 content-start gap-3' : 'flex flex-col gap-1')}>
-      {Array.from({ length: view === 'grid' ? 6 : 7 }, (_, i) =>
+    <div role="status" aria-label="Loading results" className={cn('flex-1 overflow-hidden', view === 'grid' ? 'grid grid-cols-3 content-start gap-3 px-4 pt-4' : 'flex flex-col pt-9')}>
+      {Array.from({ length: view === 'grid' ? 6 : 9 }, (_, i) =>
         view === 'grid' ? (
-          <Skeleton key={i} className="h-[184px] rounded-xl" />
+          <Skeleton key={i} className="h-[144px] rounded-[10px]" />
         ) : (
-          <div key={i} className="flex h-[80px] items-center gap-3 px-1">
-            <Skeleton className="size-[52px] rounded-xl" />
-            <div className="flex flex-1 flex-col gap-2">
-              <Skeleton className="h-3 w-1/3" />
-              <Skeleton className="h-2.5 w-2/3" />
+          <div key={i} className="flex h-[52px] items-center gap-3 border-b border-separator px-4">
+            <Skeleton className="size-8 rounded-lg" />
+            <div className="flex flex-1 flex-col gap-1.5">
               <Skeleton className="h-2.5 w-1/4" />
+              <Skeleton className="h-2 w-1/2" />
             </div>
-            <Skeleton className="h-6 w-20 rounded-md" />
+            <Skeleton className="h-[26px] w-16 rounded-[7px]" />
           </div>
         ),
       )}

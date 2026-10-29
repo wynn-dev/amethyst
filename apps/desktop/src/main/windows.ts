@@ -157,6 +157,10 @@ const seedInstances = `(async () => {
 const openSample = (name: string, tab: string) =>
   `window.amethyst.invoke('instances', 'list', []).then((l) => { const i = l.ok && l.value.find((x) => x.name === ${JSON.stringify(name)}); if (i) location.hash = '#/instances/' + i.id + '/${tab}' })`
 
+/** Opens Discover for mods, targeting a sample instance by name, with a query. */
+const discoverFor = (name: string, q: string) =>
+  `window.amethyst.invoke('instances', 'list', []).then((l) => { const i = l.ok && l.value.find((x) => x.name === ${JSON.stringify(name)}); if (i) location.hash = '#/discover?type=mod&q=${q}&target=' + i.id })`
+
 /** Installs a sample instance (a real download in the screenshot profile) to show the Play button's progress pill. */
 const installSample = (name: string) =>
   `window.amethyst.invoke('instances', 'list', []).then((l) => { const i = l.ok && l.value.find((x) => x.name === ${JSON.stringify(name)}); if (i) { location.hash = '#/instances/' + i.id + '/overview'; window.amethyst.invoke('install', 'install', [i.id]) } })`
@@ -174,6 +178,16 @@ const SHOTS: Shot[] = [
   { name: 'discover', hash: '#/discover?type=modpack' },
   { name: 'discover-target', hash: '#/discover?type=mod&target=survival' },
   { name: 'project', hash: '#/discover/modpack-0' },
+  { name: 'discover-search', hash: '#/discover?type=mod&q=sodium', wait: 1200 },
+  { name: 'discover-target-search', hash: '#/', script: discoverFor('Survival', 'sodium'), wait: 1500 },
+  { name: 'discover-grid', hash: '#/discover?type=shader', script: `document.querySelector('[role=radio][aria-label="Grid"]')?.click()`, wait: 1200 },
+  { name: 'project-sodium', hash: '#/discover/modrinth:sodium', wait: 1500 },
+  {
+    name: 'project-sodium-versions',
+    hash: '#/discover/modrinth:sodium',
+    script: `[...document.querySelectorAll('[role=tab]')].find((t) => t.textContent === 'Versions')?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))`,
+    wait: 2000,
+  },
   { name: 'instance-overview', hash: '#/', script: openSample('Survival', 'overview') },
   { name: 'instance-mods', hash: '#/', script: openSample('Survival', 'mods') },
   { name: 'instance-resource-packs', hash: '#/', script: openSample('Survival', 'resource-packs') },

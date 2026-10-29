@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { FileDown } from 'lucide-react'
 import type { ResourceDetail, ResourceKind, ResourceRow } from '@shared/services'
 import { Alert, Button, Checkbox, EmptyState, SearchField, Select, Sheet, Skeleton, Spinner, VirtualList, cn } from '@/ui'
 import { BlockIcon, formatBytes, formatDate } from '@/app/visuals'
-import { KIND_NOUN, addFromInstance, noun, useResourceAll, type PagedList } from '@/data/content'
+import { KIND_NOUN, addFromInstance, noun, queryHash, resourceKeys, useResourceAll, type ListQuery, type PagedList } from '@/data/content'
 import { useInstanceRows, runtimeLabel } from '@/data/instance-info'
 import { dragHasFiles, droppedPaths, revealInFinder } from '@/lib/files'
-import { CopyButton, InspectorSection, PropertyList, SourceBadge } from './parts'
+import { api } from '@/lib/rpc'
+import { CopyButton, InspectorSection, PropertyList } from './parts'
 
 /* ------------------------------------------------------------------------------------------ */
 /* Rows                                                                                       */
@@ -33,9 +35,9 @@ export const realIds = (ids: Iterable<string>) => [...ids].filter((id) => !id.st
 export function PlaceholderCell({ index, request }: { index: number; request: (i: number) => void }) {
   useEffect(() => request(index), [index, request])
   return (
-    <div className="flex items-center gap-2.5" aria-hidden>
-      <Skeleton className="size-6 rounded-md" />
-      <Skeleton className="h-2.5 w-40" />
+    <div className="flex items-center gap-[9px]" aria-hidden>
+      <Skeleton className="size-[18px] rounded-[5px]" />
+      <Skeleton className="h-2 w-36" />
     </div>
   )
 }
@@ -47,15 +49,49 @@ export function hueOf(id: string): number {
 }
 
 /** The file's own icon (served by `amethyst-asset:`), or a generated block. */
-export function ResourceIcon({ row, size = 24 }: { row: Pick<ResourceRow, 'id' | 'name' | 'iconUrl'>; size?: number }) {
+export function ResourceIcon({ row, size = 18 }: { row: Pick<ResourceRow, 'id' | 'name' | 'iconUrl'>; size?: number }) {
   return <BlockIcon hue={hueOf(row.id)} label={row.name} size={size} src={row.iconUrl ?? undefined} className="[image-rendering:pixelated]" />
 }
 
+const SOURCE_NAME = { modrinth: 'Modrinth', curseforge: 'CurseForge', local: 'Local' } as const
+
+/** Where a file came from, as quiet text (no coloured badge). */
 export function RowSource({ row }: { row: ResourceRow }) {
+  return <span className="truncate text-meta text-label-2">{SOURCE_NAME[row.source?.platform ?? 'local']}</span>
+}
+
+const shortDateFmt = new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric' })
+const yearDateFmt = new Intl.DateTimeFormat('en', { month: 'short', year: 'numeric' })
+/** A compact date for table cells: "Oct 24" this year, "Oct 2024" before. */
+export function shortDate(ts: number, now = Date.now()): string {
+  return new Date(ts).getFullYear() === new Date(now).getFullYear() ? shortDateFmt.format(ts) : yearDateFmt.format(ts)
+}
+
+/**
+ * How many rows match a query, without loading them (filter chip counts). Cached under the
+ * kind's page keys, so the change events that refresh the table refresh it too.
+ */
+export function useResourceCount(instanceId: string, kind: ResourceKind, query: ListQuery, enabled = true): number | undefined {
+  const q = queryHash(query)
+  const count = useQuery({
+    queryKey: [...resourceKeys.pages(instanceId, kind), q, 'count'],
+    queryFn: async () => (await api.resources.list(instanceId, kind, { ...query, offset: 0, limit: 1 })).total,
+    enabled: !!instanceId && enabled,
+    placeholderData: (prev: number | undefined) => prev,
+  })
+  return count.data
+}
+
+/**
+ * The compact filter bar above a content table (the mockup's `.fbar`): filter field, chips and
+ * counts on the left, the tab's actions on the right.
+ */
+export function ContentBar({ children, trailing }: { children?: ReactNode; trailing?: ReactNode }) {
   return (
-    <span className="row-badge contents">
-      <SourceBadge source={row.source?.platform ?? 'local'} />
-    </span>
+    <div className="flex h-11 shrink-0 items-center gap-1.5 border-b border-separator pr-3 pl-4">
+      <div className="flex min-w-0 flex-1 items-center gap-1.5">{children}</div>
+      {trailing && <div className="flex shrink-0 items-center gap-1.5">{trailing}</div>}
+    </div>
   )
 }
 
@@ -104,10 +140,10 @@ export function useFileDrop(onPaths: (paths: string[]) => void) {
 export function DropOverlay({ active, label, hint }: { active: boolean; label: string; hint?: string }) {
   if (!active) return null
   return (
-    <div className="pointer-events-none absolute inset-2 z-20 flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-accent bg-accent-soft/90 backdrop-blur-sm">
-      <FileDown className="size-8 text-accent" />
-      <p className="text-title3 font-semibold text-accent">{label}</p>
-      {hint && <p className="text-small text-label-2">{hint}</p>}
+    <div className="pointer-events-none absolute inset-2 z-20 flex animate-fade-in flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-separator-2 glass">
+      <FileDown className="mb-1 size-6 text-label-2" strokeWidth={1.5} />
+      <p className="text-headline font-semibold text-label">{label}</p>
+      {hint && <p className="text-meta text-label-2">{hint}</p>}
     </div>
   )
 }
@@ -121,16 +157,16 @@ export function FileSection({ row, detail }: { row: ResourceRow; detail?: Resour
     <InspectorSection title={row.isDirectory ? 'Folder' : 'File'}>
       <PropertyList
         rows={[
-          { label: 'Name', value: <span className="selectable font-mono text-small break-all">{row.fileName}</span> },
-          ...(row.isDirectory ? [] : [{ label: 'Size', value: formatBytes(row.size) }]),
-          ...(row.mtimeMs ? [{ label: 'Modified', value: formatDate(row.mtimeMs) }] : []),
+          { label: 'Name', value: <span className="selectable mono break-all">{row.fileName}</span> },
+          ...(row.isDirectory ? [] : [{ label: 'Size', value: <span className="mono">{formatBytes(row.size)}</span> }]),
+          ...(row.mtimeMs ? [{ label: 'Modified', value: <span className="mono">{formatDate(row.mtimeMs)}</span> }] : []),
           ...(row.sha1
             ? [
                 {
                   label: 'SHA-1',
                   value: (
                     <span className="inline-flex items-center gap-1">
-                      <span className="selectable font-mono text-small">{row.sha1.slice(0, 12)}…</span>
+                      <span className="selectable mono">{row.sha1.slice(0, 12)}…</span>
                       <CopyButton text={row.sha1} label="Copy SHA-1" />
                     </span>
                   ),
@@ -159,7 +195,7 @@ export function ProblemNote({ row }: { row: ResourceRow }) {
 export function ScanningNote({ scanning }: { scanning: boolean }) {
   if (!scanning) return null
   return (
-    <span className="flex items-center gap-1.5 text-small text-label-2" role="status">
+    <span className="flex items-center gap-1.5 text-meta text-label-2" role="status">
       <Spinner size={11} /> Reading files…
     </span>
   )
@@ -168,7 +204,7 @@ export function ScanningNote({ scanning }: { scanning: boolean }) {
 /** The "N mods · M selected" count in the sub-toolbar. */
 export function CountLabel({ kind, total, all, selected }: { kind: ResourceKind; total: number; all?: number; selected: number }) {
   return (
-    <span className="text-small text-label-2 tabular">
+    <span className="pl-1.5 font-mono text-[11px] text-label-3 tabular">
       {all !== undefined && all !== total ? `${total} of ${noun(kind, all)}` : noun(kind, total)}
       {selected > 1 && ` · ${selected} selected`}
     </span>
@@ -224,7 +260,7 @@ export function AddFromInstanceSheet({ open, onOpenChange, instanceId, kind }: {
       title={`Add ${many} from Another Instance`}
       description={`Copies are stored once on disk and cloned into this instance. Each instance keeps its own ${many}.`}
       width={560}
-      footerLeading={visible.length > 0 ? <span className="text-small text-label-2">{picked.size ? `${picked.size} selected` : `${visible.length} ${visible.length === 1 ? one : many}`}</span> : undefined}
+      footerLeading={visible.length > 0 ? <span className="text-meta text-label-2 tabular">{picked.size ? `${picked.size} selected` : `${visible.length} ${visible.length === 1 ? one : many}`}</span> : undefined}
       footer={
         <>
           <Button onClick={() => onOpenChange(false)}>Cancel</Button>
@@ -277,16 +313,16 @@ export function AddFromInstanceSheet({ open, onOpenChange, instanceId, kind }: {
               />
               <VirtualList
                 items={visible}
-                rowHeight={36}
+                rowHeight={32}
                 getKey={(r) => r.id}
                 aria-label={`${many} in the other instance`}
-                className={cn('h-[300px] rounded-lg bg-surface shadow-[inset_0_0_0_0.5px_var(--color-surface-border)]')}
+                className={cn('h-[300px] rounded-[10px] border border-separator')}
                 renderRow={(r) => (
-                  <label className="flex h-full cursor-default items-center gap-2.5 border-b border-separator px-3">
+                  <label className="flex h-full cursor-default items-center gap-[9px] border-b border-separator px-3 hover:bg-hover">
                     <Checkbox checked={picked.has(r.id)} onCheckedChange={(on) => toggle(r.id, on)} aria-label={`Add ${r.name}`} />
-                    <ResourceIcon row={r} size={20} />
-                    <span className="min-w-0 flex-1 truncate text-body">{r.name}</span>
-                    <span className="truncate text-small text-label-2">{r.version || (r.isDirectory ? 'Folder' : formatBytes(r.size))}</span>
+                    <ResourceIcon row={r} />
+                    <span className="min-w-0 flex-1 truncate text-compact">{r.name}</span>
+                    <span className="truncate mono text-label-2">{r.version || (r.isDirectory ? 'Folder' : formatBytes(r.size))}</span>
                   </label>
                 )}
               />

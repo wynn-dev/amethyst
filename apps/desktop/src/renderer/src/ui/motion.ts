@@ -136,11 +136,17 @@ export const flight = {
  * indicator element, which must be absolutely positioned at the top-left of its positioned
  * ancestor (in the same scroller as the items) and carry the transition (see `indicatorClass`
  * in Layout.tsx). It is placed on the element matching `selector` inside `container` whenever
- * `key` changes, without animating the first placement or placements caused by resizing. Hidden
- * when nothing matches.
+ * `key` changes, so the key must cover everything that moves the selected item (the selection,
+ * plus e.g. the visible rows of a list). It slides only when the selection moves to another
+ * element; the first placement, resizes and the selected item itself moving (rows inserted
+ * above it, a filter) re-place it instantly. Hidden when nothing matches.
+ *
+ * Positions are measured in the indicator's own (untransformed) coordinates, so an item inside a
+ * surface that is still scaling in (a sheet growing from its trigger) is measured at its final size.
  */
 export function useSlidingIndicator(container: RefObject<HTMLElement | null>, selector: string, key: unknown): RefObject<HTMLSpanElement | null> {
   const ref = useRef<HTMLSpanElement>(null)
+  const placedOn = useRef<HTMLElement | null>(null)
   useLayoutEffect(() => {
     const box = container.current
     const ind = ref.current
@@ -150,23 +156,28 @@ export function useSlidingIndicator(container: RefObject<HTMLElement | null>, se
       if (!target) {
         ind.style.opacity = '0'
         ind.dataset.placed = ''
+        placedOn.current = null
         return
       }
-      // Measured against the indicator's own positioned ancestor, which may be a scroller.
+      // Measured against the indicator's own positioned ancestor, which may be a scroller. Client
+      // rects include ancestors' transforms; dividing by the ancestor's scale undoes them.
       const base = (ind.offsetParent as HTMLElement | null) ?? box
       const c = base.getBoundingClientRect()
       const r = target.getBoundingClientRect()
-      const instant = !animate || !ind.dataset.placed
+      const sx = base.offsetWidth && c.width ? c.width / base.offsetWidth : 1
+      const sy = base.offsetHeight && c.height ? c.height / base.offsetHeight : 1
+      const instant = !animate || !ind.dataset.placed || placedOn.current === target
       if (instant) ind.style.transition = 'none'
       ind.style.opacity = '1'
-      ind.style.transform = `translate(${r.left - c.left - base.clientLeft + base.scrollLeft}px, ${r.top - c.top - base.clientTop + base.scrollTop}px)`
-      ind.style.width = `${r.width}px`
-      ind.style.height = `${r.height}px`
+      ind.style.transform = `translate(${(r.left - c.left) / sx - base.clientLeft + base.scrollLeft}px, ${(r.top - c.top) / sy - base.clientTop + base.scrollTop}px)`
+      ind.style.width = `${r.width / sx}px`
+      ind.style.height = `${r.height / sy}px`
       if (instant) {
         void ind.offsetWidth
         ind.style.transition = ''
       }
       ind.dataset.placed = '1'
+      placedOn.current = target
     }
     place(true)
     if (typeof ResizeObserver === 'undefined') return
@@ -184,7 +195,7 @@ export function useSlidingIndicator(container: RefObject<HTMLElement | null>, se
     ro.observe(box)
     if (target) ro.observe(target)
     return () => ro.disconnect()
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `key` (the selection) is the re-placement trigger
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `key` (the selection and what moves it) is the re-placement trigger
   }, [container, selector, key])
   return ref
 }

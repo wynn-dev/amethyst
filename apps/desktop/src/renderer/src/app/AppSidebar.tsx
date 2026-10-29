@@ -158,9 +158,11 @@ export function AppSidebar() {
 
   const virtual = rows.length > VIRTUALISE_AT
   // The selection pill slides between rows; long (virtualised) lists use a static pill instead,
-  // since the selected row may not be rendered.
+  // since the selected row may not be rendered. It re-places whenever the visible rows change
+  // (folders, the filter) or the list switches between plain and virtualised.
   const list = useRef<HTMLDivElement>(null)
-  const indicator = useSlidingIndicator(list, '.sl-row[aria-current="page"]', pathname)
+  const rowKeys = rows.map((r) => r.key).join()
+  const indicator = useSlidingIndicator(list, '.sl-row[aria-current="page"]', `${pathname}|${virtual}|${rowKeys}`)
   const pill = <span ref={indicator} aria-hidden className={indicatorClass} />
 
   return (

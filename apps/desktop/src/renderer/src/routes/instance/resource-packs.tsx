@@ -1,6 +1,6 @@
 import { useCallback, useDeferredValue, useMemo, useState, type DragEvent, type KeyboardEvent } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { AlertTriangle, ArrowDown, ArrowUp, Check, GripVertical, Image, Plus, Trash2 } from 'lucide-react'
+import { AlertTriangle, ArrowDown, ArrowUp, Check, ChevronDown, GripVertical, Image, Plus, Trash2 } from 'lucide-react'
 import type { ResourceRow } from '@shared/services'
 import { Button, EmptyState, IconButton, Menu, SearchField, SkeletonRows, Switch, Tooltip, VirtualTable, cn, type Column, type MenuEntry } from '@/ui'
 import { QueryError } from '@/app/RouteStates'
@@ -14,6 +14,7 @@ import { api } from '@/lib/rpc'
 import { toastError } from '@/lib/error-messages'
 import {
   AddFromInstanceSheet,
+  ContentBar,
   DropOverlay,
   FileSection,
   PlaceholderCell,
@@ -28,7 +29,7 @@ import {
   type ContentRow,
 } from './content-parts'
 import { packCompat, releasesFor } from './pack-format'
-import { InspectorHeader, InspectorSection, PropertyList, SplitView, SubToolbar, copyText, useInstanceId, useSelection } from './parts'
+import { InspectorHeader, InspectorSection, PropertyList, SplitView, copyText, useInstanceId, useSelection } from './parts'
 import { UpdatesSheet } from './updates-sheet'
 
 type Header = { header: string; id: string }
@@ -66,7 +67,7 @@ export default function ResourcePacksTab() {
     const q = search.toLowerCase()
     const en = enabled.filter((p) => !q || p.name.toLowerCase().includes(q) || p.fileName.toLowerCase().includes(q))
     return [
-      { header: `Enabled (load order) — top overrides bottom`, id: 'h-enabled' },
+      { header: `Enabled · top overrides bottom`, id: 'h-enabled' },
       ...en,
       { header: 'Available', id: 'h-available' },
       ...available.rows.map((r, index): ContentRow => r ?? { placeholder: true, id: `\u0000p${index}`, index }),
@@ -130,7 +131,7 @@ export default function ResourcePacksTab() {
       id: 'handle',
       title: 'Order',
       header: <span className="sr-only">Order</span>,
-      width: '28px',
+      width: '30px',
       align: 'center',
       cell: (r) =>
         !isHeader(r) && !isPlaceholder(r) && r.enabled ? (
@@ -140,10 +141,10 @@ export default function ResourcePacksTab() {
               e.dataTransfer.setData(DRAG_TYPE, r.id)
               e.dataTransfer.effectAllowed = 'move'
             }}
-            className="flex cursor-grab items-center active:cursor-grabbing"
+            className="flex cursor-grab items-center text-label-3 hover:text-label-2 active:cursor-grabbing"
             title="Drag to change the load order (⌥⌘↑ / ⌥⌘↓)"
           >
-            <GripVertical aria-label={`Position ${(r.order ?? 0) + 1}`} className="size-3.5 text-label-3" />
+            <GripVertical aria-label={`Position ${(r.order ?? 0) + 1}`} className="size-3.5" strokeWidth={1.5} />
           </span>
         ) : null,
     },
@@ -165,20 +166,18 @@ export default function ResourcePacksTab() {
           <PlaceholderCell index={r.index} request={request} />
         ) : (
           <div
-            className="flex h-full min-w-0 flex-1 items-center gap-2.5"
+            className="flex h-full min-w-0 flex-1 items-center gap-[9px]"
             onDragOver={(e) => {
               if (r.enabled && Array.from(e.dataTransfer.types).includes(DRAG_TYPE)) e.preventDefault()
             }}
             onDrop={(e) => r.enabled && dropOn(r.id, e)}
           >
             <ResourceIcon row={r} />
-            <div className="flex min-w-0 flex-col">
-              <span className="flex items-center gap-1.5 truncate">
-                <span className="truncate">{r.name}</span>
-                {r.problem && <AlertTriangle aria-label={r.problem.message} className="size-3 shrink-0 text-orange" />}
-              </span>
-              <span className="truncate text-small text-label-2">{r.pending ? 'Reading…' : r.summary || r.fileName}</span>
-            </div>
+            <span className="flex min-w-0 items-baseline gap-2">
+              <span className="truncate font-medium">{r.name}</span>
+              <span className="truncate text-meta text-label-3">{r.pending ? 'Reading…' : r.summary || r.fileName}</span>
+            </span>
+            {r.problem && <AlertTriangle aria-label={r.problem.message} className="size-3 shrink-0 text-orange" />}
           </div>
         ),
     },
@@ -192,20 +191,20 @@ export default function ResourcePacksTab() {
         const c = packCompat(r.packFormats, minecraft)
         if (!c) return null
         return c.ok ? (
-          <span className="flex items-center gap-1 text-small text-label-2">
-            <Check className="size-3.5 text-green" /> Compatible
+          <span className="flex items-center gap-1 text-meta text-label-2">
+            <Check className="size-3 text-label-3" /> Compatible
           </span>
         ) : (
           <Tooltip content={c.detail}>
-            <span tabIndex={0} className="flex min-w-0 items-center gap-1 text-small text-orange">
+            <span tabIndex={0} className="flex min-w-0 items-center gap-1 text-meta text-orange">
               <AlertTriangle className="size-3.5 shrink-0" /> <span className="truncate">{c.label}</span>
             </span>
           </Tooltip>
         )
       },
     },
-    { id: 'source', title: 'Source', header: 'Source', width: '96px', cell: (r) => (isHeader(r) || isPlaceholder(r) ? null : <RowSource row={r} />) },
-    { id: 'size', title: 'Size', header: 'Size', width: '76px', align: 'end', cell: (r) => (isHeader(r) || isPlaceholder(r) ? null : <span className="text-label-2">{r.isDirectory ? 'Folder' : formatBytes(r.size)}</span>) },
+    { id: 'source', title: 'Source', header: 'Source', width: '92px', cell: (r) => (isHeader(r) || isPlaceholder(r) ? null : <RowSource row={r} />) },
+    { id: 'size', title: 'Size', header: 'Size', width: '80px', align: 'end', cell: (r) => (isHeader(r) || isPlaceholder(r) ? null : <span className="pr-1 mono text-label-2">{r.isDirectory ? 'Folder' : formatBytes(r.size)}</span>) },
   ], [setEnabled, dropOn, request, minecraft])
 
   const rowMenu = (keys: string[]): MenuEntry[] => {
@@ -243,35 +242,49 @@ export default function ResourcePacksTab() {
       Add Resource Packs
     </Button>
   )
+  const moreItems = [
+    { label: 'Add from Files…', onSelect: () => void addFiles() },
+    { label: 'Add from Another Instance…', onSelect: () => setFromInstance(true) },
+  ]
   const names = Object.fromEntries([...byId.values()].map((r) => [r.id, { name: r.name, version: r.version }]))
   const loading = enabledQuery.isPending || available.isPending
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col" {...drop.props}>
-      <SubToolbar
+      <ContentBar
         trailing={
           <>
             <Button onClick={() => setUpdatesOpen(true)}>Check for Updates</Button>
-            {addButton}
-            <Menu
-              align="end"
-              items={[
-                { label: 'Add from Files…', onSelect: () => void addFiles() },
-                { label: 'Add from Another Instance…', onSelect: () => setFromInstance(true) },
-              ]}
-              trigger={
-                <IconButton label="More ways to add" variant="push" size="sm" className="!size-6">
-                  <Plus />
-                </IconButton>
-              }
-            />
+            <div className="flex">
+              <Button variant="primary" icon={<Plus />} onClick={browse} className="!rounded-r-none">
+                Add Packs
+              </Button>
+              <Menu
+                align="end"
+                items={moreItems}
+                trigger={
+                  <IconButton label="More ways to add" variant="primary" tooltip={false} className="ml-px !h-[26px] !w-[22px] !rounded-l-none">
+                    <ChevronDown />
+                  </IconButton>
+                }
+              />
+            </div>
           </>
         }
       >
-        <SearchField ref={findTargetRef} value={query} onValueChange={setQuery} placeholder="Search resource packs" className="w-[220px]" />
-        {!loading && <span className="text-small text-label-2 tabular">{`${enabled.length} enabled · ${search ? `${available.total} more found` : `${total} total`}`}</span>}
+        <SearchField ref={findTargetRef} value={query} onValueChange={setQuery} placeholder="Filter resource packs" label="Search resource packs" className="mr-1 w-[190px]" />
+        {!loading && (
+          <span className="flex items-baseline gap-3 pl-1 text-callout text-label-2">
+            <span>
+              Enabled <span className="font-mono text-[10.5px] text-label-3 tabular">{enabled.length}</span>
+            </span>
+            <span>
+              {search ? 'Found' : 'Total'} <span className="font-mono text-[10.5px] text-label-3 tabular">{search ? available.total : total}</span>
+            </span>
+          </span>
+        )}
         <ScanningNote scanning={available.scanning} />
-      </SubToolbar>
+      </ContentBar>
       <SplitView
         inspectorLabel="Resource pack details"
         inspector={
@@ -287,13 +300,11 @@ export default function ResourcePacksTab() {
               onMove={(d) => move([selected.id], d)}
               onTrash={() => setPendingTrash([selected.id])}
             />
-          ) : (
-            <p className="m-auto px-6 text-center text-body text-label-3">Select a resource pack to see its details</p>
-          )
+          ) : undefined
         }
       >
         {loading ? (
-          <SkeletonRows rows={8} className="pt-2" />
+          <SkeletonRows rows={8} />
         ) : enabledQuery.isError || available.isError ? (
           <QueryError error={enabledQuery.error ?? available.error} onRetry={available.refetch} what="resource packs" />
         ) : total === 0 && !search ? (
@@ -316,7 +327,7 @@ export default function ResourcePacksTab() {
               columns={columns}
               getKey={(r) => r.id}
               groupHeader={(r) => (isHeader(r) ? r.header : null)}
-              rowHeight={40}
+              rowHeight={32}
               selection={selection}
               onSelectionChange={setSelection}
               onToggle={toggle}
@@ -370,9 +381,9 @@ function PackInspector({
   const f = pack.packFormats
   return (
     <>
-      <InspectorHeader icon={<ResourceIcon row={pack} size={44} />} title={pack.name} subtitle={pack.enabled ? `Position ${position + 1} of ${count} in the load order` : 'Not enabled'} />
+      <InspectorHeader icon={<ResourceIcon row={pack} size={40} />} title={pack.name} subtitle={pack.enabled ? `Position ${position + 1} of ${count} in the load order` : 'Not enabled'} />
       <div className="flex items-center justify-between px-4 pb-3">
-        <label htmlFor="rp-enabled" className="text-body">
+        <label htmlFor="rp-enabled" className="text-compact">
           Enabled
         </label>
         <Switch id="rp-enabled" checked={pack.enabled} onCheckedChange={onEnabled} />
@@ -388,18 +399,18 @@ function PackInspector({
         </div>
       )}
       <InspectorSection>
-        <p className="text-callout whitespace-pre-line">{detail.data?.description || pack.summary || 'No description.'}</p>
+        <p className="text-compact whitespace-pre-line text-label-2">{detail.data?.description || pack.summary || 'No description.'}</p>
         <ProblemNote row={pack} />
       </InspectorSection>
       <InspectorSection title="Compatibility">
         <PropertyList
           rows={[
-            { label: 'Pack format', value: f ? (f.min === f.max ? f.max : `${f.min}–${f.max}`) : '—' },
+            { label: 'Pack format', value: <span className="mono">{f ? (f.min === f.max ? f.max : `${f.min}–${f.max}`) : '—'}</span> },
             { label: 'Made for', value: f ? (releasesFor(f.max) ?? '—') : '—' },
-            { label: 'This instance', value: compat ? <span className={cn(compat.ok ? 'text-green' : 'text-orange')}>{compat.label}</span> : '—' },
+            { label: 'This instance', value: compat ? <span className={cn(compat.ok ? 'text-label' : 'text-orange')}>{compat.label}</span> : '—' },
           ]}
         />
-        {compat && !compat.ok && <p className="mt-2 text-small text-label-2">{compat.detail}</p>}
+        {compat && !compat.ok && <p className="mt-2 text-meta text-label-2">{compat.detail}</p>}
       </InspectorSection>
       <FileSection row={pack} detail={detail.data} />
       <InspectorSection>

@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react'
 import { File, Folder, Plus } from 'lucide-react'
-import { Button, Checkbox, Segmented, Sheet, Spinner, TextField } from '@/ui'
+import { Button, Checkbox, DitherBar, IconButton, Segmented, Sheet, TextField, recentTrigger } from '@/ui'
 import { QueryError } from '@/app/RouteStates'
 import { formatBytes } from '@/app/visuals'
 import { loaderLabel, useInstanceInfo } from '@/data/instance-info'
 import { exportModpack, useExportFiles, useModpackUi } from '@/data/modpacks'
 import { pickSaveFile } from '@/lib/files'
+import { Card, CardHeader, Note, Row } from './parts'
 
 type Format = 'mrpack' | 'curseforge'
 
@@ -52,7 +53,8 @@ export default function ExportModpackSheet() {
       title={`Export “${target?.name}”`}
       description={info.data ? `Minecraft ${info.data.minecraft}${info.data.loader ? ` · ${loaderLabel(info.data.loader.kind)} ${info.data.loader.version}` : ''}` : undefined}
       width={560}
-      footerLeading={chosen.length > 0 ? <span className="text-small text-label-2 tabular">About {formatBytes(size)} before linking</span> : undefined}
+      origin={recentTrigger}
+      footerLeading={chosen.length > 0 ? <span className="text-meta text-label-2 tabular">About {formatBytes(size)} before linking</span> : undefined}
       footer={
         <>
           <Button onClick={close}>Cancel</Button>
@@ -62,47 +64,54 @@ export default function ExportModpackSheet() {
         </>
       }
     >
-      <div className="flex flex-col gap-4">
-        <div className="flex flex-col gap-1.5">
-          <span className="text-small font-semibold text-label-2">Format</span>
-          <Segmented
-            aria-label="Format"
-            value={format}
-            onValueChange={setFormat}
-            options={[
-              { value: 'mrpack', label: 'Modrinth (.mrpack)' },
-              { value: 'curseforge', label: 'CurseForge (.zip)' },
-            ]}
-          />
-        </div>
-        <div className="grid grid-cols-[1fr_160px] gap-3">
-          <TextField label="Name" value={name} onChange={(e) => setName(e.target.value)} />
-          <div className="flex items-end gap-1">
-            <TextField label="Version" value={version} onChange={(e) => setVersion(e.target.value)} />
-            <Button aria-label="Bump version" title="Bump the version" onClick={() => setVersion(bump(version))} className="mb-px">
+      <div className="flex flex-col gap-3">
+        <Card>
+          <Row label="Format">
+            <Segmented
+              aria-label="Format"
+              value={format}
+              onValueChange={setFormat}
+              options={[
+                { value: 'mrpack', label: 'Modrinth (.mrpack)' },
+                { value: 'curseforge', label: 'CurseForge (.zip)' },
+              ]}
+            />
+          </Row>
+          <Row label="Name" htmlFor="export-name">
+            <TextField id="export-name" value={name} onChange={(e) => setName(e.target.value)} className="flex-1" />
+          </Row>
+          <Row label="Version" htmlFor="export-version">
+            <TextField id="export-version" monospace value={version} onChange={(e) => setVersion(e.target.value)} className="!w-[120px]" />
+            <IconButton label="Bump version" variant="push" onClick={() => setVersion(bump(version))}>
               <Plus />
-            </Button>
-          </div>
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <div className="flex items-center justify-between">
-            <span className="text-small font-semibold text-label-2">Files to include</span>
-            {files.data && (
-              <Checkbox
-                label="All"
-                checked={chosen.length === 0 ? false : chosen.length === files.data.length ? true : 'indeterminate'}
-                onCheckedChange={(on) => setIncluded(new Set(on ? files.data.map((f) => f.path) : []))}
-              />
-            )}
-          </div>
+            </IconButton>
+          </Row>
+        </Card>
+        <section aria-label="Files to include" className="overflow-hidden rounded-[10px] border border-separator">
+          <CardHeader
+            title="Files to include"
+            count={files.data ? `${chosen.length}/${files.data.length}` : undefined}
+            action={
+              files.data && (
+                <Checkbox
+                  label="All"
+                  checked={chosen.length === 0 ? false : chosen.length === files.data.length ? true : 'indeterminate'}
+                  onCheckedChange={(on) => setIncluded(new Set(on ? files.data.map((f) => f.path) : []))}
+                  className="ml-1.5 [&_label>span:first-child]:text-meta"
+                />
+              )
+            }
+          />
           {files.isPending ? (
-            <Spinner label="Reading the instance folder" />
+            <div className="flex h-24 items-center justify-center">
+              <DitherBar label="Reading the instance folder" className="w-40" />
+            </div>
           ) : files.isError ? (
             <QueryError error={files.error} onRetry={() => files.refetch()} what="the instance folder" />
           ) : (
-            <ul className="flex max-h-[260px] flex-col divide-y divide-separator overflow-y-auto rounded-lg bg-surface shadow-[inset_0_0_0_0.5px_var(--color-surface-border)]">
+            <ul className="flex max-h-[248px] flex-col divide-y divide-separator overflow-y-auto">
               {(files.data ?? []).map((f) => (
-                <li key={f.path} className="flex h-9 items-center gap-2.5 px-3">
+                <li key={f.path} className="flex h-8 shrink-0 items-center gap-2.5 px-3 hover:bg-hover">
                   <Checkbox
                     checked={included?.has(f.path) ?? false}
                     aria-label={`Include ${f.path}`}
@@ -115,9 +124,9 @@ export default function ExportModpackSheet() {
                       })
                     }
                   />
-                  {f.isDirectory ? <Folder className="size-3.5 text-accent" /> : <File className="size-3.5 text-label-2" />}
-                  <span className="min-w-0 flex-1 truncate font-mono text-callout">{f.path}</span>
-                  <span className="text-small text-label-2 tabular">
+                  {f.isDirectory ? <Folder className="size-3.5 shrink-0 text-label-2" strokeWidth={1.5} /> : <File className="size-3.5 shrink-0 text-label-3" strokeWidth={1.5} />}
+                  <span className="min-w-0 flex-1 truncate font-mono text-meta">{f.path}</span>
+                  <span className="shrink-0 font-mono text-[11px] text-label-2 tabular">
                     {f.isDirectory ? `${f.files} file${f.files === 1 ? '' : 's'} · ` : ''}
                     {formatBytes(f.size)}
                   </span>
@@ -125,8 +134,8 @@ export default function ExportModpackSheet() {
               ))}
             </ul>
           )}
-          <p className="text-small text-label-2">Mods and packs from Modrinth{format === 'curseforge' ? ' or CurseForge' : ''} are linked, not bundled. Worlds, logs and screenshots are left out unless you tick them.</p>
-        </div>
+        </section>
+        <Note>Mods and packs from Modrinth{format === 'curseforge' ? ' or CurseForge' : ''} are linked, not bundled. Worlds, logs and screenshots are left out unless you tick them.</Note>
       </div>
     </Sheet>
   )

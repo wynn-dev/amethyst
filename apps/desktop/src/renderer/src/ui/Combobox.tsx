@@ -29,7 +29,7 @@ export interface ComboboxProps {
   filter?: (option: ComboboxOption, query: string) => boolean
 }
 
-const ROW = 24
+const ROW = 26
 const labelFilter = (o: ComboboxOption, q: string) => o.label.toLowerCase().includes(q.toLowerCase())
 
 /**
@@ -127,7 +127,7 @@ export function Combobox({
                 setQuery(null)
               }
             }}
-            className={cn(fieldClass, 'h-[22px] pr-6 pl-[7px]')}
+            className={cn(fieldClass, 'h-[26px] pr-6 pl-2')}
           />
           <button
             type="button"
@@ -136,9 +136,9 @@ export function Combobox({
             disabled={disabled}
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => setOpen((o) => !o)}
-            className="absolute top-[3px] right-[3px] flex size-4 items-center justify-center rounded-[4px] bg-accent-fill text-on-accent"
+            className="absolute top-[5px] right-[5px] flex size-4 items-center justify-center rounded-[4px] text-label-3 hover:text-label-2"
           >
-            <ChevronDown className="size-3" strokeWidth={2.5} />
+            <ChevronDown className="size-3" strokeWidth={2} />
           </button>
         </div>
       </Popover.Anchor>
@@ -153,7 +153,7 @@ export function Combobox({
           }}
           className={cn(menuSurface, 'w-(--radix-popover-trigger-width) p-0')}
         >
-          <div ref={scrollRef} id={listId} role="listbox" aria-label={aria['aria-label']} className="max-h-[264px] overflow-y-auto p-[5px]">
+          <div ref={scrollRef} id={listId} role="listbox" aria-label={aria['aria-label']} className="max-h-[286px] overflow-y-auto p-1">
             {results.length === 0 ? (
               <div className="px-2.5 py-1.5 text-label-2">{emptyText}</div>
             ) : (
@@ -173,14 +173,14 @@ export function Combobox({
                       onClick={() => commit(o)}
                       style={{ position: 'absolute', top: 0, left: 0, right: 0, height: ROW, transform: `translateY(${row.start}px)` }}
                       className={cn(
-                        'group flex items-center gap-2 rounded-[4px] pr-2.5 pl-[22px] text-body',
-                        'data-[active]:bg-accent-fill data-[active]:text-on-accent aria-disabled:text-label-3',
+                        'group flex items-center gap-2 rounded-[5px] pr-2 pl-6 text-compact',
+                        'data-[active]:bg-fill-2 aria-disabled:text-label-3',
                       )}
                     >
                       {o.value === value && <Check className="absolute left-1.5 size-3.5" strokeWidth={2.5} />}
                       <span className="truncate">{o.label}</span>
                       {o.tags}
-                      {o.detail && <span className="ml-auto shrink-0 text-small text-label-2 group-data-[active]:text-on-accent/80">{o.detail}</span>}
+                      {o.detail && <span className="ml-auto shrink-0 font-mono text-[11px] text-label-3 tabular">{o.detail}</span>}
                     </div>
                   )
                 })}

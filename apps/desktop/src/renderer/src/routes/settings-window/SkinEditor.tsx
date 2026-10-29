@@ -1,7 +1,7 @@
 import { useRef, useState, type DragEvent } from 'react'
 import { RadioGroup } from 'radix-ui'
 import type { AccountDetail, SkinSource } from '@shared/services'
-import { Banner, Button, FormSection, Menu, Segmented, Sheet, Skeleton, TextField, cn, toast } from '@/ui'
+import { Banner, Button, FormSection, Menu, Segmented, Sheet, Skeleton, TextField, cn, recentTrigger, toast } from '@/ui'
 import { skinErrorMessage, useAccountDetail, useApplySkin } from '@/data/skins'
 import { detectSkinModel, readSkinFile, type SkinFile, type SkinModel } from '@/lib/skin'
 import { decodePixels, imageToDataUrl } from '@/lib/skin-image'
@@ -149,7 +149,7 @@ export function SkinEditorView({ account }: { account: AccountDetail }) {
 
           <div className="flex min-w-0 flex-1 flex-col gap-4">
             <div className="flex flex-col gap-1.5">
-              <span className="text-small font-semibold text-label-2">Skin</span>
+              <span className="text-meta font-semibold text-label-2">Skin</span>
               <div className="flex flex-wrap items-center gap-2">
                 <Segmented<SkinModel>
                   aria-label="Skin model"
@@ -182,7 +182,7 @@ export function SkinEditorView({ account }: { account: AccountDetail }) {
                   }}
                 />
               </div>
-              <p className="text-small text-label-2">
+              <p className="text-meta text-label-2">
                 {skin?.kind === 'file'
                   ? `Previewing “${skin.file.name}”${skin.file.legacy ? ' (legacy 64 × 32 skin)' : ''}. It isn’t ${offline ? 'saved' : 'uploaded'} until you apply it.`
                   : skin?.kind === 'url'
@@ -192,16 +192,16 @@ export function SkinEditorView({ account }: { account: AccountDetail }) {
                       : 'Drop a PNG on the preview, or choose one. Skins are 64 × 64 or 64 × 32 pixels.'}
               </p>
               {problem && (
-                <p role="alert" className="text-small text-red">
+                <p role="alert" className="text-meta text-red">
                   {problem}
                 </p>
               )}
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <span className="text-small font-semibold text-label-2">Cape</span>
+              <span className="text-meta font-semibold text-label-2">Cape</span>
               {offline ? (
-                <p className="text-small text-label-3">Capes need a Microsoft account.</p>
+                <p className="text-meta text-label-3">Capes need a Microsoft account.</p>
               ) : (
                 <CapePicker capes={account.capes} value={cape} onValueChange={setCape} disabled={needsSignIn} />
               )}
@@ -272,7 +272,7 @@ function CapePicker({ capes, value, onValueChange, disabled }: { capes: AccountD
           </RadioGroup.Item>
         ))}
       </RadioGroup.Root>
-      {capes.length === 0 && <p className="text-small text-label-3">This account doesn’t own any capes.</p>}
+      {capes.length === 0 && <p className="text-meta text-label-3">This account doesn’t own any capes.</p>}
     </>
   )
 }
@@ -314,6 +314,7 @@ function SkinUrlSheet({ open, onOpenChange, onSubmit }: { open: boolean; onOpenC
       open={open}
       onOpenChange={onOpenChange}
       title="Skin from URL"
+      origin={recentTrigger}
       description="Preview a skin PNG from the web. It’s uploaded only when you apply it."
       width={440}
       footer={

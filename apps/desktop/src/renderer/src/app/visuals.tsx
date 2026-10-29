@@ -1,13 +1,15 @@
 import { memo } from 'react'
+import { InstanceArt } from '@/ui/InstanceArt'
+import { artFor } from '@/ui/dither-math'
 import { cn } from '@/ui/cn'
 
 /**
- * Generated block-style icon used until an instance or project has a real icon. Cheap: pure CSS,
- * no images, so long virtualised lists never decode bitmaps.
+ * The icon of an instance or project: its real icon when known, otherwise seeded dithered art
+ * (ui/InstanceArt). `hue` is any stable number derived from the subject's id; `label` is kept for
+ * callers but no longer drawn (the placeholder carries no letter).
  */
 export const BlockIcon = memo(function BlockIcon({
   hue,
-  label,
   size = 20,
   className,
   src,
@@ -19,55 +21,23 @@ export const BlockIcon = memo(function BlockIcon({
   /** Real icon URL when known (`amethyst-asset:` or CDN). Loaded lazily. */
   src?: string
 }) {
-  const radius = Math.max(4, Math.round(size * 0.24))
-  if (src) {
-    return (
-      <img
-        src={src}
-        alt=""
-        loading="lazy"
-        decoding="async"
-        width={size}
-        height={size}
-        className={cn('shrink-0 object-cover', className)}
-        style={{ borderRadius: radius }}
-      />
-    )
-  }
-  return (
-    <span
-      aria-hidden
-      className={cn('relative inline-flex shrink-0 items-center justify-center overflow-hidden font-semibold text-white', className)}
-      style={{
-        width: size,
-        height: size,
-        borderRadius: radius,
-        fontSize: Math.round(size * 0.46),
-        background: `linear-gradient(160deg, hsl(${hue} 62% 62%), hsl(${(hue + 28) % 360} 58% 40%))`,
-        boxShadow: 'inset 0 0 0 0.5px rgb(0 0 0 / 0.18), inset 0 1px 0 rgb(255 255 255 / 0.25)',
-        textShadow: '0 1px 1px rgb(0 0 0 / 0.25)',
-      }}
-    >
-      <span
-        className="absolute inset-0 opacity-[0.16]"
-        style={{
-          backgroundImage:
-            'linear-gradient(45deg, #000 25%, transparent 25%, transparent 75%, #000 75%), linear-gradient(45deg, #000 25%, transparent 25%, transparent 75%, #000 75%)',
-          backgroundSize: `${size / 4}px ${size / 4}px`,
-          backgroundPosition: `0 0, ${size / 8}px ${size / 8}px`,
-        }}
-      />
-      <span className="relative leading-none">{label.trim().charAt(0).toUpperCase()}</span>
-    </span>
-  )
+  return <InstanceArt seed={hue} size={size} src={src} className={className} />
 })
+
+/** A flat, dark, muted backdrop from the placeholder-art tones (never purple), for cards with light text. */
+export function heroTone(seed: number, lightness: number): string {
+  const { hue, sat } = artFor(seed)
+  return `hsl(${hue} ${Math.round(sat * 0.6)}% ${lightness}%)`
+}
 
 // 8×8 face: 0 hair, 1 skin, 2 shade, 3 eye white, 4 iris, 5 mouth
 const FACE = ['00000000', '00000000', '01111110', '11111111', '13411431', '11122111', '11255211', '21111112']
 const PIXELS = FACE.flatMap((row, y) => [...row].map((c, x) => ({ key: y * 8 + x, x, y, c: Number(c) })))
 
 /** A pixel-art player head generated from a hue, standing in for the real skin face. */
-export const PlayerHead = memo(function PlayerHead({ hue, size = 20, className }: { hue: number; size?: number; className?: string }) {
+export const PlayerHead = memo(function PlayerHead({ hue: seed, size = 20, className }: { hue: number; size?: number; className?: string }) {
+  // The same muted, never-purple tones as the placeholder art.
+  const hue = artFor(seed).hue
   const hair = `hsl(${hue} 42% 28%)`
   const skin = `hsl(${(hue + 25) % 360} 38% 66%)`
   const shade = `hsl(${(hue + 25) % 360} 32% 56%)`
@@ -88,25 +58,6 @@ export const PlayerHead = memo(function PlayerHead({ hue, size = 20, className }
 
 /** `relative` unless the caller already positions the element (Tailwind can't merge the two). */
 export const positioned = (className?: string) => (/(^|\s)(absolute|fixed|sticky)(\s|$)/.test(className ?? '') ? undefined : 'relative')
-
-/** Placeholder artwork (screenshots, gallery images) until real images are wired. */
-export function ArtTile({ hue, className, label }: { hue: number; className?: string; label?: string }) {
-  return (
-    <div
-      role={label ? 'img' : undefined}
-      aria-label={label}
-      aria-hidden={label ? undefined : true}
-      className={cn(positioned(className), 'overflow-hidden', className)}
-      style={{
-        background: `linear-gradient(180deg, hsl(${(hue + 190) % 360} 60% 72%) 0%, hsl(${(hue + 200) % 360} 55% 82%) 52%, hsl(${hue} 42% 44%) 52%, hsl(${(hue + 20) % 360} 38% 30%) 100%)`,
-      }}
-    >
-      <div className="absolute bottom-[48%] left-[12%] h-[22%] w-[18%] rounded-t-sm" style={{ background: `hsl(${hue} 30% 32%)` }} />
-      <div className="absolute bottom-[48%] left-[34%] h-[34%] w-[10%]" style={{ background: `hsl(${(hue + 100) % 360} 35% 36%)` }} />
-      <div className="absolute top-[12%] right-[16%] size-[10%] rounded-full bg-white/80" />
-    </div>
-  )
-}
 
 const units = ['B', 'KB', 'MB', 'GB', 'TB']
 export function formatBytes(n: number): string {

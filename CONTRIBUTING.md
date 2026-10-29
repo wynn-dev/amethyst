@@ -33,6 +33,10 @@ AMETHYST_E2E_UI=core:/tmp/e2e-core pnpm --filter @amethyst/desktop exec electron
 AMETHYST_E2E_UI=content:/tmp/e2e-content pnpm --filter @amethyst/desktop exec electron .
 ```
 
+Screenshot and E2E UI runs keep their windows invisible (transparent, unfocusable, no Dock icon;
+`main/headless.ts`), so they can run while you work. Set `AMETHYST_VISIBLE=1` to watch one. The
+game window an E2E launch opens is a separate Java process and still appears.
+
 `AMETHYST_E2E_UI=<dir>` without a prefix runs `core`. Set `AMETHYST_E2E_CACHE=<data root>` to
 clone an existing data root's `minecraft/` and `runtimes/` folders in (APFS clones), so game files
 are not downloaded again. The drivers print `E2E …` lines and exit non-zero when a step fails.

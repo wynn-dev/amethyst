@@ -29,7 +29,7 @@ export interface SelectProps<V extends string = string> {
 }
 
 /**
- * macOS pop-up button (Radix Select). The list opens aligned over the trigger, like NSPopUpButton,
+ * Pop-up button (Radix Select). The list opens aligned over the trigger, like NSPopUpButton,
  * with a checkmark beside the current item. Type-to-select and arrow keys work.
  */
 export function Select<V extends string = string>({
@@ -50,22 +50,17 @@ export function Select<V extends string = string>({
         aria-label={aria['aria-label']}
         className={cn(
           'inline-flex min-w-0 items-center justify-between gap-2 rounded-md pr-1 pl-2.5 text-label outline-none',
-          'focus-visible:outline-3 focus-visible:outline-[color-mix(in_srgb,var(--accent)_55%,transparent)] disabled:opacity-45',
-          size === 'md' ? 'h-6 text-body' : 'h-5 text-small',
-          variant === 'push' ? 'bg-control shadow-control' : 'hover:bg-fill',
+          'focus-visible:outline-2 focus-visible:outline-(--focus-ring) disabled:opacity-45',
+          size === 'md' ? 'h-[26px] text-compact' : 'h-5 text-small',
+          variant === 'push' ? 'hairline-strong hover:bg-hover data-[state=open]:bg-fill' : 'hover:bg-hover data-[state=open]:bg-fill',
           className,
         )}
       >
         <span className="truncate">
           <R.Value />
         </span>
-        <span
-          className={cn(
-            'flex items-center justify-center rounded-[4px]',
-            variant === 'push' ? 'size-4 bg-accent-fill text-on-accent' : 'size-4 text-label-2',
-          )}
-        >
-          <ChevronsUpDown aria-hidden className="size-3" strokeWidth={2.25} />
+        <span className="flex size-4 items-center justify-center text-label-3">
+          <ChevronsUpDown aria-hidden className="size-3" strokeWidth={2} />
         </span>
       </R.Trigger>
       <R.Portal>
@@ -73,7 +68,7 @@ export function Select<V extends string = string>({
           <R.Viewport>
             {options.map((o) => (
               <div key={o.value}>
-                {o.separatorBefore && <R.Separator className="mx-2.5 my-[5px] h-px bg-separator" />}
+                {o.separatorBefore && <R.Separator className="mx-2 my-1 h-px bg-separator" />}
                 <R.Item value={o.value} disabled={o.disabled} textValue={o.text} className={cn(menuItem, 'group')}>
                   <R.ItemIndicator className="absolute left-1.5 flex items-center">
                     <Check strokeWidth={2.5} />

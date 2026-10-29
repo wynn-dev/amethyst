@@ -1,15 +1,15 @@
-import { useEffect, useState, type MouseEvent } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from 'react'
 import { Outlet, useNavigate, useRouterState } from '@tanstack/react-router'
-import { ChevronDown, FolderOpen, MoreHorizontal, Play, Square, X } from 'lucide-react'
+import { Folder, MoreHorizontal, Play, Square, X } from 'lucide-react'
 import { INSTANCE_TABS, type InstanceTab } from '@shared/menu'
-import { Alert, Button, EmptyState, IconButton, Menu, Segmented, Skeleton, ToolbarTitle, cn, type MenuEntry } from '@/ui'
+import { Alert, Button, ContextMenu, Dot, DitherProgress, EmptyState, IconButton, Menu, Skeleton, TabStrip, ToolbarTitle, tabPanelProps, cn, flight, flyFrom, type MenuEntry } from '@/ui'
 import { PageToolbar } from '@/app/PageToolbar'
 import { QueryError } from '@/app/RouteStates'
 import { TAB_LABELS, openInstance } from '@/app/commands'
 import { useUi } from '@/app/ui-store'
 import { BlockIcon } from '@/app/visuals'
-import { instanceActions, useInstance, useInstances, versionLabel } from '@/data/instances'
-import { useWorlds } from '@/data/content'
+import { instanceActions, loaderName, useInstance, useInstances } from '@/data/instances'
+import { useContentCounts, useWorlds } from '@/data/content'
 import { useAccounts } from '@/data/accounts'
 import { openModpackExport } from '@/data/modpacks'
 import { STEP_LABELS } from '@/data/launch'
@@ -47,8 +47,8 @@ export function InstanceLayout() {
       <>
         <PageToolbar
           leading={
-            <div className="flex items-center gap-2.5 pl-1" role="status" aria-label="Loading instance">
-              <Skeleton className="size-7 rounded-md" />
+            <div className="flex items-center gap-2.5" role="status" aria-label="Loading instance">
+              <Skeleton className="size-7 rounded-[7px]" />
               <div className="flex flex-col gap-1.5">
                 <Skeleton className="h-3 w-36" />
                 <Skeleton className="h-2 w-20" />
@@ -78,40 +78,115 @@ export function InstanceLayout() {
     )
   }
 
+  return <InstanceView inst={inst} tab={tab} />
+}
+
+/** A tab count, hidden when zero or unknown. */
+const count = (n: number | undefined) => (n ? n : undefined)
+
+/** The header (art, name, "version · loader · N mods", actions, Play) and the tab strip. */
+function InstanceView({ inst, tab }: { inst: InstanceSummary; tab: InstanceTab }) {
+  const modded = inst.loader.kind !== 'vanilla'
+  const { data: counts } = useContentCounts(inst.id, modded)
+  const tabCounts: Partial<Record<InstanceTab, number | undefined>> = {
+    mods: count(counts?.mods),
+    'resource-packs': count(counts?.resourcePacks),
+    shaders: count(counts?.shaders),
+    worlds: count(counts?.worlds),
+  }
+  const subtitle = [
+    inst.minecraft || 'Unknown version',
+    modded ? [loaderName(inst.loader.kind), inst.loader.version].filter(Boolean).join(' ') : 'Vanilla',
+    modded && counts?.mods !== undefined ? `${counts.mods} ${counts.mods === 1 ? 'mod' : 'mods'}` : undefined,
+  ]
+    .filter(Boolean)
+    .join(' · ')
+
   return (
     <>
       <PageToolbar
         separator={false}
-        leading={<ToolbarTitle icon={<BlockIcon hue={inst.iconHue} label={inst.name} src={inst.iconUrl} size={28} />} title={inst.name} subtitle={versionLabel(inst)} />}
+        leading={<ToolbarTitle icon={<HeaderArt inst={inst} />} title={inst.name} subtitle={subtitle} />}
         trailing={
+          <IconButton label="Show in Finder" shortcut="shift+mod+r" onClick={() => void instanceActions.revealInFinder(inst)}>
+            <Folder />
+          </IconButton>
+        }
+        end={
           <>
-            <PlayButton inst={inst} />
-            <IconButton label="Show in Finder" shortcut="shift+mod+r" onClick={() => void instanceActions.revealInFinder(inst)}>
-              <FolderOpen />
-            </IconButton>
             <OverflowMenu inst={inst} />
+            <PlayButton inst={inst} />
           </>
         }
       />
-      <div className="flex h-10 shrink-0 items-center justify-center border-b border-separator px-3">
-        <Segmented
+      <div className="flex h-9 shrink-0 items-center border-b border-separator px-2.5">
+        <TabStrip
           aria-label="Instance sections"
+          panelId="instance-panel"
           value={tab}
           onValueChange={(t) => openInstance(inst.id, t)}
-          options={INSTANCE_TABS.map((t) => ({ value: t, label: TAB_LABELS[t] }))}
+          items={INSTANCE_TABS.map((t) => ({ value: t, label: TAB_LABELS[t], count: tabCounts[t] }))}
         />
       </div>
-      <div className="flex min-h-0 flex-1 flex-col">
+      {/* Each tab is its own route, so the pane enters fresh. */}
+      <div key={tab} {...tabPanelProps('instance-panel', tab)} className="flex min-h-0 flex-1 animate-enter flex-col">
         <Outlet />
       </div>
     </>
   )
 }
 
+/** The header tile. When the instance was picked from the sidebar, it flies in from that row's tile. */
+function HeaderArt({ inst }: { inst: InstanceSummary }) {
+  const ref = useRef<HTMLSpanElement>(null)
+  useLayoutEffect(() => {
+    const from = flight.take(inst.id)
+    if (from && ref.current) flyFrom(ref.current, from)
+  }, [inst.id])
+  return (
+    <span ref={ref} className="flex">
+      <BlockIcon hue={inst.iconHue} label={inst.name} src={inst.iconUrl} size={28} />
+    </span>
+  )
+}
+
+/** Launch choices: in the More menu and on the Play button's context menu. */
+function useLaunchMenu(inst: InstanceSummary): MenuEntry[] {
+  const { data: accounts = [] } = useAccounts()
+  const { data: worlds = [] } = useWorlds(inst.id)
+  const s = inst.state
+  return [
+    {
+      kind: 'sub',
+      label: 'Launch as',
+      disabled: s.kind !== 'idle' && s.kind !== 'problem',
+      items: accounts.length
+        ? accounts.map<MenuEntry>((a) => ({
+            label: a.status === 'needs-sign-in' ? `${a.name} (session expired)` : a.name,
+            onSelect: () => instanceActions.launch(inst, { accountId: a.id }),
+          }))
+        : [{ label: 'No accounts', disabled: true }],
+    },
+    {
+      kind: 'sub',
+      label: 'Launch into World',
+      disabled: s.kind !== 'idle' && s.kind !== 'problem',
+      items: worlds.length
+        ? worlds.map<MenuEntry>((w) => ({ label: w.name, onSelect: () => instanceActions.launch(inst, { quickPlay: { type: 'singleplayer', world: w.id } }) }))
+        : [{ label: 'No worlds', disabled: true }],
+    },
+    { label: 'Repair Files', onSelect: () => instanceActions.repair(inst) },
+    { label: 'Launch Options…', onSelect: () => openInstance(inst.id, 'settings') },
+  ]
+}
+
 function OverflowMenu({ inst }: { inst: InstanceSummary }) {
   const set = useUi((s) => s.set)
   const target = { id: inst.id, name: inst.name }
+  const launch = useLaunchMenu(inst)
   const items: MenuEntry[] = [
+    ...launch,
+    { kind: 'separator' },
     { label: 'Export Modpack…', shortcut: 'shift+mod+e', onSelect: () => openModpackExport(inst.id, inst.name) },
     { label: 'Duplicate…', shortcut: 'mod+d', onSelect: () => set({ duplicate: target }) },
     { label: 'Rename…', onSelect: () => set({ rename: target }) },
@@ -133,91 +208,92 @@ function OverflowMenu({ inst }: { inst: InstanceSummary }) {
   )
 }
 
+/** One label of the Play pill; the inactive ones blur out downwards while the pill morphs. */
+const layer = (on: boolean) =>
+  cn(
+    'absolute inset-0 flex items-center gap-1.5 whitespace-nowrap transition-[opacity,filter,translate] duration-200 ease-[var(--ease-mac)]',
+    !on && 'pointer-events-none translate-y-1 opacity-0 blur-[3px]',
+  )
+
+/** Pill widths per state; the button morphs between them on the UI spring. */
+const PLAY_WIDTH = { idle: 74, busy: 220, run: 112 } as const
+
 /**
- * Split Play button. The main part reflects state: Play → Installing 42% (opens Activity) →
- * Launching… (cancels) → Stop (asks first; ⌥-click force quits). ▾ opens a click menu.
+ * The Play button morphs with the instance's state: Play → a dithered progress pill showing the
+ * stage and percentage (installing opens Activity; launching cancels on click) → Running, which
+ * stops (asks first; ⌥-click force quits). Right-click offers the launch choices.
  */
 function PlayButton({ inst }: { inst: InstanceSummary }) {
   const set = useUi((s) => s.set)
-  const { data: accounts = [] } = useAccounts()
-  const { data: worlds = [] } = useWorlds(inst.id)
   const [confirmStop, setConfirmStop] = useState(false)
   const progress = useInstanceTask(inst.state.kind === 'installing' ? inst.id : undefined)
+  const menu = useLaunchMenu(inst)
   const s = inst.state
 
+  const mode = s.kind === 'installing' || s.kind === 'launching' ? 'busy' : s.kind === 'running' ? 'run' : 'idle'
+  const pct = s.kind === 'installing' && progress !== undefined ? Math.round(progress * 100) : undefined
+  const stage = s.kind === 'installing' ? 'Installing' : s.kind === 'launching' ? (s.step ? STEP_LABELS[s.step] : 'Launching') : ''
+
   let label = 'Play'
-  let icon = <Play className="fill-current" />
-  let variant: 'primary' | 'push' = 'primary'
+  let title: string | undefined = s.kind === 'idle' ? 'Play (⌘↩)' : undefined
   let onClick: (e: MouseEvent) => void = () => instanceActions.launch(inst)
   if (s.kind === 'installing') {
-    label = progress === undefined ? 'Installing…' : `Installing ${Math.round(progress * 100)}%`
-    icon = <span className="size-3.5 rounded-full border-2 border-on-accent/40 border-t-on-accent animate-spin" aria-hidden />
+    label = pct === undefined ? 'Installing…' : `Installing ${pct}%`
+    title = 'Show in Activity'
     onClick = () => set({ activity: true })
   } else if (s.kind === 'launching') {
-    label = s.step ? `${STEP_LABELS[s.step]}…` : 'Launching…'
-    icon = <X />
-    variant = 'push'
+    label = `${stage}…`
+    title = 'Cancel launch'
     onClick = () => instanceActions.cancel(inst)
   } else if (s.kind === 'running') {
     label = 'Stop'
-    icon = <Square className="fill-current" />
-    variant = 'push'
+    title = 'Stop (⌘.) — ⌥-click to force quit'
     onClick = (e) => (e.altKey ? instanceActions.stop(inst, true) : setConfirmStop(true))
   }
 
-  const menu: MenuEntry[] = [
-    {
-      kind: 'sub',
-      label: 'Launch as',
-      disabled: s.kind !== 'idle' && s.kind !== 'problem',
-      items: accounts.length
-        ? accounts.map<MenuEntry>((a) => ({
-            label: a.status === 'needs-sign-in' ? `${a.name} (session expired)` : a.name,
-            onSelect: () => instanceActions.launch(inst, { accountId: a.id }),
-          }))
-        : [{ label: 'No accounts', disabled: true }],
-    },
-    {
-      kind: 'sub',
-      label: 'Launch into World',
-      disabled: s.kind !== 'idle' && s.kind !== 'problem',
-      items: worlds.length
-        ? worlds.map<MenuEntry>((w) => ({ label: w.name, onSelect: () => instanceActions.launch(inst, { quickPlay: { type: 'singleplayer', world: w.id } }) }))
-        : [{ label: 'No worlds', disabled: true }],
-    },
-    { kind: 'separator' },
-    { label: 'Repair Files', onSelect: () => instanceActions.repair(inst) },
-    { label: 'Launch Options…', onSelect: () => openInstance(inst.id, 'settings') },
-  ]
-
   return (
-    <div className="flex items-center">
-      <Button
-        variant={variant}
-        size="lg"
-        icon={icon}
-        onClick={onClick}
-        aria-keyshortcuts={s.kind === 'running' ? 'Meta+.' : 'Meta+Enter'}
-        title={s.kind === 'running' ? 'Stop (⌘.) — ⌥-click to force quit' : s.kind === 'idle' ? 'Play (⌘↩)' : undefined}
-        disabled={s.kind === 'problem'}
-        className={cn('min-w-[88px] rounded-r-none', s.kind === 'installing' && 'tabular')}
-      >
-        {label}
-      </Button>
-      <Menu
-        align="end"
-        items={menu}
-        trigger={
-          <Button
-            variant={variant}
-            size="lg"
-            aria-label="Launch options"
-            className={cn('rounded-l-none !px-1.5', variant === 'primary' ? 'border-l border-l-black/15' : 'border-l border-l-separator')}
-          >
-            <ChevronDown />
-          </Button>
-        }
-      />
+    <>
+      <ContextMenu items={menu}>
+        <button
+          type="button"
+          aria-label={label}
+          aria-keyshortcuts={s.kind === 'running' ? 'Meta+.' : 'Meta+Enter'}
+          title={title}
+          disabled={s.kind === 'problem'}
+          onClick={onClick}
+          style={{ width: PLAY_WIDTH[mode] }}
+          className={cn(
+            'group relative ml-1 h-7 shrink-0 overflow-hidden rounded-lg text-compact font-semibold outline-none disabled:opacity-45',
+            'transition-[width,background-color,color,box-shadow] duration-(--duration-spring) ease-spring focus-visible:shadow-[0_0_0_2px_var(--focus-ring)]',
+            mode === 'idle' && 'bg-accent-fill text-on-accent hover:bg-accent-hover',
+            mode === 'busy' && 'bg-fill text-label hairline-strong',
+            mode === 'run' && 'text-label shadow-[inset_0_0_0_1px_var(--color-separator-2)] hover:bg-hover',
+          )}
+        >
+          {mode === 'busy' && <DitherProgress value={progress} alpha={0.28} className="absolute inset-0" />}
+          <span aria-hidden className={cn(layer(mode === 'idle'), 'justify-center')}>
+            <Play className="size-3 fill-current" strokeWidth={0} />
+            Play
+          </span>
+          <span aria-hidden className={cn(layer(mode === 'busy'), 'justify-between px-[11px] font-medium')}>
+            <span key={stage} className="min-w-0 animate-enter truncate">
+              {stage}
+            </span>
+            {pct !== undefined ? (
+              <span className="font-mono text-[11px] text-label-2 tabular">{pct}%</span>
+            ) : (
+              s.kind === 'launching' && <X className="size-3 text-label-3 group-hover:text-label" />
+            )}
+          </span>
+          <span aria-hidden className={cn(layer(mode === 'run'), 'justify-center font-medium')}>
+            <Dot tone="green" label="" pulse={mode === 'run'} />
+            Running
+            <span className="ml-1 flex border-l border-separator-2 pl-2 text-label-2 group-hover:text-label">
+              <Square className="size-[9px] fill-current" strokeWidth={0} />
+            </span>
+          </span>
+        </button>
+      </ContextMenu>
       <Alert
         open={confirmStop}
         onOpenChange={setConfirmStop}
@@ -227,7 +303,6 @@ function PlayButton({ inst }: { inst: InstanceSummary }) {
         destructive
         onConfirm={() => instanceActions.stop(inst)}
       />
-    </div>
+    </>
   )
 }
-

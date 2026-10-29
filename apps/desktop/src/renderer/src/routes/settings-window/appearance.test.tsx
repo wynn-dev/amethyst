@@ -60,9 +60,16 @@ describe('accent colour', () => {
     expect(invoke).toHaveBeenCalledWith('settings', 'patch', [{ appearance: { accentColor: '#007aff' } }])
     await waitFor(() => expect(screen.getByRole('radio', { name: 'Blue' }).getAttribute('aria-checked')).toBe('true'))
 
-    // Back to the default: the stylesheet's tuned light/dark pair takes over again.
-    await act(async () => fireEvent.click(screen.getByRole('radio', { name: 'Amethyst' })))
+    // Back to the default: the stylesheet's neutral light/dark pair takes over again.
+    await act(async () => fireEvent.click(screen.getByRole('radio', { name: 'Neutral' })))
     await waitFor(() => expect(accentVar()).toBe(''))
+  })
+
+  it('selects Neutral for the old purple default', async () => {
+    appearance.accentColor = '#9b5de5'
+    renderRows()
+    await waitFor(() => expect(screen.getByRole('radio', { name: 'Neutral' }).getAttribute('aria-checked')).toBe('true'))
+    expect(accentVar()).toBe('')
   })
 
   it('applies an accent saved elsewhere when settings load', async () => {

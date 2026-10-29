@@ -1,14 +1,28 @@
 import type { ReactNode } from 'react'
 import { PanelLeft, Search } from 'lucide-react'
-import { IconButton, Toolbar, ToolbarDivider } from '@/ui'
+import { IconButton, Toolbar } from '@/ui'
 import { ActivityButton } from './Activity'
 import { useUi } from './ui-store'
 
 /**
- * The content-area toolbar every page uses. The Activity and Search buttons are always on the
- * trailing edge (B1). When the sidebar is hidden, it makes room for the traffic lights.
+ * The content-area toolbar every page uses: page actions (`trailing`), the Activity button, then
+ * `end` (overflow menu and the page's primary action, e.g. Play), like the mockup. The Search
+ * button (⌘K) lives in the sidebar, so it only appears here while the sidebar is hidden, which is
+ * also when the toolbar makes room for the traffic lights.
  */
-export function PageToolbar({ leading, center, trailing, separator }: { leading?: ReactNode; center?: ReactNode; trailing?: ReactNode; separator?: boolean }) {
+export function PageToolbar({
+  leading,
+  center,
+  trailing,
+  end,
+  separator,
+}: {
+  leading?: ReactNode
+  center?: ReactNode
+  trailing?: ReactNode
+  end?: ReactNode
+  separator?: boolean
+}) {
   const collapsed = useUi((s) => s.sidebarCollapsed)
   const set = useUi((s) => s.set)
   return (
@@ -29,11 +43,13 @@ export function PageToolbar({ leading, center, trailing, separator }: { leading?
       trailing={
         <>
           {trailing}
-          {trailing && <ToolbarDivider />}
           <ActivityButton />
-          <IconButton label="Search" shortcut="mod+k" onClick={() => set({ palette: true })}>
-            <Search />
-          </IconButton>
+          {collapsed && (
+            <IconButton label="Search" shortcut="mod+k" onClick={() => set({ palette: true })}>
+              <Search />
+            </IconButton>
+          )}
+          {end}
         </>
       }
     />

@@ -99,7 +99,7 @@ export function runCommand(command: MenuCommand, arg?: string): void {
     case 'view.toggleInspector':
       return ui.set({ inspector: !ui.inspector })
     case 'view.filterSidebar':
-      ui.set({ sidebarCollapsed: false })
+      ui.set({ sidebarCollapsed: false, sidebarFilterOpen: true })
       requestAnimationFrame(() => document.getElementById('sidebar-filter')?.focus())
       return
     case 'view.tab': {

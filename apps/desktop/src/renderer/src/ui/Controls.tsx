@@ -18,7 +18,10 @@ export interface SwitchProps {
   size?: 'sm' | 'md'
 }
 
-/** macOS toggle switch. */
+/**
+ * Toggle switch. Off: a faint knob on a hairline track. On: the accent track (grey with a
+ * window-coloured knob for the neutral accent), with the knob sliding on the UI spring.
+ */
 export function Switch({ checked, onCheckedChange, disabled, size = 'md', ...rest }: SwitchProps) {
   return (
     <RSwitch.Root
@@ -27,15 +30,15 @@ export function Switch({ checked, onCheckedChange, disabled, size = 'md', ...res
       disabled={disabled}
       {...rest}
       className={cn(
-        'relative inline-flex shrink-0 items-center rounded-full p-px transition-colors duration-200 ease-[var(--ease-mac)]',
-        'bg-fill-3 shadow-[inset_0_0_0_0.5px_rgb(0_0_0/0.08)] data-[state=checked]:bg-accent-fill disabled:opacity-45',
-        size === 'md' ? 'h-[18px] w-[32px]' : 'h-[14px] w-[24px]',
+        'relative inline-flex shrink-0 items-center rounded-full p-[2px] transition-[background-color,box-shadow] duration-200',
+        'bg-fill hairline-strong data-[state=checked]:bg-(--accent-switch) data-[state=checked]:shadow-none disabled:opacity-45',
+        size === 'md' ? 'h-4 w-7' : 'h-[14px] w-6',
       )}
     >
       <RSwitch.Thumb
         className={cn(
-          'block rounded-full bg-white shadow-[0_0.5px_2px_rgb(0_0_0/0.3),0_0_0_0.5px_rgb(0_0_0/0.06)] transition-transform duration-200 ease-[var(--ease-mac)]',
-          size === 'md' ? 'size-4 data-[state=checked]:translate-x-[14px]' : 'size-3 data-[state=checked]:translate-x-[10px]',
+          'block rounded-full bg-label-3 transition-[transform,background-color] duration-(--duration-spring) ease-spring data-[state=checked]:bg-(--on-accent-switch)',
+          size === 'md' ? 'size-3 data-[state=checked]:translate-x-3' : 'size-2.5 data-[state=checked]:translate-x-2.5',
         )}
       />
     </RSwitch.Root>
@@ -57,7 +60,7 @@ export interface CheckboxProps {
   className?: string
 }
 
-/** macOS checkbox with an optional trailing label. Clicking the label toggles it. */
+/** Checkbox with an optional trailing label. Clicking the label toggles it. */
 export function Checkbox({ checked, onCheckedChange, label, description, disabled, id, className, ...aria }: CheckboxProps) {
   const autoId = useId()
   const boxId = id ?? autoId
@@ -70,8 +73,8 @@ export function Checkbox({ checked, onCheckedChange, label, description, disable
       onCheckedChange={(c) => onCheckedChange(c === true)}
       onClick={(e) => e.stopPropagation()}
       className={cn(
-        'flex size-[14px] shrink-0 items-center justify-center rounded-[3.5px] bg-control text-on-accent shadow-control',
-        'data-[state=checked]:bg-accent-fill data-[state=indeterminate]:bg-accent-fill data-[state=checked]:shadow-none disabled:opacity-45',
+        'flex size-[14px] shrink-0 items-center justify-center rounded-[4px] bg-field text-on-accent hairline-strong',
+        'data-[state=checked]:bg-accent-fill data-[state=indeterminate]:bg-accent-fill data-[state=checked]:shadow-none data-[state=indeterminate]:shadow-none disabled:opacity-45',
       )}
     >
       <RCheckbox.Indicator>
@@ -85,7 +88,7 @@ export function Checkbox({ checked, onCheckedChange, label, description, disable
       <div className="flex h-4 items-center">{box}</div>
       <label htmlFor={boxId} className={cn('flex flex-col', disabled && 'opacity-45')}>
         <span className="text-body text-label">{label}</span>
-        {description && <span className="text-small text-label-2">{description}</span>}
+        {description && <span className="text-meta text-label-2">{description}</span>}
       </label>
     </div>
   )
@@ -112,7 +115,7 @@ export interface SegmentedProps<V extends string> {
   className?: string
 }
 
-/** macOS segmented control (single selection). Arrow keys move between segments. */
+/** Segmented control (single selection). Arrow keys move between segments. */
 export function Segmented<V extends string>({ value, onValueChange, options, size = 'md', className, ...aria }: SegmentedProps<V>) {
   return (
     <RadioGroup.Root
@@ -123,9 +126,7 @@ export function Segmented<V extends string>({ value, onValueChange, options, siz
       loop
       className={cn('inline-flex shrink-0 items-center rounded-[7px] bg-fill p-[2px]', className)}
     >
-      {options.map((o, i) => {
-        const prevSelected = options[i - 1]?.value === value
-        const selected = o.value === value
+      {options.map((o) => {
         return (
           <RadioGroup.Item
             key={o.value}
@@ -133,16 +134,11 @@ export function Segmented<V extends string>({ value, onValueChange, options, siz
             disabled={o.disabled}
             aria-label={o['aria-label']}
             className={cn(
-              'relative flex items-center justify-center gap-1.5 rounded-[5px] px-2.5 whitespace-nowrap text-label outline-none [&_svg]:size-3.5',
-              'transition-[background-color,box-shadow] duration-150 focus-visible:outline-3 focus-visible:outline-[color-mix(in_srgb,var(--accent)_55%,transparent)]',
-              size === 'md' ? 'h-[22px] text-body' : 'h-[18px] text-small',
-              'data-[state=checked]:bg-control data-[state=checked]:font-medium data-[state=checked]:shadow-control',
+              'relative flex items-center justify-center gap-1.5 rounded-[5px] px-2.5 whitespace-nowrap text-label-2 outline-none hover:text-label [&_svg]:size-3.5',
+              'transition-[background-color,box-shadow,color] duration-150 focus-visible:outline-2 focus-visible:outline-(--focus-ring)',
+              size === 'md' ? 'h-[22px] text-callout' : 'h-[18px] text-small',
+              'data-[state=checked]:bg-control data-[state=checked]:text-label data-[state=checked]:shadow-control',
               'disabled:opacity-40',
-              // Hairline separators between unselected neighbours, like NSSegmentedControl.
-              i > 0 &&
-                !selected &&
-                !prevSelected &&
-                'before:absolute before:top-1 before:bottom-1 before:-left-px before:w-px before:bg-separator',
             )}
           >
             {o.label}
@@ -187,14 +183,14 @@ export function Slider({ value, onValueChange, onValueCommit, min, max, step = 1
         onValueCommit={([v]) => v !== undefined && onValueCommit?.(v)}
         className="relative flex h-5 w-full touch-none items-center select-none data-[disabled]:opacity-45"
       >
-        <RSlider.Track className="relative h-1 grow overflow-hidden rounded-full bg-fill-2">
+        <RSlider.Track className="relative h-[3px] grow overflow-hidden rounded-full bg-fill-2">
           <RSlider.Range className="absolute h-full rounded-full bg-accent" />
         </RSlider.Track>
         <RSlider.Thumb
           aria-label={aria['aria-label']}
           aria-labelledby={aria['aria-labelledby']}
           aria-valuetext={valueText?.(value)}
-          className="block size-[18px] rounded-full bg-white shadow-[0_0.5px_2.5px_rgb(0_0_0/0.35),0_0_0_0.5px_rgb(0_0_0/0.12)] outline-none focus-visible:outline-3 focus-visible:outline-[color-mix(in_srgb,var(--accent)_55%,transparent)]"
+          className="block size-3.5 rounded-full bg-white shadow-[0_0.5px_2px_rgb(0_0_0/0.35),0_0_0_0.5px_rgb(0_0_0/0.14)] outline-none focus-visible:outline-2 focus-visible:outline-(--focus-ring)"
         />
       </RSlider.Root>
       {ticks && (
@@ -203,7 +199,7 @@ export function Slider({ value, onValueChange, onValueCommit, min, max, step = 1
             <span
               key={t}
               className="absolute top-0 h-1.5 w-px bg-label-3"
-              style={{ left: `calc(9px + (100% - 18px) * ${(t - min) / (max - min)})` }}
+              style={{ left: `calc(7px + (100% - 14px) * ${(t - min) / (max - min)})` }}
             />
           ))}
         </div>
@@ -261,22 +257,22 @@ export function Stepper({ value, onValueChange, min = -Infinity, max = Infinity,
             }
           }}
           className={cn(
-            'h-[22px] rounded-[5px] bg-field pr-1.5 pl-[7px] text-right text-body text-label tabular outline-none',
-            'shadow-[0_0_0_0.5px_var(--color-label-4)] focus:shadow-[0_0_0_3.5px_color-mix(in_srgb,var(--accent)_45%,transparent),0_0_0_1px_var(--accent)]',
+            'h-[26px] rounded-md bg-field pr-1.5 pl-2 text-right font-mono text-meta text-label tabular outline-none',
+            'shadow-[inset_0_0_0_0.5px_var(--color-separator-2)] focus:shadow-[inset_0_0_0_1px_var(--focus-ring)]',
             'disabled:opacity-45',
           )}
         />
       </div>
-      {unit && <span className="text-body text-label-2">{unit}</span>}
-      <div className="flex h-[22px] w-[13px] flex-col overflow-hidden rounded-[4px] bg-control shadow-control" aria-hidden>
+      {unit && <span className="text-compact text-label-2">{unit}</span>}
+      <div className="flex h-[26px] w-[15px] flex-col overflow-hidden rounded-[5px] hairline-strong" aria-hidden>
         <button
           type="button"
           tabIndex={-1}
           disabled={disabled || value >= max}
           onClick={() => bump(step)}
-          className="flex flex-1 items-center justify-center text-label-2 active:bg-fill-2 disabled:opacity-40"
+          className="flex flex-1 items-center justify-center text-label-2 hover:bg-hover active:bg-fill-2 disabled:opacity-40"
         >
-          <ChevronUp className="size-2.5" strokeWidth={3} />
+          <ChevronUp className="size-2.5" strokeWidth={2.5} />
         </button>
         <span className="h-px bg-separator" />
         <button
@@ -284,9 +280,9 @@ export function Stepper({ value, onValueChange, min = -Infinity, max = Infinity,
           tabIndex={-1}
           disabled={disabled || value <= min}
           onClick={() => bump(-step)}
-          className="flex flex-1 items-center justify-center text-label-2 active:bg-fill-2 disabled:opacity-40"
+          className="flex flex-1 items-center justify-center text-label-2 hover:bg-hover active:bg-fill-2 disabled:opacity-40"
         >
-          <ChevronDown className="size-2.5" strokeWidth={3} />
+          <ChevronDown className="size-2.5" strokeWidth={2.5} />
         </button>
       </div>
     </div>
@@ -305,7 +301,7 @@ export interface RadioListProps<V extends string> {
   className?: string
 }
 
-/** A vertical group of macOS radio buttons. */
+/** A vertical group of radio buttons. */
 export function RadioList<V extends string>({ value, onValueChange, options, className, ...aria }: RadioListProps<V>) {
   const base = useId()
   return (
@@ -321,13 +317,13 @@ export function RadioList<V extends string>({ value, onValueChange, options, cla
             id={`${base}-${o.value}`}
             value={o.value}
             disabled={o.disabled}
-            className="mt-px flex size-[14px] shrink-0 items-center justify-center rounded-full bg-control shadow-control data-[state=checked]:bg-accent-fill data-[state=checked]:shadow-none disabled:opacity-45"
+            className="mt-px flex size-[14px] shrink-0 items-center justify-center rounded-full bg-field hairline-strong data-[state=checked]:bg-accent-fill data-[state=checked]:shadow-none disabled:opacity-45"
           >
             <RadioGroup.Indicator className="size-[5px] rounded-full bg-on-accent" />
           </RadioGroup.Item>
           <label htmlFor={`${base}-${o.value}`} className={cn('flex flex-col', o.disabled && 'opacity-45')}>
             <span className="text-body">{o.label}</span>
-            {o.description && <span className="text-small text-label-2">{o.description}</span>}
+            {o.description && <span className="text-meta text-label-2">{o.description}</span>}
           </label>
         </div>
       ))}

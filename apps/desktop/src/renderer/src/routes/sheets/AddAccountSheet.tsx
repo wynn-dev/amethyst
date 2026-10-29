@@ -1,4 +1,4 @@
-import { Sheet, toast } from '@/ui'
+import { Sheet, recentTrigger, toast } from '@/ui'
 import { useUi } from '@/app/ui-store'
 import { AccountForm } from './AccountForm'
 
@@ -17,7 +17,7 @@ export default function AddAccountSheet() {
       }}
     >
       {({ body, actions }) => (
-        <Sheet open onOpenChange={(o) => !o && close()} title={reauth ? 'Sign In Again' : 'Add Account'} width={460} footer={actions}>
+        <Sheet open onOpenChange={(o) => !o && close()} title={reauth ? 'Sign In Again' : 'Add Account'} width={460} footer={actions} origin={recentTrigger}>
           {body}
         </Sheet>
       )}

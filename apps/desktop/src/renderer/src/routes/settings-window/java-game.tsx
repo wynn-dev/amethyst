@@ -1,6 +1,6 @@
 import { AlertTriangle, ChevronDown, Ellipsis, RefreshCw } from 'lucide-react'
 import type { GameSettings } from '@shared/services'
-import { Badge, Button, Checkbox, Form, FormSection, IconButton, Menu, Select, SkeletonRows, Spinner, Stepper, Switch, cn } from '@/ui'
+import { Button, Checkbox, Form, FormSection, IconButton, Menu, Select, SkeletonRows, Spinner, Stepper, Switch, cn } from '@/ui'
 import { api } from '@/lib/rpc'
 import { toastError } from '@/lib/error-messages'
 import { formatArgs, parseArgs } from '@/lib/args'
@@ -62,11 +62,11 @@ export function JavaPane() {
           ) : isPending ? (
             <SkeletonRows rows={3} />
           ) : runtimes.length === 0 ? (
-            <p className="px-3 py-6 text-center text-body text-label-2">No Java runtimes found. Amethyst downloads the right one when you play.</p>
+            <p className="px-3 py-6 text-center text-compact text-label-2">No Java runtimes found. Amethyst downloads the right one when you play.</p>
           ) : (
-            <table className="w-full table-fixed text-left text-body">
+            <table className="w-full table-fixed text-left text-compact">
               <thead>
-                <tr className="border-b border-separator text-small text-label-2">
+                <tr className="h-7 border-b border-separator text-[11px] text-label-3">
                   <th className="w-[96px] px-2.5 py-1.5 font-medium">Version</th>
                   <th className="w-[140px] px-2 py-1.5 font-medium">Vendor</th>
                   <th className="w-[96px] px-2 py-1.5 font-medium">Arch</th>
@@ -79,23 +79,23 @@ export function JavaPane() {
               </thead>
               <tbody>
                 {runtimes.map((r, i) => (
-                  <tr key={r.id} className={cn('h-8', i % 2 === 1 && 'bg-row-alt', !r.valid && 'text-label-3')}>
-                    <td className="px-2.5 tabular">{r.version}</td>
+                  <tr key={r.id} className={cn('h-8 border-b border-separator last:border-b-0 hover:bg-hover', i % 2 === 1 && 'bg-row-alt', !r.valid && 'text-label-3')}>
+                    <td className="px-2.5 font-mono text-meta tabular">{r.version}</td>
                     <td className="truncate px-2 text-label-2">{r.vendor}</td>
                     <td className="px-2">
                       {!r.valid ? (
-                        <Badge tone="error" title={r.invalidReason}>
+                        <span className="text-meta text-red" title={r.invalidReason}>
                           {INVALID[r.invalidReason ?? ''] ?? 'Unusable'}
-                        </Badge>
+                        </span>
                       ) : r.arch === 'x86_64' ? (
-                        <Badge tone="warning" title="Runs under Rosetta">
-                          <AlertTriangle /> x86_64
-                        </Badge>
+                        <span className="flex items-center gap-1 font-mono text-[11px] text-orange" title="Runs under Rosetta">
+                          <AlertTriangle className="size-3 shrink-0" strokeWidth={1.75} /> x86_64
+                        </span>
                       ) : (
-                        <span className="text-label-2">{r.arch}</span>
+                        <span className="font-mono text-[11px] text-label-2">{r.arch}</span>
                       )}
                     </td>
-                    <td className="selectable truncate px-2 font-mono text-small text-label-2" title={r.path}>
+                    <td className="selectable truncate px-2 font-mono text-[11px] text-label-2" title={r.path}>
                       {r.path}
                     </td>
                     <td className="px-2 text-label-2">{SOURCE_LABEL[r.source]}</td>

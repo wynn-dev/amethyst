@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { AlertTriangle, Check, ChevronsUpDown, Plus, UserRound } from 'lucide-react'
+import { AlertTriangle, Check, Plus, UserRound } from 'lucide-react'
 import { Popover, cn } from '@/ui'
 import { accountActions, useAccounts } from '@/data/accounts'
 import type { Account } from '@/data/types'
@@ -12,6 +12,8 @@ import { SkinHead } from './skin/SkinHead'
 export function displayName(name: string, streamer: boolean) {
   return streamer ? `${name.slice(0, 1)}${'•'.repeat(Math.max(3, name.length - 1))}` : name
 }
+
+const kindLabel = (a: Account) => (a.kind === 'microsoft' ? 'Microsoft account' : 'Offline account')
 
 /** Sidebar footer: the active account, with a popover to switch, add or manage accounts (B2.3). */
 export function AccountChip() {
@@ -40,29 +42,28 @@ export function AccountChip() {
         <button
           type="button"
           aria-label={active ? `Account: ${active.name}${expired ? ', session expired' : ''}` : 'Add an account'}
-          className="flex h-9 w-full items-center gap-2 rounded-lg px-1.5 text-left hover:bg-fill data-[state=open]:bg-fill-2"
+          className="flex h-9 min-w-0 flex-1 items-center gap-[9px] rounded-lg px-1.5 text-left transition-colors duration-150 hover:bg-hover data-[state=open]:bg-fill"
         >
           {active ? (
-            <span className="relative">
-              <SkinHead skin={active.skinUrl} hue={active.hue} size={24} />
-              {expired && <span className="absolute -top-1 -right-1 size-2.5 rounded-full bg-yellow ring-2 ring-[var(--color-window-2)]" />}
+            <span className="relative flex">
+              <SkinHead skin={active.skinUrl} hue={active.hue} size={24} className="!rounded-full" />
+              {expired && <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-yellow ring-2 ring-[var(--color-window-2)]" />}
             </span>
           ) : (
-            <span className="flex size-6 items-center justify-center rounded-[5px] bg-fill-2 text-label-2">
-              <UserRound className="size-4" />
+            <span className="flex size-6 items-center justify-center rounded-full bg-fill-2 text-label-2 hairline-strong">
+              <UserRound className="size-3.5" />
             </span>
           )}
-          <span className="flex min-w-0 flex-1 flex-col">
-            <span className="truncate text-body font-medium">{active ? displayName(active.name, streamer) : 'Add Account'}</span>
-            <span className={cn('truncate text-small', expired ? 'text-orange' : 'text-label-2')}>
-              {active ? (expired ? 'Session expired' : active.kind === 'microsoft' ? 'Microsoft' : 'Offline') : 'Not signed in'}
+          <span className="flex min-w-0 flex-1 flex-col leading-tight">
+            <span className="truncate text-compact font-medium">{active ? displayName(active.name, streamer) : 'Add Account'}</span>
+            <span className={cn('truncate text-small', expired ? 'text-orange' : 'text-label-3')}>
+              {active ? (expired ? 'Session expired' : kindLabel(active)) : 'Not signed in'}
             </span>
           </span>
-          <ChevronsUpDown className="size-3.5 shrink-0 text-label-3" />
         </button>
       }
     >
-      <div className="p-1.5" role="menu" aria-label="Accounts">
+      <div className="p-1" role="menu" aria-label="Accounts">
         {accounts.map((a) => (
           <button
             key={a.id}
@@ -70,14 +71,14 @@ export function AccountChip() {
             role="menuitemradio"
             aria-checked={a.active}
             onClick={() => switchTo(a)}
-            className="flex h-9 w-full items-center gap-2 rounded-md px-1.5 text-left hover:bg-accent-fill hover:text-on-accent focus-visible:bg-accent-fill focus-visible:text-on-accent focus-visible:outline-none [&:hover_.sub]:text-on-accent/75"
+            className="flex h-9 w-full items-center gap-2 rounded-[6px] px-1.5 text-left hover:bg-fill-2 focus-visible:bg-fill-2 focus-visible:outline-none"
           >
-            <span className="flex w-3.5 justify-center">{a.active && <Check className="size-3.5" strokeWidth={2.5} />}</span>
-            <SkinHead skin={a.skinUrl} hue={a.hue} size={20} />
-            <span className="flex min-w-0 flex-1 flex-col">
-              <span className="truncate text-body">{displayName(a.name, streamer)}</span>
-              <span className={cn('sub truncate text-small', a.status === 'needs-sign-in' ? 'text-orange' : 'text-label-2')}>
-                {a.status === 'needs-sign-in' ? 'Session expired' : a.kind === 'microsoft' ? 'Microsoft' : 'Offline'}
+            <span className="flex w-3.5 justify-center">{a.active && <Check className="size-3.5" strokeWidth={2} />}</span>
+            <SkinHead skin={a.skinUrl} hue={a.hue} size={20} className="!rounded-full" />
+            <span className="flex min-w-0 flex-1 flex-col leading-tight">
+              <span className="truncate text-compact">{displayName(a.name, streamer)}</span>
+              <span className={cn('truncate text-small', a.status === 'needs-sign-in' ? 'text-orange' : 'text-label-3')}>
+                {a.status === 'needs-sign-in' ? 'Session expired' : kindLabel(a)}
               </span>
             </span>
             {a.status === 'needs-sign-in' && <AlertTriangle className="size-3.5 text-orange" />}
@@ -91,12 +92,12 @@ export function AccountChip() {
               setOpen(false)
               setUi({ addAccount: true, reauth: active?.id ?? null })
             }}
-            className="mt-1 flex h-7 w-full items-center rounded-md px-2 text-body font-medium text-accent hover:bg-fill"
+            className="mt-1 flex h-[26px] w-full items-center rounded-[6px] px-2 text-compact font-medium text-accent hover:bg-fill-2"
           >
             Sign In Again…
           </button>
         )}
-        <div className="my-1.5 h-px bg-separator" />
+        <div className="mx-1 my-1 h-px bg-separator" />
         <button
           type="button"
           role="menuitem"
@@ -104,7 +105,7 @@ export function AccountChip() {
             setOpen(false)
             setUi({ addAccount: true })
           }}
-          className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-body hover:bg-accent-fill hover:text-on-accent"
+          className="flex h-[26px] w-full items-center gap-2 rounded-[6px] px-2 text-compact hover:bg-fill-2"
         >
           <Plus className="size-3.5" /> Add Account…
         </button>
@@ -115,7 +116,7 @@ export function AccountChip() {
             setOpen(false)
             openSettings('accounts')
           }}
-          className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-body hover:bg-accent-fill hover:text-on-accent"
+          className="flex h-[26px] w-full items-center gap-2 rounded-[6px] px-2 text-compact hover:bg-fill-2"
         >
           <span className="w-3.5" /> Manage Accounts…
         </button>

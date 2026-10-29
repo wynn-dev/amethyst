@@ -5,6 +5,7 @@
  */
 import path from 'node:path'
 import type { Settings } from '@shared/services'
+import { DEFAULT_ACCENT, migrateAccent } from '@shared/accent'
 import { isUnsafeEnvKey } from '../util/env'
 import { isRecord, readBool, readColor, readInt, readOneOf, readStringArray, readStringRecord } from '../util/parse'
 
@@ -37,7 +38,11 @@ const SPEC: Spec<Settings> = {
   },
   appearance: {
     theme: oneOf('system', ['light', 'dark', 'system']),
-    accentColor: leaf('#9b5de5', readColor),
+    // The pre-redesign default (purple) reads as the new neutral default, on load and in patches.
+    accentColor: leaf(DEFAULT_ACCENT, (v) => {
+      const hex = readColor(v)
+      return hex && migrateAccent(hex)
+    }),
     background: {
       kind: oneOf('none', ['none', 'image', 'video']),
       file: leaf<string | null>(null, (v) => (v === null || (typeof v === 'string' && MEDIA_FILE.test(v)) ? v : undefined)),

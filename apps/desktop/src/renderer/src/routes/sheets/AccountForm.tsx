@@ -1,12 +1,13 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { ChevronRight, Copy, ExternalLink } from 'lucide-react'
+import { Copy, ExternalLink } from 'lucide-react'
 import type { MicrosoftLoginMethod } from '@shared/services'
-import { Banner, Button, Segmented, Spinner, TextField, cn } from '@/ui'
+import { Banner, Button, Segmented, Spinner, TextField } from '@/ui'
 import { describeError, errorCode, type FriendlyError } from '@/lib/error-messages'
 import { api } from '@/lib/rpc'
 import { accountActions, cancelLogin, loginMicrosoft, useAccountsStatus, useLoginStage } from '@/data/accounts'
 import { patchSettings } from '@/data/settings'
 import type { Account } from '@/data/types'
+import { Card, DisclosureCard, Note, Row } from './parts'
 
 export type AccountKind = 'microsoft' | 'offline'
 
@@ -113,22 +114,22 @@ export function AccountForm({ initialKind = 'microsoft', showKindPicker = true, 
 
   const running = ms.step === 'running'
   const microsoftBody = (
-    <div className="flex flex-col items-center gap-3 py-2 text-center" data-login-stage={running ? stage.stage : 'start'}>
+    <div className="flex animate-enter flex-col items-center gap-3 py-3 text-center" data-login-stage={running ? stage.stage : 'start'}>
       {msError && <ErrorBanner error={msError} />}
       {!msAvailable ? (
         <>
           <MicrosoftLogo />
-          <p className="max-w-[360px] text-body text-label-2">
+          <p className="max-w-[340px] text-compact text-label-2">
             Microsoft sign-in isn’t available in this build of Amethyst: it was built without a Microsoft app ID. Offline accounts still work for single-player.
           </p>
         </>
       ) : !running ? (
         <>
           <MicrosoftLogo />
-          <p className="max-w-[340px] text-body text-label-2">
+          <p className="max-w-[340px] text-compact text-label-2">
             {reauthAccountId ? 'Your session expired. Sign in again with the same Microsoft account.' : 'Sign in with the Microsoft account that owns Minecraft: Java Edition. Amethyst never sees your password.'}
           </p>
-          <div className="flex gap-3 text-small">
+          <div className="flex gap-4 text-meta">
             <Button variant="link" onClick={() => void startMicrosoft('browser')}>
               Use my browser
             </Button>
@@ -139,10 +140,10 @@ export function AccountForm({ initialKind = 'microsoft', showKindPicker = true, 
         </>
       ) : stage.stage === 'device-code' ? (
         <>
-          <p className="text-body text-label-2">
+          <p className="text-compact text-label-2">
             Go to <span className="font-medium text-label">{stage.verificationUri.replace(/^https?:\/\//, '')}</span> and enter this code:
           </p>
-          <p aria-label={`Code ${stage.userCode.split('').join(' ')}`} className="selectable font-mono text-[32px] leading-10 font-semibold tracking-[0.12em]">
+          <p aria-label={`Code ${stage.userCode.split('').join(' ')}`} className="selectable rounded-lg px-4 py-1.5 font-mono text-[26px] leading-9 font-medium tracking-[0.14em] hairline-strong">
             {stage.userCode}
           </p>
           <div className="flex gap-2">
@@ -159,15 +160,15 @@ export function AccountForm({ initialKind = 'microsoft', showKindPicker = true, 
               Open Verification Page
             </Button>
           </div>
-          <p className="flex items-center gap-1.5 text-small text-label-2">
+          <p className="flex items-center gap-1.5 text-meta text-label-2">
             <Spinner size={11} /> Waiting for sign-in… The code expires at {new Date(stage.expiresAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.
           </p>
         </>
       ) : stage.stage === 'browser' ? (
         <>
-          <Spinner size={22} />
-          <p className="text-body font-medium">Waiting for you to finish in your browser…</p>
-          <div className="flex gap-3 text-small">
+          <Spinner size={18} />
+          <p className="text-compact font-medium">Waiting for you to finish in your browser…</p>
+          <div className="flex gap-4 text-meta">
             <Button variant="link" onClick={() => openLink(stage.url)}>
               Open the page again
             </Button>
@@ -178,16 +179,16 @@ export function AccountForm({ initialKind = 'microsoft', showKindPicker = true, 
         </>
       ) : stage.stage === 'window' ? (
         <>
-          <Spinner size={22} />
-          <p className="text-body font-medium">Finish signing in in the Microsoft window…</p>
-          <Button variant="link" className="text-small" onClick={() => void startMicrosoft('device-code')}>
+          <Spinner size={18} />
+          <p className="text-compact font-medium">Finish signing in in the Microsoft window…</p>
+          <Button variant="link" className="text-meta" onClick={() => void startMicrosoft('device-code')}>
             Use a code instead
           </Button>
         </>
       ) : (
         <>
-          <Spinner size={22} />
-          <p className="text-body font-medium">{stage.stage === 'signing-in' ? 'Signing in to Minecraft…' : 'Starting sign-in…'}</p>
+          <Spinner size={18} />
+          <p className="text-compact font-medium">{stage.stage === 'signing-in' ? 'Signing in to Minecraft…' : 'Starting sign-in…'}</p>
         </>
       )}
     </div>
@@ -195,7 +196,7 @@ export function AccountForm({ initialKind = 'microsoft', showKindPicker = true, 
 
   const offlineBody = (
     <form
-      className="flex flex-col gap-3"
+      className="flex animate-enter flex-col gap-3"
       onSubmit={(e) => {
         e.preventDefault()
         void addOffline()
@@ -215,44 +216,41 @@ export function AccountForm({ initialKind = 'microsoft', showKindPicker = true, 
         </Banner>
       )}
       {offlineError && <ErrorBanner error={offlineError} />}
-      <TextField
-        label="Username"
-        placeholder="Steve"
-        value={name}
-        onChange={(e) => setName(e.target.value.trim())}
-        error={nameError}
-        hint={nameError ? undefined : '3–16 letters, digits or underscores.'}
-        autoFocus
-      />
-      <div>
-        <button
-          type="button"
-          aria-expanded={advanced}
-          onClick={() => setAdvanced((a) => !a)}
-          className="-ml-1 flex items-center gap-1 rounded px-1 text-body text-label-2 hover:text-label"
-        >
-          <ChevronRight className={cn('size-3 transition-transform duration-150', advanced && 'rotate-90')} strokeWidth={2.5} />
-          Advanced
-        </button>
-        {advanced && (
+      <Card>
+        <Row label="Username" htmlFor="account-username" hintId="account-username-msg" hint={nameError ? <span className="text-red">{nameError}</span> : '3–16 letters, digits or underscores.'}>
           <TextField
-            label="UUID (optional)"
+            id="account-username"
+            placeholder="Steve"
+            value={name}
+            onChange={(e) => setName(e.target.value.trim())}
+            aria-invalid={nameError ? true : undefined}
+            aria-describedby="account-username-msg"
+            className="flex-1"
+            autoFocus
+          />
+        </Row>
+      </Card>
+      <DisclosureCard title="Advanced" open={advanced} onOpenChange={setAdvanced}>
+        <Row label="UUID (optional)" htmlFor="account-uuid" hintId="account-uuid-msg" hint={uuidError && <span className="text-red">{uuidError}</span>}>
+          <TextField
+            id="account-uuid"
             monospace
             placeholder="Generated from the username"
             value={uuid}
             onChange={(e) => setUuid(e.target.value.trim())}
-            error={uuidError}
-            className="mt-2"
+            aria-invalid={uuidError ? true : undefined}
+            aria-describedby={uuidError ? 'account-uuid-msg' : undefined}
+            className="flex-1"
           />
-        )}
-      </div>
-      <p className="text-small text-label-2">Offline accounts can’t join online-mode servers.</p>
+        </Row>
+      </DisclosureCard>
+      <Note>Offline accounts can’t join online-mode servers.</Note>
       <button type="submit" hidden />
     </form>
   )
 
   const body = (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-3">
       {showKindPicker && !reauthAccountId && (
         <Segmented<AccountKind>
           aria-label="Account type"
@@ -294,13 +292,14 @@ export function AccountForm({ initialKind = 'microsoft', showKindPicker = true, 
   return <>{children({ body, actions })}</>
 }
 
+/** The Microsoft mark, drawn in the muted label colour like the other icons. */
 function MicrosoftLogo() {
   return (
-    <svg aria-hidden width="36" height="36" viewBox="0 0 23 23">
-      <rect x="1" y="1" width="10" height="10" fill="#f25022" />
-      <rect x="12" y="1" width="10" height="10" fill="#7fba00" />
-      <rect x="1" y="12" width="10" height="10" fill="#00a4ef" />
-      <rect x="12" y="12" width="10" height="10" fill="#ffb900" />
+    <svg aria-hidden width="22" height="22" viewBox="0 0 23 23" className="text-label-2">
+      <rect x="1" y="1" width="10" height="10" fill="currentColor" />
+      <rect x="12" y="1" width="10" height="10" fill="currentColor" opacity="0.75" />
+      <rect x="1" y="12" width="10" height="10" fill="currentColor" opacity="0.75" />
+      <rect x="12" y="12" width="10" height="10" fill="currentColor" opacity="0.5" />
     </svg>
   )
 }

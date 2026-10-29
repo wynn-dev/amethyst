@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { RouterProvider } from '@tanstack/react-router'
 import { QueryClientProvider } from '@tanstack/react-query'
+import { LucideProvider } from 'lucide-react'
 import { TooltipProvider } from '@/ui'
 import { queryClient } from '@/data/query'
 import { useAppearanceSync } from '@/data/appearance'
@@ -32,9 +33,12 @@ function Root() {
   return (
     <QueryClientProvider client={queryClient}>
       <AppearanceSync />
-      <TooltipProvider>
-        <RouterProvider router={router} />
-      </TooltipProvider>
+      {/* One quiet icon stroke everywhere; an explicit `strokeWidth` still wins. */}
+      <LucideProvider strokeWidth={1.5}>
+        <TooltipProvider>
+          <RouterProvider router={router} />
+        </TooltipProvider>
+      </LucideProvider>
     </QueryClientProvider>
   )
 }

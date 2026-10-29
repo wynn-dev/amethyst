@@ -1,7 +1,7 @@
-import { useMemo, useState, type ReactNode } from 'react'
-import { ChevronRight, Compass, FileArchive, FolderOpen, Link2, SlidersHorizontal } from 'lucide-react'
+import { useMemo, useRef, useState, type ReactNode } from 'react'
+import { Check, Compass, FileArchive, FolderOpen, Link2, SlidersHorizontal } from 'lucide-react'
 import type { ImportCandidate, InstanceOverrides, InstanceRuntime, LoaderKind as RuntimeLoader } from '@shared/services'
-import { Badge, Banner, Button, Checkbox, Combobox, Segmented, Select, Sheet, Spinner, Stepper, Switch, TextField, cn, type ComboboxOption } from '@/ui'
+import { Banner, Button, Checkbox, Combobox, Segmented, Select, Sheet, Spinner, Stepper, Switch, TextField, cn, indicatorClass, recentTrigger, useSlidingIndicator, type ComboboxOption } from '@/ui'
 import { api } from '@/lib/rpc'
 import { errorMessage, toastError } from '@/lib/error-messages'
 import { createInstance, loaderName, useInstances } from '@/data/instances'
@@ -16,6 +16,7 @@ import { pickFiles } from '@/lib/files'
 import { router } from '@/app/router'
 import { useUi } from '@/app/ui-store'
 import { BlockIcon, formatDate } from '@/app/visuals'
+import { Card, DisclosureCard, InfoRow, Note, Row, VersionLabel } from './parts'
 
 type SourceId = 'custom' | 'file' | 'url' | 'folder' | 'browse'
 
@@ -43,8 +44,9 @@ export default function NewInstanceSheet() {
       open
       onOpenChange={(o) => !o && close()}
       title="New Instance"
-      width={760}
-      bodyClassName="!p-0 flex min-h-[420px]"
+      width={680}
+      origin={recentTrigger}
+      bodyClassName="!p-0 flex min-h-[392px]"
       footer={
         <>
           <Button onClick={close}>Cancel</Button>
@@ -61,36 +63,12 @@ export default function NewInstanceSheet() {
         </>
       }
     >
-      <nav aria-label="Source" className="w-[184px] shrink-0 border-r border-separator p-2">
-        <div role="tablist" aria-orientation="vertical" className="flex flex-col gap-px">
-          {SOURCES.map((s) => (
-            <button
-              key={s.id}
-              type="button"
-              role="tab"
-              aria-selected={source === s.id}
-              onClick={() => {
-                if (s.id === 'browse') {
-                  close()
-                  void router.navigate({ to: '/discover', search: { type: 'modpack' } })
-                } else setSource(s.id)
-              }}
-              className={cn(
-                'flex h-7 items-center gap-2 rounded-md px-2 text-left text-body outline-none [&_svg]:size-4 [&_svg]:text-accent',
-                source === s.id ? 'bg-selection font-medium' : 'hover:bg-fill',
-                'focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent)_55%,transparent)]',
-              )}
-            >
-              {s.icon}
-              {s.label}
-            </button>
-          ))}
-        </div>
-      </nav>
-      <div role="tabpanel" className="min-w-0 flex-1 overflow-y-auto px-5 py-4">
+      <SourceTabs source={source} onSelect={setSource} />
+      <div role="tabpanel" className="min-w-0 flex-1 overflow-y-auto p-4">
         {source === 'custom' && custom.element}
         {source === 'file' && (
           <PickSource
+            icon={<FileArchive strokeWidth={1.5} />}
             title="Import a modpack file"
             description="Choose a Modrinth .mrpack or a CurseForge .zip. You’ll review the version, loader and files before anything is installed."
             button="Choose File…"
@@ -109,12 +87,68 @@ export default function NewInstanceSheet() {
   )
 }
 
-function PickSource({ title, description, button, onPick, busy }: { title: string; description: string; button: string; onPick: () => void; busy?: boolean }) {
+/** The source list, with a selection pill that slides between sources. Mounted inside the sheet's portal, so its refs exist when it lays out. */
+function SourceTabs({ source, onSelect }: { source: SourceId; onSelect: (id: SourceId) => void }) {
+  const tabs = useRef<HTMLDivElement>(null)
+  const indicator = useSlidingIndicator(tabs, '[aria-selected="true"]', source)
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
-      <h3 className="text-title3 font-semibold">{title}</h3>
-      <p className="max-w-[400px] text-body text-label-2">{description}</p>
-      <Button size="lg" variant="primary" onClick={onPick} disabled={busy}>
+    <nav aria-label="Source" className="w-[164px] shrink-0 border-r border-separator p-1.5">
+      <div
+        ref={tabs}
+        role="tablist"
+        aria-orientation="vertical"
+        className="relative flex flex-col gap-px"
+        onKeyDown={(e) => {
+          // Roving focus: ↑/↓ move between sources (Browse Modpacks navigates, so it only takes focus).
+          const delta = e.key === 'ArrowDown' ? 1 : e.key === 'ArrowUp' ? -1 : 0
+          if (!delta) return
+          e.preventDefault()
+          const buttons = [...(tabs.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? [])]
+          const next = buttons[(buttons.indexOf(document.activeElement as HTMLButtonElement) + delta + buttons.length) % buttons.length]
+          next?.focus()
+          const id = next?.dataset.source as SourceId | undefined
+          if (id && id !== 'browse') onSelect(id)
+        }}
+      >
+        <span ref={indicator} aria-hidden className={indicatorClass} />
+        {SOURCES.map((s) => (
+          <button
+            key={s.id}
+            type="button"
+            role="tab"
+            data-source={s.id}
+            aria-selected={source === s.id}
+            tabIndex={source === s.id ? 0 : -1}
+            onClick={() => {
+              if (s.id === 'browse') {
+                close()
+                void router.navigate({ to: '/discover', search: { type: 'modpack' } })
+              } else onSelect(s.id)
+            }}
+            className={cn(
+              'relative flex h-[26px] items-center gap-2 rounded-md px-2 text-left text-compact outline-none transition-colors duration-150 [&_svg]:size-[15px] [&_svg]:shrink-0',
+              source === s.id ? 'text-label [&_svg]:text-label' : 'text-label-2 hover:bg-hover hover:text-label [&_svg]:text-label-3',
+              'focus-visible:shadow-[inset_0_0_0_1.5px_var(--focus-ring)]',
+            )}
+          >
+            {s.icon}
+            {s.label}
+          </button>
+        ))}
+      </div>
+    </nav>
+  )
+}
+
+function PickSource({ icon, title, description, button, onPick, busy }: { icon: ReactNode; title: string; description: string; button: string; onPick: () => void; busy?: boolean }) {
+  return (
+    <div className="flex h-full animate-enter flex-col items-center justify-center gap-2 px-6 pb-4 text-center">
+      <span aria-hidden className="mb-1 text-label-3 [&_svg]:size-[22px]">
+        {icon}
+      </span>
+      <h3 className="text-headline font-semibold">{title}</h3>
+      <p className="max-w-[360px] text-compact text-label-2">{description}</p>
+      <Button variant="primary" className="mt-2" onClick={onPick} disabled={busy}>
         {busy ? 'Reading…' : button}
       </Button>
     </div>
@@ -138,7 +172,7 @@ function UrlForm() {
         : undefined
   return (
     <form
-      className="flex flex-col gap-3"
+      className="flex animate-enter flex-col gap-3"
       onSubmit={(e) => {
         e.preventDefault()
         if (!value || error) return
@@ -149,8 +183,22 @@ function UrlForm() {
         else openModpackImport({ url: value })
       }}
     >
-      <h3 className="text-title3 font-semibold">Import from a link</h3>
-      <TextField label="Modpack URL" placeholder="https://modrinth.com/modpack/…" value={url} onChange={(e) => setUrl(e.target.value)} error={error} autoFocus />
+      <Card title="Import from a link">
+        <Row label="Modpack URL" htmlFor="ni-url" hintId="ni-url-msg" hint={error && <span className="text-red">{error}</span>}>
+          <TextField
+            id="ni-url"
+            monospace
+            placeholder="https://modrinth.com/modpack/…"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            aria-invalid={error ? true : undefined}
+            aria-describedby={error ? 'ni-url-msg' : undefined}
+            className="flex-1"
+            autoFocus
+          />
+        </Row>
+      </Card>
+      <Note>A Modrinth project opens in Discover, where Install creates the instance. A link to a .mrpack or .zip file is previewed first.</Note>
       <div className="flex justify-end">
         <Button type="submit" variant="primary" disabled={!url || !!error}>
           Continue
@@ -253,7 +301,7 @@ function useCustomForm(): { valid: boolean; busy: boolean; create: () => void; e
 
   const element = (
     <form
-      className="flex flex-col gap-5"
+      className="flex animate-enter flex-col gap-3"
       onSubmit={(e) => {
         e.preventDefault()
         void create()
@@ -265,37 +313,43 @@ function useCustomForm(): { valid: boolean; busy: boolean; create: () => void; e
           aria-label="Change icon"
           title={icon ? icon : 'Choose an Icon…'}
           onClick={() => void pickIcon()}
-          className="relative rounded-[12px] outline-none focus-visible:ring-[3px] focus-visible:ring-[color-mix(in_srgb,var(--accent)_55%,transparent)]"
+          className="relative mt-px rounded-[9px] outline-none focus-visible:shadow-[0_0_0_2px_var(--focus-ring)]"
         >
-          <BlockIcon hue={(effectiveName.length * 37) % 360} label={effectiveName} size={48} />
-          {icon && <span className="absolute -right-1 -bottom-1 rounded-full bg-accent-fill px-1 text-caption font-semibold text-on-accent">✓</span>}
+          <BlockIcon hue={(effectiveName.length * 37) % 360} label={effectiveName} size={40} />
+          {icon && (
+            <span aria-hidden className="absolute -right-1 -bottom-1 flex size-4 items-center justify-center rounded-full bg-label text-window shadow-[0_0_0_1.5px_var(--color-sheet)]">
+              <Check className="size-2.5" strokeWidth={3} />
+            </span>
+          )}
         </button>
         <TextField label="Name" placeholder={placeholder} value={name} onChange={(e) => setName(e.target.value)} error={nameError} className="flex-1" autoFocus />
       </div>
 
-      <section aria-labelledby="ni-version" className="flex flex-col gap-3">
-        <h3 id="ni-version" className="text-body font-semibold">
-          Version
-        </h3>
-        {versions.isError && <Banner tone="error" title="Couldn’t load the version list">{errorMessage(versions.error)}</Banner>}
-        <div className="grid grid-cols-[120px_1fr] items-center gap-x-3 gap-y-3">
-          <span className="text-right text-body text-label-2">Minecraft</span>
-          <div className="flex items-center gap-3">
-            <Combobox
-              aria-label="Minecraft version"
-              value={minecraft}
-              onValueChange={setChosenMc}
-              options={mcOptions}
-              placeholder={versions.isPending ? 'Loading versions…' : 'Choose a version'}
-              className="w-[220px]"
-            />
-            <Checkbox checked={snapshots} onCheckedChange={setSnapshots} label="Show snapshots" />
-          </div>
-
-          <span className="text-right text-body text-label-2">Mod loader</span>
+      {versions.isError && <Banner tone="error" title="Couldn’t load the version list">{errorMessage(versions.error)}</Banner>}
+      <Card title="Version">
+        <Row label="Minecraft">
+          <Combobox
+            aria-label="Minecraft version"
+            value={minecraft}
+            onValueChange={setChosenMc}
+            options={mcOptions}
+            placeholder={versions.isPending ? 'Loading versions…' : 'Choose a version'}
+            className="w-[180px]"
+          />
+          <Checkbox checked={snapshots} onCheckedChange={setSnapshots} label="Show snapshots" className="ml-auto !items-center" />
+        </Row>
+        <Row
+          label="Mod loader"
+          hint={
+            (unavailable.length > 0 || loaderError) && (
+              <span className={loaderError ? 'text-red' : undefined}>
+                {loaderError ?? `${listNames(unavailable.map(loaderName))} ${unavailable.length === 1 ? 'isn’t' : 'aren’t'} available for ${minecraft}.`}
+              </span>
+            )
+          }
+        >
           <Segmented<LoaderKind>
             aria-label="Mod loader"
-            className="justify-self-start"
             value={loader}
             onValueChange={(l) => {
               setLoader(l)
@@ -306,80 +360,51 @@ function useCustomForm(): { valid: boolean; busy: boolean; create: () => void; e
               ...LOADERS.map((l) => ({ value: l, label: loaderName(l), disabled: unavailable.includes(l) && loader !== l })),
             ]}
           />
-          {(unavailable.length > 0 || loaderError) && (
-            <>
-              <span />
-              <p className={cn('-mt-1.5 text-small', loaderError ? 'text-red' : 'text-label-2')}>
-                {loaderError ?? `${listNames(unavailable.map(loaderName))} ${unavailable.length === 1 ? 'isn’t' : 'aren’t'} available for ${minecraft}.`}
-              </p>
-            </>
-          )}
-
-          {loader !== 'vanilla' && !loaderError && (
-            <>
-              <span className="text-right text-body text-label-2">{loaderName(loader)} version</span>
-              {loaderQueries[loader].isPending ? (
-                <span className="flex items-center gap-2 text-small text-label-2">
-                  <Spinner size={12} /> Loading versions…
-                </span>
-              ) : loaderQueries[loader].isError ? (
-                <p className="text-small text-red">{errorMessage(loaderQueries[loader].error)}</p>
-              ) : (
-                <Select
-                  aria-label={`${loaderName(loader)} version`}
-                  className="w-[220px] justify-self-start"
-                  value={loaderVersion ?? ''}
-                  onValueChange={setChosenLoaderVersion}
-                  options={loaderVersions.map((v) => ({
-                    value: v.version,
-                    text: v.version,
-                    label: (
-                      <span className="flex items-center gap-1.5">
-                        {v.version}
-                        {v.recommended && <Badge tone="success">Recommended</Badge>}
-                        {v.latest && <Badge tone="info">Latest</Badge>}
-                      </span>
-                    ),
-                  }))}
-                />
-              )}
-            </>
-          )}
-        </div>
-      </section>
-
-      <section>
-        <button
-          type="button"
-          aria-expanded={advanced}
-          onClick={() => setAdvanced((a) => !a)}
-          className="-ml-1 flex items-center gap-1 rounded px-1 text-body font-semibold"
-        >
-          <ChevronRight className={cn('size-3 text-label-2 transition-transform duration-150', advanced && 'rotate-90')} strokeWidth={2.5} />
-          Advanced
-        </button>
-        {advanced && (
-          <div className="mt-3 grid grid-cols-[120px_1fr] items-center gap-x-3 gap-y-3">
-            <span className="text-right text-body text-label-2">Java</span>
-            <Select
-              aria-label="Java runtime"
-              className="w-[280px] justify-self-start"
-              value={javaPath}
-              onValueChange={setJavaPath}
-              options={[
-                { value: 'auto', label: 'Automatic (recommended)' },
-                ...javas.filter((j) => j.valid).map((j, i) => ({ value: j.path, label: `Java ${j.version} · ${j.vendor} · ${j.arch}`, separatorBefore: i === 0 })),
-              ]}
-            />
-            <span className="text-right text-body text-label-2">Memory</span>
-            <div className="flex items-center gap-3">
-              <Switch checked={memAuto} onCheckedChange={setMemAuto} aria-label="Automatic memory" />
-              <span className="text-body">{memAuto ? 'Automatic' : 'Maximum'}</span>
-              {!memAuto && <Stepper aria-label="Maximum memory" unit="MB" value={memMax} min={1024} max={65536} step={256} onValueChange={setMemMax} />}
-            </div>
-          </div>
+        </Row>
+        {loader !== 'vanilla' && !loaderError && (
+          <Row label={`${loaderName(loader)} version`}>
+            {loaderQueries[loader].isPending ? (
+              <span className="flex items-center gap-2 text-meta text-label-2">
+                <Spinner size={12} /> Loading versions…
+              </span>
+            ) : loaderQueries[loader].isError ? (
+              <p className="text-meta text-red">{errorMessage(loaderQueries[loader].error)}</p>
+            ) : (
+              <Select
+                aria-label={`${loaderName(loader)} version`}
+                className="w-[250px]"
+                value={loaderVersion ?? ''}
+                onValueChange={setChosenLoaderVersion}
+                options={loaderVersions.map((v) => ({
+                  value: v.version,
+                  text: v.version,
+                  label: <VersionLabel version={v.version} recommended={v.recommended} latest={v.latest} />,
+                }))}
+              />
+            )}
+          </Row>
         )}
-      </section>
+      </Card>
+
+      <DisclosureCard title="Advanced" open={advanced} onOpenChange={setAdvanced}>
+        <Row label="Java">
+          <Select
+            aria-label="Java runtime"
+            className="w-[260px]"
+            value={javaPath}
+            onValueChange={setJavaPath}
+            options={[
+              { value: 'auto', label: 'Automatic (recommended)' },
+              ...javas.filter((j) => j.valid).map((j, i) => ({ value: j.path, label: `Java ${j.version} · ${j.vendor} · ${j.arch}`, separatorBefore: i === 0 })),
+            ]}
+          />
+        </Row>
+        <Row label="Memory">
+          <Switch checked={memAuto} onCheckedChange={setMemAuto} aria-label="Automatic memory" />
+          <span className="text-compact">{memAuto ? 'Automatic' : 'Maximum'}</span>
+          {!memAuto && <Stepper aria-label="Maximum memory" unit="MB" value={memMax} min={1024} max={65536} step={256} onValueChange={setMemMax} />}
+        </Row>
+      </DisclosureCard>
       <button type="submit" hidden />
     </form>
   )
@@ -446,6 +471,7 @@ function useFolderImport(): { candidate: ImportCandidate | undefined; valid: boo
   const options = (versions.data ?? []).map((v) => ({ value: v.id, label: v.id, detail: v.type === 'release' ? undefined : v.type }))
   const element = !candidate ? (
     <PickSource
+      icon={<FolderOpen strokeWidth={1.5} />}
       title="Add an existing folder"
       description="Import a .minecraft folder or another launcher’s instance folder. Amethyst detects the version and shows what it found. Copy is the default; Link in place keeps the files where they are."
       button="Choose Folder…"
@@ -453,16 +479,7 @@ function useFolderImport(): { candidate: ImportCandidate | undefined; valid: boo
       onPick={() => void pick()}
     />
   ) : (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <h3 className="text-title3 font-semibold">Review</h3>
-          <p className="selectable truncate font-mono text-small text-label-2" title={candidate.path}>
-            {candidate.path}
-          </p>
-        </div>
-        <Button onClick={() => void pick()}>Choose Another…</Button>
-      </div>
+    <div className="flex animate-enter flex-col gap-3">
       {candidate.check !== 'ok' && <Banner tone="error" title="This folder can’t be imported">{CHECK_TEXT[candidate.check]}</Banner>}
       {candidate.check === 'ok' && candidate.removedLaunchSettings && candidate.removedLaunchSettings.length > 0 && (
         <Banner tone="warning" title="These launch settings won’t be imported">
@@ -476,39 +493,64 @@ function useFolderImport(): { candidate: ImportCandidate | undefined; valid: boo
           </ul>
         </Banner>
       )}
-      <div className="grid grid-cols-[120px_1fr] items-center gap-x-3 gap-y-3">
-        <span className="text-right text-body text-label-2">Found</span>
-        <span className="text-body">
-          {candidate.kind === 'amethyst' ? 'An Amethyst instance' : candidate.kind === 'game-dir' ? 'A Minecraft game folder' : 'Nothing recognisable (an empty instance will be set up)'} · {candidate.modCount} mods ·{' '}
-          {candidate.worldCount} worlds
-        </span>
-        <span className="text-right text-body text-label-2">Name</span>
-        <TextField aria-label="Name" value={name} onChange={(e) => setName(e.target.value)} error={!name.trim() ? 'Enter a name.' : undefined} />
-        {needsRuntime && (
-          <>
-            <span className="text-right text-body text-label-2">Minecraft</span>
-            <div className="flex items-center gap-2">
-              <Combobox aria-label="Minecraft version" value={mc} onValueChange={setMc} options={options} placeholder="Choose a version" className="w-[200px]" />
-              {candidate.runtime?.minecraft ? <span className="text-small text-label-2">Detected from the folder. Check it’s right.</span> : <span className="text-small text-orange">Couldn’t detect it; choose one.</span>}
-            </div>
-          </>
-        )}
-        <span className="text-right text-body text-label-2">Files</span>
-        <Segmented<'copy' | 'in-place'>
-          aria-label="Import mode"
-          className="justify-self-start"
-          value={mode}
-          onValueChange={setMode}
-          options={[
-            { value: 'copy', label: 'Copy into Amethyst' },
-            { value: 'in-place', label: 'Link in place' },
-          ]}
+      <Card title="Review" action={<Button onClick={() => void pick()}>Choose Another…</Button>}>
+        <InfoRow
+          label="Folder"
+          value={
+            <span className="selectable font-mono text-meta" title={candidate.path}>
+              {candidate.path}
+            </span>
+          }
         />
-        <span />
-        <p className="-mt-1.5 text-small text-label-2">
-          {mode === 'copy' ? 'A clone is made in Amethyst’s instances folder (no extra disk space with APFS). The original stays untouched.' : 'Amethyst uses the folder where it is. Moving or unmounting it makes the instance unavailable.'}
-        </p>
-      </div>
+        <InfoRow
+          label="Found"
+          value={candidate.kind === 'amethyst' ? 'An Amethyst instance' : candidate.kind === 'game-dir' ? 'A Minecraft game folder' : 'Nothing recognisable (an empty instance will be set up)'}
+          detail={
+            <span className="tabular">
+              {candidate.modCount} mods · {candidate.worldCount} worlds
+            </span>
+          }
+        />
+      </Card>
+      <Card title="Import as">
+        <Row label="Name" htmlFor="ni-folder-name" hintId="ni-folder-name-msg" hint={!name.trim() && <span className="text-red">Enter a name.</span>}>
+          <TextField
+            id="ni-folder-name"
+            aria-label="Name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            aria-invalid={!name.trim() || undefined}
+            aria-describedby={!name.trim() ? 'ni-folder-name-msg' : undefined}
+            className="flex-1"
+          />
+        </Row>
+        {needsRuntime && (
+          <Row
+            label="Minecraft"
+            hint={candidate.runtime?.minecraft ? 'Detected from the folder. Check it’s right.' : <span className="text-orange">Couldn’t detect it; choose one.</span>}
+          >
+            <Combobox aria-label="Minecraft version" value={mc} onValueChange={setMc} options={options} placeholder="Choose a version" className="w-[180px]" />
+          </Row>
+        )}
+        <Row
+          label="Files"
+          hint={
+            mode === 'copy'
+              ? 'A clone is made in Amethyst’s instances folder (no extra disk space with APFS). The original stays untouched.'
+              : 'Amethyst uses the folder where it is. Moving or unmounting it makes the instance unavailable.'
+          }
+        >
+          <Segmented<'copy' | 'in-place'>
+            aria-label="Import mode"
+            value={mode}
+            onValueChange={setMode}
+            options={[
+              { value: 'copy', label: 'Copy into Amethyst' },
+              { value: 'in-place', label: 'Link in place' },
+            ]}
+          />
+        </Row>
+      </Card>
     </div>
   )
   return { candidate, valid, busy, submit: () => void submit(), element }
@@ -518,3 +560,4 @@ function listNames(names: string[]) {
   if (names.length <= 1) return names.join('')
   return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
 }
+

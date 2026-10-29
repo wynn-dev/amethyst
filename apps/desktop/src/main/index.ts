@@ -15,6 +15,7 @@ import { RuntimeSupervisor, showHiddenWindows } from './runtime'
 import { Updater } from './updater'
 import { guardNavigation, runScreenshots } from './windows'
 import { mainMark } from './bench-marks'
+import { keepOffScreen } from './headless'
 
 mainMark('main-start')
 
@@ -72,6 +73,8 @@ const e2eDriver = e2eSpec ? (e2eMatch?.[1] ?? 'core') : undefined
 const e2eDir = e2eSpec ? (e2eMatch?.[2] ?? e2eSpec) : undefined
 const e2eRoot = e2eDir ? prepareE2eDataRoot() : undefined
 if (e2eRoot) app.setPath('userData', e2eRoot)
+// Automated dev runs never put windows on the user's screen (headless.ts).
+if ((screenshotDir || e2eSpec) && process.env.AMETHYST_VISIBLE !== '1') keepOffScreen()
 
 function createMainWindow(): BrowserWindow {
   const win = new BrowserWindow({

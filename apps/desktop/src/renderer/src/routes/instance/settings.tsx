@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { AlertTriangle, CheckCircle2 } from 'lucide-react'
+import { AlertTriangle, Check } from 'lucide-react'
 import type { InstanceOverrides, Patch } from '@shared/services'
 import { Button, Checkbox, Form, FormNote, FormRow, FormSection, Select, Skeleton, Slider, Stepper, Switch } from '@/ui'
 import { formatArgs, parseArgs } from '@/lib/args'
@@ -19,15 +19,18 @@ export default function InstanceSettingsTab() {
   const q = useInstance(id)
   if (q.isError) return <QueryError error={q.error} onRetry={() => q.refetch()} what="settings" />
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
-      {q.data ? (
-        <SettingsForm inst={q.data} />
-      ) : (
-        <Form>
-          <Skeleton className="h-32 rounded-lg" />
-          <Skeleton className="h-24 rounded-lg" />
-        </Form>
-      )}
+    <div className="min-h-0 flex-1 overflow-y-auto px-4 pt-3.5 pb-[18px]">
+      {/* A form may cap its width, but it starts at the content edge rather than floating centred. */}
+      <div className="max-w-[640px]">
+        {q.data ? (
+          <SettingsForm inst={q.data} />
+        ) : (
+          <Form>
+            <Skeleton className="h-32 rounded-[10px]" />
+            <Skeleton className="h-24 rounded-[10px]" />
+          </Form>
+        )}
+      </div>
     </div>
   )
 }
@@ -75,8 +78,8 @@ function SettingsForm({ inst }: { inst: InstanceDetail }) {
     <Form>
       <FormSection title="General">
         <FormRow label="Icon" description="Click to choose an image.">
-          <button type="button" aria-label="Change icon" onClick={() => void chooseInstanceIcon(inst)} className="rounded-lg transition-transform hover:scale-105">
-            <BlockIcon hue={inst.iconHue} label={inst.name} src={inst.iconUrl} size={36} />
+          <button type="button" aria-label="Change icon" onClick={() => void chooseInstanceIcon(inst)} className="flex rounded-[7px] transition-transform duration-(--duration-spring) ease-spring hover:scale-105">
+            <BlockIcon hue={inst.iconHue} label={inst.name} src={inst.iconUrl} size={28} />
           </button>
         </FormRow>
         <FormRow label="Name" htmlFor="inst-name">
@@ -131,7 +134,7 @@ function SettingsForm({ inst }: { inst: InstanceDetail }) {
           inherited={!o.memory}
           onReset={() => patch({ memory: null }, 'the memory setting')}
         >
-          <label className="flex items-center gap-2 text-body">
+          <label className="flex items-center gap-2 text-compact">
             Automatic
             <Switch
               checked={mem.mode === 'auto'}
@@ -157,17 +160,17 @@ function SettingsForm({ inst }: { inst: InstanceDetail }) {
                   patch({ memory: { mode: 'manual', maxMB: v, minMB: Math.min(mem.minMB, v) } }, 'the memory setting')
                 }}
               />
-              <div className="flex items-center justify-between text-small text-label-2">
+              <div className="flex items-center justify-between font-mono text-[11px] text-label-2 tabular">
                 <span>512 MB</span>
                 <span>Recommended: {RECOMMENDED_MB / 1024} GB</span>
                 <span>{Math.round(ramMB / 1024)} GB</span>
               </div>
               <div className="flex items-center gap-4">
-                <label className="flex items-center gap-2 text-body">
+                <label className="flex items-center gap-2 text-compact">
                   Min
                   <Stepper aria-label="Minimum memory" unit="MB" min={0} max={maxMB} step={256} value={mem.minMB} onValueChange={(minMB) => patch({ memory: { mode: 'manual', minMB, maxMB } })} />
                 </label>
-                <label className="flex items-center gap-2 text-body">
+                <label className="flex items-center gap-2 text-compact">
                   Max
                   <Stepper aria-label="Maximum memory in MB" unit="MB" min={512} max={ramMB} step={256} value={maxMB} onValueChange={(v) => patch({ memory: { mode: 'manual', minMB: Math.min(mem.minMB, v), maxMB: v } })} />
                 </label>
@@ -249,13 +252,15 @@ function SettingsForm({ inst }: { inst: InstanceDetail }) {
   )
 }
 
+const javaRow = 'flex min-h-[38px] items-center gap-2.5 px-3 py-[7px] text-compact'
+
 function JavaStatus({ rec, loading }: { rec: ReturnType<typeof useJavaRecommendation>['data']; loading: boolean }) {
   if (loading) return <FormNote>Looking for Java…</FormNote>
   if (!rec) return <FormNote>Java is chosen when the game version is known.</FormNote>
   if (!rec.java)
     return (
-      <div className="flex items-center gap-2 px-2.5 py-2 text-body">
-        <AlertTriangle className="size-4 text-orange" />
+      <div className={javaRow}>
+        <AlertTriangle className="size-[15px] shrink-0 text-yellow" strokeWidth={1.75} />
         <span className="flex-1">{rec.willInstall ? `Needs Java ${rec.major}. It downloads automatically when you play.` : `Needs Java ${rec.major}`}</span>
         <Button size="md" variant={rec.willInstall ? 'push' : 'primary'} onClick={() => void javaActions.install(rec.major)}>
           Download Now
@@ -264,8 +269,8 @@ function JavaStatus({ rec, loading }: { rec: ReturnType<typeof useJavaRecommenda
     )
   if (rec.rosetta)
     return (
-      <div className="flex items-center gap-2 px-2.5 py-2 text-body">
-        <AlertTriangle className="size-4 text-orange" />
+      <div className={javaRow}>
+        <AlertTriangle className="size-[15px] shrink-0 text-yellow" strokeWidth={1.75} />
         <span className="flex-1">x86_64 runtime (runs under Rosetta, slower)</span>
         <Button size="md" onClick={() => void javaActions.install(rec.major)}>
           Get arm64 Java {rec.major}
@@ -273,11 +278,11 @@ function JavaStatus({ rec, loading }: { rec: ReturnType<typeof useJavaRecommenda
       </div>
     )
   return (
-    <div className="flex items-center gap-2 px-2.5 py-2 text-body">
-      <CheckCircle2 className="size-4 text-green" />
+    <div className={javaRow}>
+      <Check className="size-[15px] shrink-0 text-label-2" strokeWidth={1.75} />
       <span>
-        Java {rec.java.version} ({rec.java.vendor ?? 'unknown vendor'}) will be used
-        {rec.pinnedUnavailable && <span className="text-orange"> — the chosen runtime is missing</span>}
+        Java <span className="font-mono text-[11.5px]">{rec.java.version}</span> ({rec.java.vendor ?? 'unknown vendor'}) will be used
+        {rec.pinnedUnavailable && <span className="text-yellow"> — the chosen runtime is missing</span>}
       </span>
     </div>
   )

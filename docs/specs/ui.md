@@ -758,6 +758,12 @@ There is no menu bar integration and no shortcut cheatsheet.
 5. **Destructive actions are reversible or confirmed.** File deletions go to the macOS Trash (`shell.trashItem`). If an action can't be undone, it asks for confirmation in a sheet. Toasts offer "Undo" wherever it is possible.
 6. **Labels over icons.** Toolbars use SF-Symbols-style icons together with text, or show a tooltip that includes the shortcut. No three-state icon toggles.
 7. **Safe by default.** Telemetry is off. Nothing is silently disabled, deleted or changed.
+8. **Visual direction** (DECISIONS.md, 2026-10-28; reference: `docs/design/mockup.html`). Compact and neutral, like native macOS apps, Linear and Raycast:
+   - Neutral by default: the accent is the label colour. Colour comes from content (icons, screenshots) and from status only. No purple, no decorative gradients, no novelty numerals.
+   - Flat surfaces separated by hairlines; cards are outlined, not filled. Blur only on the sidebar (vibrancy), the ⌘K palette, popovers and menus, and the sticky table header.
+   - 13px base type; 26px sidebar rows, 32px table rows; monospaced figures for versions, sizes and dates.
+   - Ordered (Bayer) dithering for progress and for placeholder art when an instance or project has no icon.
+   - Purposeful spring motion only (Play → progress → Running, sliding selection, surfaces growing from their trigger, the instance tile flying into the header). Everything honours Reduce Motion; nothing loops (the small running indicator pulses three times when the game starts, then rests).
 
 ## B1. Window and layout
 
@@ -768,28 +774,30 @@ There is no menu bar integration and no shortcut cheatsheet.
   - The window frame, size and sidebar width are restored on relaunch.
 - **Layout.** Three areas:
   - The **sidebar**: 220px by default, resizable 180–320, collapsible with ⌃⌘S.
-  - The **content area**, with a unified toolbar row about 52px tall. The window can be dragged from empty toolbar space.
+  - The **content area**, with a toolbar row 48px tall (centred on the traffic lights). The window can be dragged from empty toolbar space.
   - An optional **inspector**: a trailing detail pane used in content lists, which can be toggled with ⌥⌘I.
-- **Toolbar** (in the content area). It holds the page title (or a breadcrumb) and that page's primary actions. Two items are always present on the trailing edge:
-  - The **Activity button**, a progress ring that opens the task centre popover (B6).
-  - The **Search button**, which opens ⌘K.
+- **Toolbar** (in the content area). It holds the page title (or a breadcrumb) and that page's actions, with the primary action (e.g. Play) last. Always present on the trailing side:
+  - The **Activity button**, a download glyph with a small dot while work runs (red after a failure); it opens the task centre popover (B6).
+  - ⌘K is opened from the sidebar's Search field; a **Search button** appears in the toolbar only while the sidebar is hidden.
 
 ## B2. Sidebar
 
 The sidebar is a source list. From top to bottom:
 
+0. **Search** field with a ⌘K hint. It opens the command palette, which grows out of it.
 1. **Library**
-   - **Home**: a dashboard (B3.1).
+   - **Home**: recent instances and updates (B3.1).
    - **Discover**: browse Modrinth and CurseForge for modpacks, mods and so on (B5).
 2. **Instances**. The section header has a "+" button, which opens New Instance (⌘N).
    - Each row shows:
-     - a 20px icon and the name
-     - a secondary line with the version and loader, for example "1.21.1 · Fabric"
-     - a trailing state indicator: a spinner while installing or launching, a green dot while running, a warning badge when there's a problem
+     - an 18px icon (or seeded dithered art) and the name, on a single 26px row
+     - the Minecraft version, right-aligned in small monospaced figures (the full "1.21.1 · Fabric" label is the row's tooltip)
+     - a trailing state indicator: a spinner while installing or launching, a small green dot while running, a warning badge when there's a problem
+   - The selection is a grey pill that slides between rows.
    - Rows can be dragged to reorder.
    - **Folders** are disclosure groups. They are created with "New Folder" or by choosing "Move to Folder…" from a context menu. They are named only; there is no colour picker. Their expanded state is persisted.
    - **Pinned** instances appear first, in an optional "Pinned" subsection.
-   - A filter field at the bottom of the sidebar (⌘⌥F) filters the list.
+   - A filter field filters the list. It is hidden until invoked with ⌥⌘F or View ▸ Filter Instances, then appears under the Search field; it stays while it holds a query and hides when it loses focus empty.
    - **Instance context menu** (native):
      - Launch / Stop
      - Open in New Window: no. Amethyst is single-window, so this item is omitted.
@@ -802,41 +810,34 @@ The sidebar is a source list. From top to bottom:
      - Export Modpack…
      - Move to Trash…
    - **Double-click** launches. **Return** opens the instance. **⌘Return** launches.
-3. **Footer.** Pinned to the bottom of the sidebar:
-   - The **Account chip**: head avatar and name. Clicking it opens the account popover:
+3. **Footer.** Pinned to the bottom of the sidebar, above a hairline:
+   - The **Account chip**: round head avatar, name and account type. Clicking it opens the account popover:
      - a list of accounts with checkmarks
      - "Manage Accounts…", which opens Settings → Accounts
      - "Add Account…"
    - If the account is expired, the chip shows a yellow badge and the popover offers "Sign in again".
 
-Settings is **not** in the sidebar. It opens a separate Settings window with ⌘, (B7), which is the macOS convention.
+Settings is **not** a sidebar destination. It is a separate Settings window (B7), opened with ⌘, or the settings button beside the account chip.
 
 ## B3. Main views
 
 ### B3.1 Home
 
-- **Continue playing.** A large hero for the most recently played instance, showing:
-  - icon, name and version
-  - last played and play time
-  - a big **Play** button (⌘Return)
-  - the selected account
-- **Recent instances.** A grid of up to 8 cards. Each card has a Play button, with the same behaviour as the sidebar.
-- **Updates available.** A compact list: "3 instances have mod updates", "Modpack X has version 1.4". Each row deep-links to the relevant place.
+- **Jump back in.** A card listing up to 8 instances, most recently played first (never-played ones follow, newest first). Each row shows the icon, name, "version · loader", last played (or what the instance is doing) and an inline Play control that behaves like the sidebar's. The row opens the instance's Overview.
+- **Updates.** A card shown only when there is something to update, e.g. "“Pack” has 3 mod updates". Each row deep-links to the relevant tab. The check is deferred and covers the few most recently played modded instances.
 - **Empty state (no instances).** The heading "Create your first instance". Buttons: New Instance, Import Modpack…, Add Existing Folder…, Browse Modpacks.
-- Not on Home: no news carousel, no draggable card grid, no focus mode.
+- Not on Home: no hero, no news carousel, no draggable card grid, no focus mode, and no content counts (Home starts no folder scans).
 
 ### B3.2 Instance detail
 
-The toolbar shows the instance icon and name, with the version and loader as a subtitle. On the trailing side:
+The toolbar shows the instance icon and name, with "version · loader version · N mods" as a subtitle. On the trailing side, in order:
 
-- **Play** button, a split button:
-  - The main part launches.
-  - The ▾ menu has: Launch as ▸ (accounts), Launch into World ▸, Repair Files, Launch Options… (opens the Settings tab).
-  - The button shows its state: Play → Installing 42% (click opens Activity) → Launching… (click cancels) → Stop (click asks for confirmation; ⌥-click force quits).
 - **Show in Finder**
-- **"…" overflow:** Export Modpack…, Duplicate…, Open Logs (⌘L), Move to Trash….
+- **Activity**
+- **"…" overflow:** Launch as ▸ (accounts), Launch into World ▸, Repair Files, Launch Options… (opens the Settings tab), then Export Modpack…, Duplicate…, Rename…, Change Version…, Open Logs (⌘L), Move to Trash….
+- **Play**, filled with the accent. It morphs with the state: Play → a dithered progress pill showing the stage and percentage (installing: click opens Activity; launching: click cancels) → "● Running" with a stop control (click asks for confirmation; ⌥-click force quits). Its context menu repeats the launch choices.
 
-**Tabs.** A segmented control in the toolbar. ⌘1–⌘7 switch tabs.
+**Tabs.** A tab strip under the toolbar, with a sliding selection pill and item counts (mods, packs, shaders, worlds). ⌘1–⌘7 switch tabs.
 
 | # | Tab | Contents |
 |---|---|---|
@@ -850,10 +851,11 @@ The toolbar shows the instance icon and name, with the version and loader as a s
 
 **Overview tab** contents:
 
-- A status card with problems and fixes, for example "2 files missing: Repair", "Java 21 required: Download", "3 mod updates: Review".
-- A summary with counts (mods enabled/total, packs, shaders, worlds), last played, play time and disk size.
-- A screenshots strip that opens Quick Look-style previews.
-- For modpack instances, an **Upstream** card: source and project, current version, the latest version, and "Update…" (B4.7). "Version history…" opens a sheet containing the version list.
+- A status line, "Ready to play", or a **Status** card with problems and fixes, for example "The game isn’t installed yet: Install", "The chosen Java runtime is missing: Use Automatic".
+- A **stat strip**: play time, mods (with how many are off; modded instances), worlds, resource packs, and shaders (vanilla instances). Count cells open their tab.
+- **Worlds** (the most recently played ones), **Runtime** (version, Java, memory, folder) and **Activity** (last session, total play time, created) cards.
+- For modpack instances, a **Modpack** card: project, source, current version and the latest version, with "Check for Updates…" and "Version History…" (B4.7).
+- No disk size and no screenshots strip.
 
 ### B3.3 Logs and crash view (instance tab 6)
 
@@ -927,6 +929,7 @@ The **Java issue** policy is built into the Java row. "Launch anyway" exists onl
 **Layout.**
 
 - Toolbar: search (⌘F) | filter popover | "Check for Updates" | **Add Mods** (opens Discover scoped to this instance, ⇧⌘A) | "+" menu (Add from Files…, Paste URL…).
+- Filter chips: All / Enabled / Disabled (one selected), plus a separate **Updates** toggle that combines with them. Updates filters on results already known from "Check for Updates" and is disabled until a check has run; the chips never check by themselves.
 - A table, not a card list. Columns:
   - enable checkbox
   - icon and name, with the version underneath
@@ -936,7 +939,7 @@ The **Java issue** policy is built into the Java row. "Launch anyway" exists onl
   - file size
   - date added
 - Columns can be sorted. Their visibility is set through the column header context menu.
-- Selecting a row shows the **inspector** on the trailing side:
+- The **inspector** (Mod details) appears on the trailing side only while rows are selected; with nothing selected the table takes the full width. One selected row shows:
   - description, author and links
   - installed version, with a "Change Version…" popup
   - dependencies (each shows ✓ when satisfied, or "Install" when not)
@@ -1074,7 +1077,7 @@ Buttons: Cancel / Change Version.
 
 ### B4.7 Modpack update and export
 
-- **Update modpack sheet**, opened from the Overview Upstream card or from Updates on Home:
+- **Update modpack sheet**, opened from the Overview Modpack card or from Updates on Home:
   - A version list. Each version shows its changelog, MC version and loader, and whether it is newer or older ("Downgrade").
   - Choosing one shows a **diff review**: Added N / Removed N / Updated N / Kept N, as an expandable tree, plus a loader-change callout.
   - User-added files are preserved, and the sheet says so. Overwritten configs are backed up.
@@ -1099,7 +1102,7 @@ One browser for every project type.
 
 **Target instance.** When Discover is opened from an instance ("Add Mods"), a **target bar** appears under the toolbar: "Installing to: [Instance ▾] · 1.21.1 · Fabric", with ✕ to clear it. While a target is set, filters default to that instance's game version and loader, and every result shows its compatibility. The instance-scoped content browser replaces the original's per-page market view.
 
-**Filter sidebar** (collapsible):
+**Filter sidebar** (collapsible, closed when Discover opens; the Filters button shows it):
 
 - sort: Relevance, Downloads, Follows, Recently Updated, Newest
 - game version
@@ -1149,15 +1152,15 @@ Paging uses infinite scroll with a "Load more" fallback.
 
 ## B6. Activity (task and progress centre)
 
-- **Entry point:** a toolbar **Activity button**, which shows a circular overall progress ring while work is running. Clicking it opens a **popover** about 360px wide, not a modal.
+- **Entry point:** a toolbar **Activity button**, which shows a small dot while work is running (overall progress is in its accessible name). Clicking it opens a frosted **popover** about 320px wide, not a modal.
 - **Rows.** Grouped as "In Progress", then "Recent".
-  - Each row: icon, title ("Installing Fabric 0.16.5 for 'Survival'"), subtitle (the current step), a progress bar, "120 MB of 340 MB · 2 min left", and a pause or cancel button that is always visible.
+  - Each row: title ("Installing Fabric 0.16.5 for 'Survival'") with the amount in monospaced figures ("120 MB / 340 MB" or "42%"), subtitle (the current step), a dithered progress bar, "2 min left", and a cancel button that is always visible.
   - Each row expands to show its child steps.
   - Failed rows show the error, with **Retry** and "Copy Details".
 - **Footer:** "Clear Completed".
 - **Placement and behaviour:**
   - Activity does not close when you navigate.
-  - A thin progress bar also appears on the instance row in the sidebar, and on the Play button.
+  - Progress also appears on the instance row in the sidebar, and in the Play button's progress pill.
   - Network download speed is shown only in the popover's header.
 - **Dock:** the Dock icon shows a progress bar (`setProgressBar`) while downloads run. A badge counts failures.
 - **Connection pool stats** are not shown. A developer-only log is available under Settings → Advanced.
@@ -1220,7 +1223,7 @@ The command palette hotkey is fixed at ⌘K. It can be rebound through the macOS
 
 - **Mode:** System / Light / Dark. The default is System, and it follows the OS live.
 - **Accent colour:**
-  - "System" (default), which uses the macOS accent colour.
+  - "Neutral" (default): the label colour, near-white in dark mode and near-black in light mode. A stored `#9b5de5` (the previous purple default) reads as Neutral.
   - Or one of 8 swatches.
   - Or "Custom…", which opens the native colour panel.
   - The accent drives buttons, selection, focus rings and progress.
@@ -1286,7 +1289,7 @@ The command palette hotkey is fixed at ⌘K. It can be rebound through the macOS
 Shown once, in the main window, as a centred card on a vibrancy backdrop. Steps show a dot indicator. Back and Continue are always available.
 
 1. **Welcome.** Logo, "Welcome to Amethyst", and one line of description. A **Get Started** button.
-2. **Appearance.** Three thumbnails: System (selected) / Light / Dark. An accent swatch row, with System selected by default. Changes apply live.
+2. **Appearance.** Three thumbnails: System (selected) / Light / Dark. An accent swatch row, with Neutral selected by default. Changes apply live.
 3. **Account.**
    - "Sign in with Microsoft" (primary), "Use an offline account", and "Skip for now".
    - Signing in uses the same sheet content as B9, inline.
@@ -1500,9 +1503,9 @@ Menu items are enabled or disabled to match the context. For example, the Instan
 
 - Every interactive element can be reached with Tab when Full Keyboard Access is on. Lists use arrow keys and type-to-select.
 - Every icon-only control has a tooltip, an accessible name and its shortcut.
-- Focus rings use the accent colour, through the system focus ring style.
+- Focus rings are a soft halo of the accent colour.
 - Contrast passes WCAG AA in both modes, including over background images, because the dim slider is enforced at a minimum when text sits over the background.
-- Motion respects Reduce Motion: no carousels auto-advance, and skin animation is paused.
+- Motion respects Reduce Motion: springs and morphs become instant (or a short crossfade), no carousels auto-advance, the running indicator does not pulse, and skin animation is paused.
 - Help → Keyboard Shortcuts (⌘/) lists every shortcut.
 
 ---
@@ -1512,7 +1515,7 @@ Menu items are enabled or disabled to match the context. For example, the Instan
 | # | Problem in the original | Amethyst fix |
 |---|---|---|
 | 1 | **The same action is reachable from many places.** Logs and folder appear in header icons, the launch menu's "Manage", the settings header and the context menu. | One canonical home per action. The menu bar, the context menu and ⌘K mirror it (B0.2, B13). |
-| 2 | **The launch gear opens a menu on hover and navigates on click**, and the submenus use hover delays. | A native split button: the main part plays, and ▾ opens a click menu (B3.2). |
+| 2 | **The launch gear opens a menu on hover and navigates on click**, and the submenus use hover delays. | Play only plays; the launch choices are click menus in "…" and on Play's context menu (B3.2). |
 | 3 | **Hover-only controls:** task cancel, URL menus, skin action menu, version menu, avatar download button. | All controls are visible or clickable, with the same item in the context menu (B0.4). |
 | 4 | **Destructive actions happen without confirmation:** deleting mods, packs, datapacks, logs, Java entries, saved skins, saved themes and remote collections, plus duplicate cleanup. Deleting an instance removes it from disk permanently. | Files go to the Trash, with a confirmation sheet and Undo (B0.5, B4.1, B4.5). |
 | 5 | **Actions that are silent or mislabeled:** duplicate gives no feedback; "Remove unused libraries" disables the files; the store's clear-all is labelled "Cancel"; "Ignore" in the checksum dialog has a retry icon; "Javadoc" links to the update URL; the unresolved-files checkbox means "ignore". | Labels describe exactly what happens, and each action confirms its result (B4.1, B4.5, B6). |

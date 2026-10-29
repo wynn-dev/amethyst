@@ -1,11 +1,15 @@
 @import 'tailwindcss';
 
 /*
- * Amethyst design tokens.
+ * Amethyst design tokens (docs/design/mockup.html is the reference).
  *
  * Every colour is semantic and resolves through `light-dark()`, so a subtree follows whatever
  * `color-scheme` applies to it. The root follows the system appearance; Settings can force it by
  * setting `data-appearance` on <html>. Never use Tailwind's `dark:` variant: use these tokens.
+ *
+ * The look is neutral: colour comes from content (icons, screenshots) and from status, never
+ * from decoration. Surfaces are flat and separated by hairlines; blur is reserved for the
+ * sidebar (native vibrancy), the palette, popovers and menus, and the sticky table header.
  */
 
 @theme {
@@ -18,68 +22,76 @@
 
   /*
    * Accent: overridable at runtime through the unprefixed `--accent`, `--accent-fill` and
-   * `--on-accent` variables on <html> (lib/theme.ts). `accent` is for text, icons and rings on the
-   * window; `accent-fill` is for surfaces that carry `on-accent` text or glyphs (buttons, menu
-   * highlights, selected rows), tuned so that text keeps at least 4.5:1 contrast.
+   * `--on-accent` variables on <html> (lib/theme.ts). The default is neutral: the label colour
+   * (near-white in dark, near-black in light). `accent` is for text, icons and rings on the
+   * window; `accent-fill` is for surfaces that carry `on-accent` text or glyphs (the primary
+   * button), tuned so that text keeps at least 4.5:1 contrast.
    */
   --color-accent: var(--accent);
   --color-accent-fill: var(--accent-fill);
-  --color-accent-hover: color-mix(in srgb, var(--accent-fill) 88%, black);
-  --color-accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
+  --color-accent-hover: color-mix(in srgb, var(--accent-fill) 86%, light-dark(white, black));
+  --color-accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
   --color-on-accent: var(--on-accent);
 
-  /* Labels (NSColor.labelColor family). */
-  --color-label: light-dark(rgb(0 0 0 / 0.85), rgb(255 255 255 / 0.86));
-  --color-label-2: light-dark(rgb(0 0 0 / 0.55), rgb(255 255 255 / 0.55));
-  --color-label-3: light-dark(rgb(0 0 0 / 0.3), rgb(255 255 255 / 0.28));
-  --color-label-4: light-dark(rgb(0 0 0 / 0.12), rgb(255 255 255 / 0.12));
+  /* Labels: text, muted, faint, and a hairline-strength tint. */
+  --color-label: light-dark(#1c1c1f, #ececef);
+  --color-label-2: light-dark(#6b6b73, #8e8e97);
+  --color-label-3: light-dark(#a2a2a9, #5e5e67);
+  --color-label-4: light-dark(rgb(0 0 0 / 0.13), rgb(255 255 255 / 0.13));
 
-  /* Surfaces. */
-  --color-window: light-dark(#ffffff, #1e1e1e);
-  --color-window-2: light-dark(#f6f6f6, #232323);
-  --color-surface: light-dark(rgb(0 0 0 / 0.028), rgb(255 255 255 / 0.045));
-  --color-surface-border: light-dark(rgb(0 0 0 / 0.07), rgb(255 255 255 / 0.07));
-  --color-raised: light-dark(rgb(250 250 250 / 0.96), rgb(42 42 44 / 0.96));
-  --color-sheet: light-dark(#f4f4f4, #2a2a2b);
-  --color-backdrop: light-dark(rgb(0 0 0 / 0.12), rgb(0 0 0 / 0.36));
-  --color-separator: light-dark(rgb(0 0 0 / 0.09), rgb(255 255 255 / 0.09));
+  /* Surfaces. Cards are hairline-bordered and unfilled (`surface` is transparent on purpose). */
+  --color-window: light-dark(#ffffff, #0f0f11);
+  --color-window-2: light-dark(#f3f3f5, #18181b);
+  --color-surface: transparent;
+  --color-surface-border: light-dark(rgb(0 0 0 / 0.13), rgb(255 255 255 / 0.13));
+  --color-raised: light-dark(rgb(250 250 252 / 0.8), rgb(30 30 34 / 0.74));
+  --color-sheet: light-dark(#ffffff, #161619);
+  --color-backdrop: light-dark(rgb(0 0 0 / 0.08), rgb(0 0 0 / 0.3));
+  --color-separator: light-dark(rgb(0 0 0 / 0.075), rgb(255 255 255 / 0.07));
+  --color-separator-2: light-dark(rgb(0 0 0 / 0.13), rgb(255 255 255 / 0.13));
   --color-grid: light-dark(rgb(0 0 0 / 0.05), rgb(255 255 255 / 0.05));
 
   /* Fills for controls, hovers and selections. */
-  --color-fill: light-dark(rgb(0 0 0 / 0.05), rgb(255 255 255 / 0.08));
-  --color-fill-2: light-dark(rgb(0 0 0 / 0.08), rgb(255 255 255 / 0.12));
-  --color-fill-3: light-dark(rgb(0 0 0 / 0.12), rgb(255 255 255 / 0.18));
-  --color-control: light-dark(#ffffff, rgb(255 255 255 / 0.16));
-  --color-control-pressed: light-dark(#ececec, rgb(255 255 255 / 0.24));
-  --color-field: light-dark(#ffffff, rgb(255 255 255 / 0.06));
-  --color-selection: light-dark(rgb(0 0 0 / 0.08), rgb(255 255 255 / 0.1));
-  --color-row-alt: light-dark(rgb(0 0 0 / 0.022), rgb(255 255 255 / 0.028));
+  --color-hover: light-dark(rgb(0 0 0 / 0.035), rgb(255 255 255 / 0.04));
+  --color-fill: light-dark(rgb(0 0 0 / 0.045), rgb(255 255 255 / 0.055));
+  --color-fill-2: light-dark(rgb(0 0 0 / 0.07), rgb(255 255 255 / 0.085));
+  --color-fill-3: light-dark(rgb(0 0 0 / 0.11), rgb(255 255 255 / 0.14));
+  --color-control: light-dark(#ffffff, rgb(255 255 255 / 0.1));
+  --color-control-pressed: light-dark(#f0f0f2, rgb(255 255 255 / 0.16));
+  --color-field: light-dark(rgb(0 0 0 / 0.035), rgb(255 255 255 / 0.05));
+  --color-selection: light-dark(rgb(0 0 0 / 0.06), rgb(255 255 255 / 0.075));
+  /* Tables separate rows with hairlines rather than zebra stripes. */
+  --color-row-alt: transparent;
 
-  /* System colours. */
-  --color-red: light-dark(#ff3b30, #ff453a);
-  --color-orange: light-dark(#ff9500, #ff9f0a);
-  --color-yellow: light-dark(#e5b000, #ffd60a);
-  --color-green: light-dark(#28a745, #32d74b);
-  --color-mint: light-dark(#00c7be, #63e6e2);
-  --color-teal: light-dark(#30b0c7, #40c8e0);
-  --color-blue: light-dark(#007aff, #0a84ff);
-  --color-indigo: light-dark(#5856d6, #5e5ce6);
-  --color-purple: light-dark(#af52de, #bf5af2);
-  --color-pink: light-dark(#ff2d55, #ff375f);
-  --color-brown: light-dark(#a2845e, #ac8e68);
-  --color-gray: light-dark(#8e8e93, #98989d);
+  /* Status colours, slightly muted from the system ones. Use them for meaning, not decoration. */
+  --color-red: light-dark(#d93b30, #f2665c);
+  --color-orange: light-dark(#c4670f, #e9a05a);
+  --color-yellow: light-dark(#a8781c, #d8b45e);
+  --color-green: light-dark(#3a9152, #6cbf80);
+  --color-teal: light-dark(#2f8f9f, #5fb8c6);
+  --color-blue: light-dark(#0a72e8, #3b9bff);
+  --color-gray: light-dark(#8c8c94, #85858e);
 
-  /* Type: SF via the system font stack, at macOS sizes. */
-  --font-sans: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  /* Type: SF via the system font stack, at compact macOS sizes. */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
   --font-mono: ui-monospace, 'SF Mono', Menlo, monospace;
   --text-caption: 10px;
   --text-caption--line-height: 13px;
   --text-small: 11px;
   --text-small--line-height: 14px;
+  /* Section headers, secondary lines and metadata. */
+  --text-meta: 11.5px;
+  --text-meta--line-height: 15px;
   --text-callout: 12px;
   --text-callout--line-height: 15px;
+  /* Rows, tabs and compact controls. */
+  --text-compact: 12.5px;
+  --text-compact--line-height: 16px;
   --text-body: 13px;
   --text-body--line-height: 16px;
+  /* Toolbar titles. */
+  --text-headline: 13.5px;
+  --text-headline--line-height: 17px;
   --text-title3: 15px;
   --text-title3--line-height: 20px;
   --text-title2: 17px;
@@ -92,30 +104,42 @@
   --radius-xs: 3px;
   --radius-sm: 5px;
   --radius-md: 6px;
-  --radius-lg: 10px;
-  --radius-xl: 12px;
-  --radius-2xl: 16px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+  --radius-2xl: 12px;
 
-  --shadow-control: 0 0 0 0.5px light-dark(rgb(0 0 0 / 0.16), rgb(255 255 255 / 0.06)),
-    0 0.5px 1.5px light-dark(rgb(0 0 0 / 0.14), rgb(0 0 0 / 0.3));
-  --shadow-card: 0 0 0 0.5px light-dark(rgb(0 0 0 / 0.08), rgb(255 255 255 / 0.08)),
-    0 1px 3px light-dark(rgb(0 0 0 / 0.06), rgb(0 0 0 / 0.3));
-  --shadow-popover: 0 0 0 0.5px light-dark(rgb(0 0 0 / 0.14), rgb(255 255 255 / 0.12)),
-    0 10px 30px light-dark(rgb(0 0 0 / 0.16), rgb(0 0 0 / 0.5));
-  --shadow-sheet: 0 0 0 0.5px light-dark(rgb(0 0 0 / 0.16), rgb(255 255 255 / 0.12)),
-    0 22px 70px light-dark(rgb(0 0 0 / 0.26), rgb(0 0 0 / 0.6));
+  /* Flat by default: hairline rings, and real shadows only on floating surfaces. */
+  --shadow-control: 0 0 0 0.5px light-dark(rgb(0 0 0 / 0.14), rgb(255 255 255 / 0.12)), 0 0.5px 1px light-dark(rgb(0 0 0 / 0.06), rgb(0 0 0 / 0.25));
+  --shadow-card: 0 0 0 0.5px light-dark(rgb(0 0 0 / 0.13), rgb(255 255 255 / 0.13));
+  --shadow-popover: 0 0 0 0.5px light-dark(rgb(0 0 0 / 0.12), rgb(255 255 255 / 0.13)), 0 18px 50px light-dark(rgb(0 0 0 / 0.16), rgb(0 0 0 / 0.4)),
+    inset 0 0.5px 0 light-dark(transparent, rgb(255 255 255 / 0.07));
+  --shadow-sheet: 0 0 0 0.5px light-dark(rgb(0 0 0 / 0.14), rgb(255 255 255 / 0.13)), 0 24px 70px light-dark(rgb(0 0 0 / 0.2), rgb(0 0 0 / 0.55));
 
-  --ease-mac: cubic-bezier(0.2, 0.8, 0.2, 1);
+  /*
+   * Motion. Springs are sampled into CSS `linear()` curves (ui/motion.ts has the generator and
+   * the same values for script-driven animation): `spring` is the UI spring (stiffness 240,
+   * damping 24, a hint of overshoot) for indicators and morphs, `snappy` the sheet spring
+   * (420, 38, no overshoot) for surfaces that grow from their trigger. Durations live in
+   * `--duration-spring` / `--duration-snappy` (zero under Reduce Motion).
+   */
+  --ease-mac: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 0.8, 0.4);
+  --ease-spring: linear(0, 0.027, 0.094, 0.185, 0.288, 0.394, 0.496, 0.592, 0.677, 0.752, 0.815, 0.868, 0.911, 0.944, 0.97, 0.989, 1.002, 1.012, 1.017, 1.02, 1.021, 1.021, 1.02, 1.018, 1.016, 1.013, 1.011, 1.009, 1.007, 1.006, 1.004, 1.003, 1);
+  --ease-snappy: linear(0, 0.018, 0.064, 0.127, 0.201, 0.278, 0.356, 0.431, 0.502, 0.568, 0.628, 0.682, 0.73, 0.772, 0.809, 0.84, 0.867, 0.891, 0.91, 0.927, 0.941, 0.952, 0.962, 0.97, 0.976, 0.981, 0.986, 0.989, 0.992, 0.994, 0.996, 0.997, 1);
 
   --animate-fade-in: fade-in 140ms var(--ease-mac);
   --animate-fade-out: fade-out 120ms ease-in forwards;
-  --animate-pop-in: pop-in 150ms var(--ease-mac);
-  --animate-pop-out: pop-out 110ms ease-in forwards;
-  --animate-sheet-in: sheet-in 200ms var(--ease-mac);
-  --animate-sheet-out: sheet-out 150ms ease-in forwards;
-  --animate-toast-in: toast-in 180ms var(--ease-mac);
+  --animate-pop-in: pop-in 316ms var(--ease-snappy);
+  --animate-pop-out: pop-out 140ms var(--ease-exit) forwards;
+  --animate-sheet-in: sheet-in 316ms var(--ease-snappy);
+  --animate-sheet-out: sheet-out 150ms var(--ease-exit) forwards;
+  --animate-toast-in: toast-in 316ms var(--ease-snappy);
+  /* A view or pane appearing: a short rise out of a slight blur. */
+  --animate-enter: enter 200ms var(--ease-mac);
   --animate-spin: spin 0.9s linear infinite;
   --animate-shimmer: shimmer 1.4s ease-in-out infinite;
+  /* The running indicator: a ring that pulses three times when the game starts, then rests (hidden). */
+  --animate-ring: ring 1.6s ease-out 3 forwards;
 
   @keyframes fade-in {
     from {
@@ -130,31 +154,38 @@
   @keyframes pop-in {
     from {
       opacity: 0;
-      transform: scale(0.97);
+      transform: scale(0.96);
     }
   }
   @keyframes pop-out {
     to {
       opacity: 0;
-      transform: scale(0.98);
+      transform: scale(0.97);
     }
   }
   @keyframes sheet-in {
     from {
       opacity: 0.4;
-      transform: translateY(-24px);
+      transform: translateY(-16px) scale(0.98);
     }
   }
   @keyframes sheet-out {
     to {
       opacity: 0;
-      transform: translateY(-16px);
+      transform: translateY(-10px) scale(0.98);
     }
   }
   @keyframes toast-in {
     from {
       opacity: 0;
       transform: translateY(8px) scale(0.98);
+    }
+  }
+  @keyframes enter {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+      filter: blur(2px);
     }
   }
   @keyframes spin {
@@ -167,13 +198,30 @@
       opacity: 0.45;
     }
   }
+  @keyframes ring {
+    from {
+      transform: scale(0.5);
+      opacity: 0.9;
+    }
+    to {
+      transform: scale(1.6);
+      opacity: 0;
+    }
+  }
 }
 
 :root {
-  --accent: light-dark(#8b55d6, #a578ec);
-  /* White on #8b55d6 is 4.8:1 (the dark-mode text accent would only reach 3.2:1). */
-  --accent-fill: #8b55d6;
-  --on-accent: #fff;
+  /* The neutral default accent (lib/theme.ts leaves these alone for it). */
+  --accent: light-dark(#1c1c1f, #ececef);
+  --accent-fill: light-dark(#1c1c1f, #ececef);
+  --on-accent: light-dark(#ffffff, #0f0f11);
+  /* Switch tracks: grey with a window-coloured knob when neutral, the accent with white otherwise. */
+  --accent-switch: light-dark(#8c8c94, #85858e);
+  --on-accent-switch: light-dark(#ffffff, #0f0f11);
+  --focus-ring: color-mix(in srgb, var(--accent) 50%, transparent);
+  /* Spring durations; use as `ease-spring duration-(--duration-spring)`. */
+  --duration-spring: 508ms;
+  --duration-snappy: 316ms;
   color-scheme: light dark;
   font-family: var(--font-sans);
   font-size: var(--text-body);
@@ -209,12 +257,12 @@ textarea {
   cursor: auto;
 }
 
-/* macOS-style focus ring: an accent halo that follows the element's radius. In the base layer so
+/* Focus ring: a soft accent halo that follows the element's radius. In the base layer so
    components can replace it with their own ring (e.g. `outline-none` + a box-shadow). */
 @layer base {
   :focus-visible {
-    outline: 3px solid color-mix(in srgb, var(--accent) 55%, transparent);
-    outline-offset: 0;
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 1px;
   }
   :focus:not(:focus-visible) {
     outline: none;
@@ -222,7 +270,7 @@ textarea {
 }
 
 ::selection {
-  background: color-mix(in srgb, var(--accent) 35%, transparent);
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
 }
 
 /* Thin overlay-style scrollbars. */
@@ -253,7 +301,15 @@ textarea {
   -webkit-app-region: no-drag;
 }
 
+/*
+ * Reduce Motion: springs and morphs become instant (script-driven ones check `reducedMotion()`
+ * in ui/motion.ts), and nothing loops.
+ */
 @media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-spring: 0ms;
+    --duration-snappy: 0ms;
+  }
   *,
   ::before,
   ::after {
@@ -272,6 +328,10 @@ textarea {
   .bg-layer {
     display: none;
   }
+  .glass {
+    background: var(--color-sheet) !important;
+    backdrop-filter: none !important;
+  }
 }
 
 /*
@@ -279,113 +339,40 @@ textarea {
  * regions, so paint an opaque approximation of the sidebar material instead.
  */
 :root[data-screenshot] body {
-  background: light-dark(#e6e4e9, #2a282d);
+  background: light-dark(#ececef, #1f1f22);
 }
 
-/* Source list selection: grey normally, accent while the list has keyboard focus (Finder). */
-.sl-row[aria-current='page'] {
+/* Source list selection: a grey row (or a sliding indicator, when the list draws one). */
+.source-list:not([data-indicator]) .sl-row[aria-current='page'] {
   background: var(--color-selection);
 }
 .sl-row:focus-visible {
-  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 60%, transparent);
-}
-.source-list:has(:focus-visible) .sl-row[aria-current='page'] {
-  background: var(--accent-fill);
-  color: var(--color-on-accent);
-  box-shadow: none;
-}
-.source-list:has(:focus-visible) .sl-row[aria-current='page'] :is(.text-accent, .text-label-2, .text-label-3) {
-  color: color-mix(in srgb, var(--on-accent) 80%, transparent);
-}
-
-/* Secondary text inside an accent-selected table row. */
-[role='grid']:focus [aria-selected='true'] :is(.text-label-2, .text-label-3, .text-accent) {
-  color: color-mix(in srgb, var(--on-accent) 80%, transparent);
-}
-[role='grid']:focus [aria-selected='true'] .row-badge > span {
-  color: var(--on-accent);
-  background: color-mix(in srgb, var(--on-accent) 20%, transparent);
+  outline: none;
+  box-shadow: inset 0 0 0 1.5px var(--focus-ring);
 }
 
 @utility tabular {
   font-variant-numeric: tabular-nums;
 }
 
-/* Sanitised project descriptions and changelogs (routes/markdown.tsx). */
-.md-body {
-  font-size: var(--text-body);
-  line-height: 20px;
-  color: var(--color-label);
-  overflow-wrap: anywhere;
+/* Versions, dates and sizes: monospaced and slightly smaller than the text around them. */
+@utility mono {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
 }
-.md-body > * + * {
-  margin-top: 0.75em;
+
+/* Frosted glass for floating surfaces (palette, popovers, menus, tooltips). Not for scrolling content. */
+@utility glass {
+  background-color: var(--color-raised);
+  backdrop-filter: blur(40px) saturate(1.8);
 }
-.md-body :is(h1, h2, h3, h4) {
-  font-weight: 600;
-  line-height: 1.25;
-  margin-top: 1.2em;
+
+/* A 0.5px inner hairline: controls and tiles. `hairline-strong` for buttons and outlined chips. */
+@utility hairline {
+  box-shadow: inset 0 0 0 0.5px var(--color-separator);
 }
-.md-body h1 {
-  font-size: var(--text-title2);
-}
-.md-body h2 {
-  font-size: var(--text-title3);
-}
-.md-body :is(h3, h4) {
-  font-size: var(--text-body);
-}
-.md-body a {
-  color: var(--color-accent);
-}
-.md-body a:hover {
-  text-decoration: underline;
-}
-.md-body :is(ul, ol) {
-  padding-left: 1.4em;
-}
-.md-body ul {
-  list-style: disc;
-}
-.md-body ol {
-  list-style: decimal;
-}
-.md-body img {
-  display: inline-block;
-  max-width: 100%;
-  height: auto;
-  border-radius: 6px;
-}
-.md-body :is(code, pre) {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: var(--text-callout);
-  background: var(--color-fill);
-  border-radius: 4px;
-}
-.md-body code {
-  padding: 0.1em 0.3em;
-}
-.md-body pre {
-  padding: 8px 10px;
-  overflow-x: auto;
-}
-.md-body pre code {
-  background: none;
-  padding: 0;
-}
-.md-body blockquote {
-  border-left: 3px solid var(--color-separator);
-  padding-left: 10px;
-  color: var(--color-label-2);
-}
-.md-body hr {
-  border: 0;
-  border-top: 1px solid var(--color-separator);
-}
-.md-body table {
-  border-collapse: collapse;
-}
-.md-body :is(td, th) {
-  border: 1px solid var(--color-separator);
-  padding: 3px 6px;
+@utility hairline-strong {
+  box-shadow: inset 0 0 0 0.5px var(--color-separator-2);
 }

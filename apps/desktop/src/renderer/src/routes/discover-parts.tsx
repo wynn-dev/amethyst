@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Check, Download, RotateCcw, Star } from 'lucide-react'
 import type { MarketPlatform, MarketProjectRow, MarketProjectType, MarketVersionRow } from '@shared/services'
-import { Badge, Button, Menu, ProgressRing, cn, type MenuEntry } from '@/ui'
+import { Button, DitherProgress, Menu, cn, type MenuEntry } from '@/ui'
 import { openInstance } from '@/app/commands'
 import { BlockIcon } from '@/app/visuals'
 import { useInstanceRows, runtimeLabel, type RuntimeInstanceRow } from '@/data/instance-info'
@@ -23,8 +23,19 @@ export const TYPE_LABELS: Record<MarketProjectType, { one: string; many: string 
 /** Instance tab that shows a project type's files. */
 export const TAB_FOR_TYPE: Partial<Record<MarketProjectType, 'mods' | 'resource-packs' | 'shaders' | 'worlds'>> = { mod: 'mods', resourcepack: 'resource-packs', shader: 'shaders', world: 'worlds' }
 
-export function SourceBadge({ source }: { source: MarketPlatform }) {
-  return source === 'modrinth' ? <Badge tone="success">Modrinth</Badge> : <Badge tone="warning">CurseForge</Badge>
+/** The platform a project comes from, as quiet text (no coloured badge). */
+export function SourceBadge({ source, className }: { source: MarketPlatform; className?: string }) {
+  return <span className={cn('shrink-0 text-meta text-label-3', className)}>{source === 'modrinth' ? 'Modrinth' : 'CurseForge'}</span>
+}
+
+/** A compact age for mono columns: "now", "5h ago", "3d ago", "4mo ago", "2y ago". */
+export function shortAgo(ts: number, now = Date.now()): string {
+  const s = Math.max(0, now - ts) / 1000
+  if (s < 3600) return 'now'
+  if (s < 86_400) return `${Math.floor(s / 3600)}h ago`
+  if (s < 30 * 86_400) return `${Math.floor(s / 86_400)}d ago`
+  if (s < 365 * 86_400) return `${Math.floor(s / (30 * 86_400))}mo ago`
+  return `${Math.floor(s / (365 * 86_400))}y ago`
 }
 
 export function hueOf(s: string): number {
@@ -57,7 +68,7 @@ export function FavouriteButton({ project, size = 'md' }: { project: Pick<Market
       className={cn(
         'flex shrink-0 items-center justify-center rounded-md hover:bg-fill',
         size === 'md' ? 'size-7 [&_svg]:size-4' : 'size-6 [&_svg]:size-3.5',
-        on ? 'text-yellow' : 'text-label-3 hover:text-label-2',
+        on ? 'text-label' : 'text-label-3 hover:text-label-2',
       )}
     >
       <Star className={cn(on && 'fill-current')} />
@@ -80,35 +91,56 @@ type Project = Pick<MarketProjectRow, 'key' | 'platform' | 'id' | 'title' | 'pro
 
 /**
  * Install button: Install → progress → Installed ✓ (B5). With a target instance it installs
- * there; without one it asks which instance; modpacks create a new instance.
+ * there; without one it asks which instance; modpacks create a new instance. `quiet` is the
+ * outlined form used in result lists (the mockup's `.btn`); the project page keeps the filled one.
  */
-export function InstallButton({ project, target, size = 'md', version, compatible = true }: { project: Project; target?: RuntimeInstanceRow; size?: 'sm' | 'md' | 'lg'; version?: MarketVersionRow; compatible?: boolean }) {
+export function InstallButton({
+  project,
+  target,
+  size = 'md',
+  version,
+  compatible = true,
+  quiet = false,
+}: {
+  project: Project
+  target?: RuntimeInstanceRow
+  size?: 'sm' | 'md' | 'lg'
+  version?: MarketVersionRow
+  compatible?: boolean
+  quiet?: boolean
+}) {
   const { data: instances = [] } = useInstanceRows()
   const state = useInstallState(target?.id, project.key)
   const [modpackBusy, setModpackBusy] = useState(false)
   const task = useRunningTask((t) => (t.name === 'market.install' || t.name === 'modpack.import') && String(t.params.title ?? t.params.name ?? '') === project.title)
   const label = `${project.title}`
+  const variant = quiet ? 'push' : 'primary'
+  const icon = quiet ? undefined : <Download />
 
   if (project.projectType === 'datapack')
     return (
-      <Button size={size} disabled title="Data packs go into a world; installing them from Discover isn’t available yet. Download it from the project page and add it to the world’s datapacks folder.">
-        <Download /> Install
+      <Button size={size} disabled icon={icon} title="Data packs go into a world; installing them from Discover isn’t available yet. Download it from the project page and add it to the world’s datapacks folder.">
+        Install
       </Button>
     )
 
-  if (state?.state === 'installing' || modpackBusy)
+  if (state?.state === 'installing' || modpackBusy) {
+    const fraction = task && task.fraction > 0 ? task.fraction : undefined
+    // The button fills with dithered progress, like Play while it prepares.
     return (
-      <Button size={size} disabled aria-label={`Installing ${label}`}>
-        <ProgressRing size={13} value={task && task.fraction > 0 ? task.fraction : undefined} /> {task && task.fraction > 0 ? `${Math.round(task.fraction * 100)}%` : 'Installing'}
+      <Button size={size} disabled aria-label={`Installing ${label}`} className="min-w-[72px] overflow-hidden !opacity-100 text-label-2">
+        <DitherProgress value={fraction} alpha={0.35} className="absolute inset-0" />
+        <span className="relative tabular">{fraction !== undefined ? `${Math.round(fraction * 100)}%` : 'Installing'}</span>
       </Button>
     )
+  }
 
   if (project.projectType === 'modpack')
     return (
       <Button
         size={size}
-        variant="primary"
-        icon={<Download />}
+        variant={variant}
+        icon={icon}
         onClick={async () => {
           setModpackBusy(true)
           await installModpackProject(project, version)
@@ -122,8 +154,8 @@ export function InstallButton({ project, target, size = 'md', version, compatibl
   const installed = state?.state === 'installed' || (!!target && project.installed && !version)
   if (installed && target)
     return (
-      <Button size={size} variant="borderless" className="text-label-2" onClick={() => openInstance(target.id, TAB_FOR_TYPE[project.projectType ?? 'mod'] ?? 'mods')} title={`Show in “${target.name}”`}>
-        <Check className="text-green" /> Installed
+      <Button size={size} variant={quiet ? 'push' : 'borderless'} className="text-label-2" onClick={() => openInstance(target.id, TAB_FOR_TYPE[project.projectType ?? 'mod'] ?? 'mods')} title={`Show in “${target.name}”`}>
+        <Check className="text-label-3" /> Installed
       </Button>
     )
 
@@ -131,8 +163,8 @@ export function InstallButton({ project, target, size = 'md', version, compatibl
     return (
       <Button
         size={size}
-        variant={state?.state === 'failed' ? 'push' : 'primary'}
-        icon={state?.state === 'failed' ? <RotateCcw /> : <Download />}
+        variant={state?.state === 'failed' ? 'push' : variant}
+        icon={state?.state === 'failed' ? <RotateCcw /> : icon}
         disabled={!compatible || !KIND_FOR_TYPE[project.projectType ?? 'mod']}
         title={!compatible ? `No version supports ${runtimeLabel(target)}` : state?.state === 'failed' ? state.message : undefined}
         onClick={() => void installProject(project, toTarget(target), version)}
@@ -150,7 +182,7 @@ export function InstallButton({ project, target, size = 'md', version, compatibl
     <Menu
       align="end"
       trigger={
-        <Button size={size} variant="primary" icon={<Download />}>
+        <Button size={size} variant={variant} icon={icon}>
           Install…
         </Button>
       }

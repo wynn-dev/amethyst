@@ -219,10 +219,10 @@ export interface VirtualTableProps<T> {
   ref?: Ref<VirtualListHandle>
 }
 
-const HEADER_HEIGHT = 26
+const HEADER_HEIGHT = 28
 
 /**
- * A native-feeling table: sticky sortable header, alternating rows, macOS selection semantics
+ * A native-feeling table: sticky frosted sortable header, hairline-separated rows, macOS selection semantics
  * (click, ⌘-click, ⇧-click, ⌘A, arrows, Home/End), Space/Return/Delete hooks, a column
  * visibility menu on the header, and row context menus. Rows are virtualised.
  */
@@ -241,7 +241,7 @@ export function VirtualTable<T>({
   onSortChange,
   hiddenColumns = EMPTY,
   onHiddenColumnsChange,
-  rowHeight = 28,
+  rowHeight = 32,
   className,
   rowClassName,
   initialRect,
@@ -379,7 +379,7 @@ export function VirtualTable<T>({
     <div
       role="row"
       aria-rowindex={1}
-      className="sticky top-0 z-10 grid items-center border-b border-separator bg-window/90 backdrop-blur-xl"
+      className="sticky top-0 z-10 grid items-center border-b border-separator bg-window/72 backdrop-blur-[14px] backdrop-saturate-[1.6]"
       style={{ gridTemplateColumns: template, height: HEADER_HEIGHT }}
     >
       {visible.map((c, i) => {
@@ -395,7 +395,7 @@ export function VirtualTable<T>({
             key={c.id}
             role="columnheader"
             aria-sort={sorted ? (sorted === 'asc' ? 'ascending' : 'descending') : c.sortValue ? 'none' : undefined}
-            className={cn('h-full min-w-0 text-small font-medium text-label-2', i > 0 && 'border-l border-separator')}
+            className={cn('h-full min-w-0 text-small text-label-3', i === 0 && 'pl-2')}
           >
             {c.sortValue && onSortChange ? (
               <button
@@ -404,7 +404,7 @@ export function VirtualTable<T>({
                 onClick={() =>
                   onSortChange(sorted === 'asc' ? { column: c.id, direction: 'desc' } : sorted === 'desc' ? null : { column: c.id, direction: 'asc' })
                 }
-                className="flex h-full w-full items-center px-2 hover:bg-fill"
+                className={cn('flex h-full w-full items-center px-2 hover:text-label-2', sorted && 'text-label-2')}
               >
                 {content}
               </button>
@@ -450,8 +450,8 @@ export function VirtualTable<T>({
           }
           if (label != null) {
             return (
-              <div key={v.key} role="row" aria-rowindex={v.index + 2} style={style} className="flex items-end border-b border-separator px-2 pb-1">
-                <div role="gridcell" aria-colspan={visible.length} className="text-small font-semibold text-label-2">
+              <div key={v.key} role="row" aria-rowindex={v.index + 2} style={style} className="flex items-end border-b border-separator px-4 pb-1.5">
+                <div role="gridcell" aria-colspan={visible.length} className="text-small font-semibold text-label-3">
                   {label}
                 </div>
               </div>
@@ -526,17 +526,17 @@ const TableRow = memo(function TableRow<T>({ rowKey, index, top, height, templat
       onDoubleClick={() => onDoubleClick(row)}
       style={{ position: 'absolute', top: 0, left: 0, width: '100%', height, transform: `translateY(${top}px)`, gridTemplateColumns: template }}
       className={cn(
-        'grid items-center text-body',
-        index % 2 === 1 && 'bg-row-alt',
-        selected && 'bg-selection group-focus/table:bg-accent-fill group-focus/table:text-on-accent',
+        'grid items-center border-b border-separator text-compact',
+        // Selection stays grey (a slightly firmer grey while the table has focus), never an accent slab.
+        selected ? 'bg-selection group-focus/table:bg-fill-2' : 'hover:bg-hover',
         className,
       )}
     >
-      {columns.map((c) => (
+      {columns.map((c, i) => (
         <div
           key={c.id}
           role="gridcell"
-          className={cn('flex min-w-0 items-center px-2', c.align === 'end' && 'justify-end tabular', c.align === 'center' && 'justify-center')}
+          className={cn('flex min-w-0 items-center px-2', i === 0 && 'pl-4', c.align === 'end' && 'justify-end tabular', c.align === 'center' && 'justify-center')}
         >
           {c.cell(row)}
         </div>

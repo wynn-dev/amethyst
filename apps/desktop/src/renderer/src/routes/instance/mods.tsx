@@ -1,9 +1,8 @@
 import { useCallback, useDeferredValue, useMemo, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { AlertTriangle, ArrowUpCircle, Blocks, Check, ExternalLink, ListFilter, Plus, Trash2 } from 'lucide-react'
+import { AlertTriangle, Blocks, Check, ChevronDown, ExternalLink, ListFilter, Plus, Trash2 } from 'lucide-react'
 import type { MarketPlatform, ModAnalysis, ResourceRow, UpdateCandidate } from '@shared/services'
 import {
-  Badge,
   Banner,
   Button,
   Checkbox,
@@ -13,9 +12,9 @@ import {
   Popover,
   RadioList,
   SearchField,
-  Segmented,
   Sheet,
   SkeletonRows,
+  Spinner,
   Switch,
   TextField,
   VirtualTable,
@@ -24,10 +23,11 @@ import {
   type MenuEntry,
   type SortState,
 } from '@/ui'
+import { ChipGroup, ToggleChip, chipButtonClass } from '@/ui/Chips'
 import { QueryError } from '@/app/RouteStates'
 import { openInstance } from '@/app/commands'
 import { findTargetRef } from '@/app/ui-store'
-import { formatBytes, formatDate } from '@/app/visuals'
+import { formatBytes } from '@/app/visuals'
 import { addResourceFiles, setResourcesEnabled, trashResources, useModAnalysis, usePagedResources, useResourceDetail, useWatchInstance, type ListQuery } from '@/data/content'
 import { useInstanceInfo } from '@/data/instance-info'
 import { applyUpdates, projectKey, useUpdateCandidates } from '@/data/market'
@@ -38,6 +38,7 @@ import { toastError } from '@/lib/error-messages'
 import { revealInFinder } from '@/lib/files'
 import {
   AddFromInstanceSheet,
+  ContentBar,
   CountLabel,
   DropOverlay,
   FileSection,
@@ -49,13 +50,16 @@ import {
   TrashConfirm,
   isPlaceholder,
   realIds,
+  shortDate,
   useFileDrop,
+  useResourceCount,
   useTableRows,
   type ContentRow,
 } from './content-parts'
-import { InspectorHeader, InspectorSection, SplitView, SubToolbar, copyText, sideLabel, useInstanceId, useSelection } from './parts'
+import { InspectorHeader, InspectorSection, SplitView, copyText, sideLabel, useInstanceId, useSelection } from './parts'
 import { UpdatesSheet } from './updates-sheet'
 
+/** The radio chips; "has an update" is a separate toggle chip that combines with them. */
 type Show = 'all' | 'enabled' | 'disabled'
 type SourceFilter = MarketPlatform | 'local'
 interface Filters {
@@ -67,6 +71,8 @@ interface Filters {
 const ALL_SOURCES: SourceFilter[] = ['modrinth', 'curseforge', 'local']
 const SOURCE_LABEL: Record<SourceFilter, string> = { modrinth: 'Modrinth', curseforge: 'CurseForge', local: 'Local files' }
 const DEFAULT_FILTERS: Filters = { show: 'all', hasUpdate: false, problems: false, sources: new Set(ALL_SOURCES) }
+/** Columns hidden until the user shows them from the header's context menu. */
+const DEFAULT_HIDDEN = ['side', 'size']
 /** Columns the runtime can sort by. */
 const SORTS: Record<string, ListQuery['sort']> = { name: 'name', size: 'size', modified: 'modified' }
 
@@ -94,7 +100,7 @@ export default function ModsTab() {
   const search = useDeferredValue(query.trim())
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS)
   const [sort, setSort] = useState<SortState>(null)
-  const [hidden, setHidden] = useState<Set<string>>(() => new Set(['modified']))
+  const [hidden, setHidden] = useState<Set<string>>(() => new Set(DEFAULT_HIDDEN))
   const [pendingTrash, setPendingTrash] = useState<string[] | null>(null)
   const [problemsOpen, setProblemsOpen] = useState(false)
   const [updatesOpen, setUpdatesOpen] = useState(false)
@@ -108,10 +114,13 @@ export default function ModsTab() {
   const problems = useMemo(() => problemIndex(analysis.data), [analysis.data])
   const updates = useUpdateCandidates(id, 'mods', checked)
   const updateById = useMemo(() => new Map((updates.data ?? []).map((u) => [u.resourceId, u])), [updates.data])
+  // The Updates chip filters on results already known (cached from a check); it never checks itself.
+  const updatesKnown = updates.data !== undefined
+  const hasUpdate = filters.hasUpdate && updatesKnown
 
   const listQuery = useMemo<ListQuery>(() => {
     let ids: string[] | undefined
-    if (filters.hasUpdate) ids = [...updateById.keys()]
+    if (hasUpdate) ids = [...updateById.keys()]
     if (filters.problems) ids = (ids ?? [...problems.keys()]).filter((x) => problems.has(x))
     return {
       ...(search ? { search } : {}),
@@ -120,9 +129,10 @@ export default function ModsTab() {
       ...(ids ? { ids } : {}),
       ...(filters.sources.size < ALL_SOURCES.length ? { sources: [...filters.sources] } : {}),
     }
-  }, [search, sort, filters, updateById, problems])
+  }, [search, sort, filters, hasUpdate, updateById, problems])
   const list = usePagedResources(id, 'mods', listQuery)
   const unfiltered = usePagedResources(id, 'mods', {})
+  const disabledCount = useResourceCount(id, 'mods', { enabled: false }, !vanilla)
   const rows = useTableRows(list)
   const byId = useMemo(() => new Map(list.rows.flatMap((r) => (r ? [[r.id, r] as const] : []))), [list.rows])
   const { request } = list
@@ -147,15 +157,16 @@ export default function ModsTab() {
     if (paths.length) await addResourceFiles(id, 'mods', paths)
   }
 
+  // Disabled rows dim their name and version (cells marked `data-dim`), not the switch.
   const columns = useMemo<Column<ContentRow>[]>(
     () => [
       {
         id: 'enabled',
         title: 'Enabled',
         header: <span className="sr-only">Enabled</span>,
-        width: '34px',
+        width: '42px',
         align: 'center',
-        cell: (m) => (isPlaceholder(m) ? null : <Checkbox checked={m.enabled} aria-label={`Enable ${m.name}`} onCheckedChange={(on) => void setResourcesEnabled(id, 'mods', [m.id], on)} />),
+        cell: (m) => (isPlaceholder(m) ? null : <Switch size="sm" checked={m.enabled} aria-label={`Enable ${m.name}`} onCheckedChange={(on) => void setResourcesEnabled(id, 'mods', [m.id], on)} />),
       },
       {
         id: 'name',
@@ -163,45 +174,66 @@ export default function ModsTab() {
         header: 'Name',
         width: 'minmax(220px,1fr)',
         sortValue: () => 0,
-        cell: (m) =>
-          isPlaceholder(m) ? (
-            <PlaceholderCell index={m.index} request={request} />
-          ) : (
-            <div className="flex min-w-0 items-center gap-2.5">
-              <ResourceIcon row={m} />
-              <div className="flex min-w-0 flex-col">
-                <span className="flex items-center gap-1.5 truncate">
-                  <span className="truncate">{m.name}</span>
-                  {(problems.get(m.id) || m.problem) && (
-                    <span title={(problems.get(m.id) ?? ['broken']).map((p) => PROBLEM_LABEL[p]).join(', ')} className="flex text-orange">
-                      <AlertTriangle aria-label={(problems.get(m.id) ?? ['broken']).map((p) => PROBLEM_LABEL[p]).join(', ')} className="size-3" />
-                    </span>
-                  )}
-                </span>
-                <span className="truncate text-small text-label-2">{m.pending ? 'Reading…' : m.version || m.fileName}</span>
-              </div>
-            </div>
-          ),
-      },
-      { id: 'source', title: 'Source', header: 'Source', width: '96px', hideable: true, cell: (m) => (isPlaceholder(m) ? null : <RowSource row={m} />) },
-      {
-        id: 'update',
-        title: 'Update',
-        header: 'Update',
-        width: '108px',
-        hideable: true,
         cell: (m) => {
-          const u = isPlaceholder(m) ? undefined : updateById.get(m.id)
-          return u ? (
-            <span className="flex min-w-0 items-center gap-1 text-small text-accent" title={`Update to ${u.latest.versionNumber}`}>
-              <ArrowUpCircle className="size-3.5 shrink-0" /> <span className="truncate">{u.latest.versionNumber}</span>
-            </span>
-          ) : null
+          if (isPlaceholder(m)) return <PlaceholderCell index={m.index} request={request} />
+          const issues = problems.get(m.id) ?? (m.problem ? (['broken'] as ProblemKind[]) : undefined)
+          const label = issues?.map((p) => PROBLEM_LABEL[p]).join(', ')
+          return (
+            <div className="flex min-w-0 items-center gap-[9px]">
+              <span data-dim className="flex shrink-0">
+                <ResourceIcon row={m} />
+              </span>
+              <span data-dim className="flex min-w-0 items-baseline gap-2">
+                <span className="truncate font-medium">{m.name}</span>
+                {m.authors.length > 0 && <span className="truncate text-meta text-label-3">{m.authors.join(', ')}</span>}
+              </span>
+              {label && (
+                <span title={label} className="flex shrink-0 text-orange">
+                  <AlertTriangle aria-label={label} className="size-3" />
+                </span>
+              )}
+            </div>
+          )
         },
       },
-      { id: 'side', title: 'Side', header: 'Side', width: '64px', hideable: true, cell: (m) => (isPlaceholder(m) || !m.side ? null : <span className="text-label-2">{sideLabel[m.side]}</span>) },
-      { id: 'size', title: 'Size', header: 'Size', width: '76px', align: 'end', hideable: true, sortValue: () => 0, cell: (m) => (isPlaceholder(m) ? null : <span className="text-label-2">{formatBytes(m.size)}</span>) },
-      { id: 'modified', title: 'Date Added', header: 'Date Added', width: '104px', align: 'end', hideable: true, sortValue: () => 0, cell: (m) => (isPlaceholder(m) || !m.mtimeMs ? null : <span className="text-label-2">{formatDate(m.mtimeMs)}</span>) },
+      {
+        id: 'version',
+        title: 'Version',
+        header: 'Version',
+        width: '160px',
+        hideable: true,
+        cell: (m) => {
+          if (isPlaceholder(m)) return null
+          const u = updateById.get(m.id)
+          const current = m.pending ? 'Reading…' : m.version || '—'
+          return (
+            <span data-dim className="flex min-w-0 items-baseline gap-[5px] mono text-label-2" title={u ? `Update available: ${u.latest.versionNumber}` : m.version || m.fileName}>
+              <span className="truncate">{current}</span>
+              {u && (
+                <>
+                  <span aria-hidden className="shrink-0 text-accent">
+                    →
+                  </span>
+                  <span className="sr-only">updates to</span>
+                  <span className="truncate text-label">{u.latest.versionNumber}</span>
+                </>
+              )}
+            </span>
+          )
+        },
+      },
+      { id: 'source', title: 'Source', header: 'Source', width: '92px', hideable: true, cell: (m) => (isPlaceholder(m) ? null : <RowSource row={m} />) },
+      { id: 'side', title: 'Side', header: 'Side', width: '64px', hideable: true, cell: (m) => (isPlaceholder(m) || !m.side ? null : <span className="text-meta text-label-2">{sideLabel[m.side]}</span>) },
+      { id: 'size', title: 'Size', header: 'Size', width: '76px', align: 'end', hideable: true, sortValue: () => 0, cell: (m) => (isPlaceholder(m) ? null : <span className="mono text-label-2">{formatBytes(m.size)}</span>) },
+      {
+        id: 'modified',
+        title: 'Date Added',
+        header: 'Added',
+        width: '84px',
+        hideable: true,
+        sortValue: () => 0,
+        cell: (m) => (isPlaceholder(m) || !m.mtimeMs ? null : <span className="pr-1 mono text-label-2">{shortDate(m.mtimeMs)}</span>),
+      },
     ],
     [id, request, problems, updateById],
   )
@@ -246,7 +278,8 @@ export default function ModsTab() {
     )
   }
 
-  const filterCount = (filters.show !== 'all' ? 1 : 0) + (filters.hasUpdate ? 1 : 0) + (filters.problems ? 1 : 0) + (filters.sources.size < ALL_SOURCES.length ? 1 : 0)
+  // The chips show "show" and "has update"; the Filter popover counts what it holds.
+  const filterCount = (filters.problems ? 1 : 0) + (filters.sources.size < ALL_SOURCES.length ? 1 : 0)
   const selected = only ? byId.get(only) : undefined
   const a = analysis.data
   const summary = [
@@ -261,7 +294,7 @@ export default function ModsTab() {
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col" {...drop.props}>
-      <SubToolbar
+      <ContentBar
         trailing={
           <>
             <Button
@@ -270,35 +303,61 @@ export default function ModsTab() {
                 setUpdatesOpen(true)
               }}
             >
-              Check for Updates{updateById.size ? ` (${updateById.size})` : ''}
+              {updateById.size ? 'Update All…' : 'Check for Updates'}
             </Button>
-            <Button variant="primary" icon={<Plus />} onClick={browse}>
-              Add Mods
-            </Button>
-            <Menu
-              align="end"
-              items={[
-                { label: 'Add from Files…', onSelect: () => void addFiles() },
-                { label: 'Paste URL…', onSelect: () => setPasteUrl(true) },
-                { label: 'Add from Another Instance…', onSelect: () => setFromInstance(true) },
-              ]}
-              trigger={
-                <IconButton label="More ways to add" variant="push" size="sm" className="!size-6">
-                  <Plus />
-                </IconButton>
-              }
-            />
+            <div className="flex">
+              <Button variant="primary" icon={<Plus />} onClick={browse} className="!rounded-r-none">
+                Add Mods
+              </Button>
+              <Menu
+                align="end"
+                items={[
+                  { label: 'Add from Files…', onSelect: () => void addFiles() },
+                  { label: 'Paste URL…', onSelect: () => setPasteUrl(true) },
+                  { label: 'Add from Another Instance…', onSelect: () => setFromInstance(true) },
+                ]}
+                trigger={
+                  <IconButton label="More ways to add" variant="primary" tooltip={false} className="ml-px !h-[26px] !w-[22px] !rounded-l-none">
+                    <ChevronDown />
+                  </IconButton>
+                }
+              />
+            </div>
           </>
         }
       >
-        <SearchField ref={findTargetRef} value={query} onValueChange={setQuery} placeholder="Search mods" className="w-[220px]" />
+        <SearchField ref={findTargetRef} value={query} onValueChange={setQuery} placeholder="Filter mods" label="Search mods" className="mr-1 w-[190px]" />
+        <ChipGroup<Show>
+          aria-label="Show"
+          value={filters.show}
+          onValueChange={(show) => setFilters({ ...filters, show })}
+          options={[
+            { value: 'all', label: 'All', count: total },
+            { value: 'enabled', label: 'Enabled', count: disabledCount === undefined ? undefined : total - disabledCount },
+            { value: 'disabled', label: 'Disabled', count: disabledCount },
+          ]}
+        />
+        <ToggleChip
+          pressed={hasUpdate}
+          onPressedChange={(on) => setFilters({ ...filters, hasUpdate: on })}
+          count={updatesKnown ? updateById.size : undefined}
+          disabled={!updatesKnown}
+          title={updatesKnown ? 'Show only mods with an update' : 'Check for Updates first'}
+        >
+          Updates
+        </ToggleChip>
         <FilterPopover filters={filters} onChange={setFilters} count={filterCount} />
-        {!list.isPending && <CountLabel kind="mods" total={list.total} all={total} selected={selection.size} />}
+        {!list.isPending && (list.total !== total || selection.size > 1) && <CountLabel kind="mods" total={list.total} all={total} selected={selection.size} />}
+        {checked && updates.isFetching && (
+          <span className="flex items-center gap-1.5 pl-1 text-meta text-label-2" role="status">
+            <Spinner size={11} /> Checking for updates…
+          </span>
+        )}
         <ScanningNote scanning={list.scanning} />
-      </SubToolbar>
+      </ContentBar>
 
       {summary.length > 0 && (
-        <div className="shrink-0 px-3 pt-2.5">
+        <div className="shrink-0 px-4 pb-2.5">
           <Banner
             tone="warning"
             title={summary.join(' · ')}
@@ -327,13 +386,11 @@ export default function ModsTab() {
               onOpenProject={() => openProject(selected)}
               names={names}
             />
-          ) : (
-            <p className="m-auto px-6 text-center text-body text-label-3">Select a mod to see its details</p>
-          )
+          ) : undefined
         }
       >
         {list.isPending ? (
-          <SkeletonRows rows={12} className="pt-2" />
+          <SkeletonRows rows={12} />
         ) : list.isError ? (
           <QueryError error={list.error} onRetry={list.refetch} what="mods" />
         ) : total === 0 ? (
@@ -370,7 +427,7 @@ export default function ModsTab() {
             rows={rows}
             columns={columns}
             getKey={(m) => m.id}
-            rowHeight={40}
+            rowHeight={32}
             selection={selection}
             onSelectionChange={setSelection}
             onToggle={toggle}
@@ -380,7 +437,7 @@ export default function ModsTab() {
             onSortChange={setSort}
             hiddenColumns={hidden}
             onHiddenColumnsChange={setHidden}
-            rowClassName={(m) => (!isPlaceholder(m) && !m.enabled ? 'opacity-55' : undefined)}
+            rowClassName={(m) => (!isPlaceholder(m) && !m.enabled ? '[&_[data-dim]]:opacity-45' : undefined)}
             className="flex-1"
           />
         )}
@@ -412,29 +469,18 @@ function FilterPopover({ filters, onChange, count }: { filters: Filters; onChang
     <Popover
       label="Filter mods"
       align="start"
-      width={260}
+      width={248}
       trigger={
-        <Button variant={count ? 'push' : 'borderless'} icon={<ListFilter />} className={cn(count > 0 && 'text-accent')} aria-label={count ? `Filters, ${count} active` : 'Filters'}>
-          Filter{count ? ` (${count})` : ''}
-        </Button>
+        <button type="button" className={cn(chipButtonClass, 'ml-1', count > 0 && 'text-label')} aria-label={count ? `Filters, ${count} active` : 'Filters'}>
+          <ListFilter />
+          Filter
+          {count > 0 && <span className="font-mono text-[10.5px] text-label-3 tabular">{count}</span>}
+        </button>
       }
     >
-      <div className="flex flex-col gap-3 p-3.5">
+      <div className="flex flex-col gap-3 p-3">
         <div className="flex flex-col gap-1.5">
-          <span className="text-small font-semibold text-label-2">Show</span>
-          <Segmented
-            aria-label="Show"
-            value={filters.show}
-            onValueChange={(show) => onChange({ ...filters, show })}
-            options={[
-              { value: 'all', label: 'All' },
-              { value: 'enabled', label: 'Enabled' },
-              { value: 'disabled', label: 'Disabled' },
-            ]}
-          />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <Checkbox checked={filters.hasUpdate} onCheckedChange={(hasUpdate) => onChange({ ...filters, hasUpdate })} label="Has update" description="After “Check for Updates”" />
+          <span className="text-meta font-semibold text-label-2">Problems</span>
           <Checkbox
             checked={filters.problems}
             onCheckedChange={(problems) => onChange({ ...filters, problems })}
@@ -443,7 +489,7 @@ function FilterPopover({ filters, onChange, count }: { filters: Filters; onChang
           />
         </div>
         <div className="flex flex-col gap-1.5">
-          <span className="text-small font-semibold text-label-2">Source</span>
+          <span className="text-meta font-semibold text-label-2">Source</span>
           {ALL_SOURCES.map((s) => (
             <Checkbox
               key={s}
@@ -459,7 +505,7 @@ function FilterPopover({ filters, onChange, count }: { filters: Filters; onChang
           ))}
         </div>
         {count > 0 && (
-          <Button variant="link" className="self-start" onClick={() => onChange(DEFAULT_FILTERS)}>
+          <Button variant="link" className="self-start" onClick={() => onChange({ ...filters, problems: false, sources: new Set(ALL_SOURCES) })}>
             Reset Filters
           </Button>
         )}
@@ -497,26 +543,26 @@ function ModInspector({
   const links = d ? (Object.entries(d.links).filter(([, url]) => url && /^https:\/\//i.test(url)) as [string, string][]) : []
   return (
     <>
-      <InspectorHeader icon={<ResourceIcon row={mod} size={44} />} title={mod.name} subtitle={mod.authors.length ? `by ${mod.authors.join(', ')}` : mod.fileName} />
+      <InspectorHeader icon={<ResourceIcon row={mod} size={40} />} title={mod.name} subtitle={mod.authors.length ? `by ${mod.authors.join(', ')}` : mod.fileName} />
       <div className="flex items-center justify-between px-4 pb-3">
-        <label htmlFor="mod-enabled" className="text-body">
+        <label htmlFor="mod-enabled" className="text-compact">
           Enabled
         </label>
         <Switch id="mod-enabled" checked={mod.enabled} onCheckedChange={(on) => void setResourcesEnabled(instanceId, 'mods', [mod.id], on)} />
       </div>
       <InspectorSection>
-        <p className="text-callout whitespace-pre-line text-label">{d?.description || mod.summary || (mod.pending ? 'Reading the file…' : 'No description.')}</p>
+        <p className="text-compact whitespace-pre-line text-label-2">{d?.description || mod.summary || (mod.pending ? 'Reading the file…' : 'No description.')}</p>
         <ProblemNote row={mod} />
         {problems.map((p) => (
-          <p key={p} className="mt-2 flex items-center gap-1.5 text-callout text-orange">
+          <p key={p} className="mt-2 flex items-center gap-1.5 text-compact text-orange">
             <AlertTriangle className="size-3.5 shrink-0" /> {p}
           </p>
         ))}
         {links.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
             {links.map(([label, url]) => (
-              <button key={label} type="button" className="flex items-center gap-1 text-callout text-accent hover:underline" onClick={() => openExternal(url)}>
-                {label === 'homepage' ? 'Website' : label === 'issues' ? 'Issues' : 'Source'} <ExternalLink className="size-3" />
+              <button key={label} type="button" className="flex items-center gap-1 text-meta text-label hover:underline" onClick={() => openExternal(url)}>
+                {label === 'homepage' ? 'Website' : label === 'issues' ? 'Issues' : 'Source'} <ExternalLink className="size-3 text-label-3" />
               </button>
             ))}
           </div>
@@ -524,7 +570,7 @@ function ModInspector({
       </InspectorSection>
       <InspectorSection title="Version">
         <div className="flex items-center justify-between gap-2">
-          <span className="min-w-0 truncate text-body">{mod.version || '—'}</span>
+          <span className="min-w-0 truncate mono">{mod.version || '—'}</span>
           {update ? (
             <Button size="sm" variant="primary" onClick={() => void applyUpdates(instanceId, 'mods', [update], { [mod.id]: mod.name })}>
               Update to {update.latest.versionNumber}
@@ -537,21 +583,21 @@ function ModInspector({
         </div>
         <div className="mt-1.5 flex items-center gap-1.5">
           <RowSource row={mod} />
-          {mod.side && <span className="text-small text-label-2">{sideLabel[mod.side]} side</span>}
-          {d?.license && <span className="truncate text-small text-label-2">· {d.license}</span>}
+          {mod.side && <span className="text-meta text-label-2">· {sideLabel[mod.side]} side</span>}
+          {d?.license && <span className="truncate text-meta text-label-2">· {d.license}</span>}
         </div>
       </InspectorSection>
       <InspectorSection title="Dependencies">
         {deps.length === 0 ? (
-          <p className="text-callout text-label-3">None</p>
+          <p className="text-compact text-label-3">None</p>
         ) : (
           <ul className="flex flex-col gap-1">
             {deps.map((dep) => {
               const ok = !missing.has(dep.modId.toLowerCase())
               return (
-                <li key={dep.modId} className="flex h-6 items-center gap-1.5 text-callout">
-                  {ok ? <Check className="size-3.5 text-green" aria-label="Installed" /> : <AlertTriangle className="size-3.5 text-orange" aria-label="Missing" />}
-                  <span className="flex-1 truncate font-mono text-small">{dep.modId}</span>
+                <li key={dep.modId} className="flex h-6 items-center gap-1.5">
+                  {ok ? <Check className="size-3.5 text-label-3" aria-label="Installed" /> : <AlertTriangle className="size-3.5 text-orange" aria-label="Missing" />}
+                  <span className="flex-1 truncate mono">{dep.modId}</span>
                   {!ok && <InstallDependencyButton instanceId={instanceId} modId={dep.modId} />}
                 </li>
               )
@@ -561,7 +607,7 @@ function ModInspector({
       </InspectorSection>
       {dependents.length > 0 && (
         <InspectorSection title="Required by">
-          <p className="text-callout">{dependents.map((x) => names[x]?.name ?? x).join(', ')}</p>
+          <p className="text-compact">{dependents.map((x) => names[x]?.name ?? x).join(', ')}</p>
         </InspectorSection>
       )}
       <FileSection row={mod} detail={d} />
@@ -587,15 +633,17 @@ function InstallDependencyButton({ instanceId, modId }: { instanceId: string; mo
 function MultiInspector({ count, onToggle, onTrash }: { count: number; onToggle: () => void; onTrash: () => void }) {
   return (
     <div className="flex flex-col items-center gap-3 px-6 py-10 text-center">
-      <Blocks className="size-10 text-label-3" />
-      <p className="text-title3 font-semibold">{count} mods selected</p>
+      <Blocks className="size-7 text-label-3" strokeWidth={1.5} />
+      <p className="text-headline font-semibold">
+        <span className="tabular">{count}</span> mods selected
+      </p>
       <div className="flex gap-2">
         <Button onClick={onToggle}>Enable/Disable</Button>
         <Button variant="destructive" onClick={onTrash}>
           Move to Trash…
         </Button>
       </div>
-      <p className="text-small text-label-2">Press Space to toggle, ⌘⌫ to move to the Trash.</p>
+      <p className="text-meta text-label-2">Press Space to toggle, ⌘⌫ to move to the Trash.</p>
     </div>
   )
 }
@@ -684,7 +732,7 @@ function ProblemsSheet({
               {a.incompatible.map((m) => (
                 <li key={`${m.id}:${m.with ?? ''}`} className="flex items-center gap-2 text-body">
                   <span className="min-w-0 flex-1">
-                    {name(m.id)} <Badge tone="warning">{m.reason === 'loader' ? m.message : `Conflicts with ${name(m.with ?? '')}`}</Badge>
+                    {name(m.id)} <span className="text-meta text-orange">{m.reason === 'loader' ? m.message : `Conflicts with ${name(m.with ?? '')}`}</span>
                   </span>
                   <Button size="md" onClick={() => void setResourcesEnabled(instanceId, 'mods', [m.id], false)}>
                     Disable

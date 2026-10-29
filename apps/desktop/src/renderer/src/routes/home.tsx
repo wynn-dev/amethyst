@@ -1,32 +1,31 @@
 import { useEffect } from 'react'
 import { Link } from '@tanstack/react-router'
-import { ChevronRight, Clock, Compass, FolderInput, Package, Play, Plus, Square, Timer } from 'lucide-react'
-import { Badge, Button, EmptyState, IconButton, Skeleton, ToolbarTitle } from '@/ui'
-import { useInstanceActions, useInstances, versionLabel } from '@/data/instances'
-import { useAccounts } from '@/data/accounts'
+import { Compass, FolderInput, Package, Play, Plus, Square } from 'lucide-react'
+import { Button, Dot, EmptyState, IconButton, Skeleton, Spinner, ToolbarTitle, flight } from '@/ui'
+import { loaderName, useInstanceActions, useInstances } from '@/data/instances'
 import { useHomeUpdates } from '@/data/home'
-import { STEP_LABELS } from '@/data/launch'
 import { useInstanceTask } from '@/data/tasks'
 import type { InstanceSummary } from '@/data/types'
 import { PageToolbar } from '@/app/PageToolbar'
 import { QueryError } from '@/app/RouteStates'
 import { openInstance, runCommand } from '@/app/commands'
 import { useUi } from '@/app/ui-store'
-import { BlockIcon, formatDuration, formatRelative } from '@/app/visuals'
-import { SkinHead } from '@/app/skin/SkinHead'
+import { BlockIcon, formatRelative } from '@/app/visuals'
 import { InstanceStateIndicator } from '@/app/AppSidebar'
 import { markOnce } from '@/lib/perf'
+import { Card, RowText, cardRowClass } from './instance/parts'
 
-/** Home (B3.1): continue playing, recent instances, updates. No dashboard grid. */
+/** Instances listed under "Jump back in" (B3.1: up to 8 recent ones; the sidebar has them all). */
+const RECENT = 8
+
+/** Home (B3.1): jump back into recent instances, and updates. No dashboard grid, no hero. */
 export function HomePage() {
   const instances = useInstances()
   const list = instances.data ?? []
   const played = list.filter((i) => i.lastPlayedAt).toSorted((a, b) => (b.lastPlayedAt ?? 0) - (a.lastPlayedAt ?? 0))
   const fresh = list.filter((i) => !i.lastPlayedAt).toSorted((a, b) => b.createdAt - a.createdAt)
-  // Never-played instances still get a hero and a card, newest first.
-  const ordered = [...played, ...fresh]
-  const hero = ordered[0]
-  const cards = ordered.slice(1, 9)
+  // Never-played instances follow the played ones, newest first.
+  const recent = [...played, ...fresh].slice(0, RECENT)
   // Startup timing: Home shows the instances (docs/PERFORMANCE.md).
   useEffect(() => {
     if (!instances.isPending) markOnce('home-instances')
@@ -43,19 +42,13 @@ export function HomePage() {
         ) : list.length === 0 ? (
           <FirstInstance />
         ) : (
-          <div className="mx-auto flex max-w-[1040px] flex-col gap-8 px-8 pt-6 pb-10">
-            {hero && <ContinuePlaying inst={hero} />}
-            {cards.length > 0 && (
-              <section aria-labelledby="recent-h">
-                <SectionHeader id="recent-h" title={played.length > 1 ? 'Recent Instances' : 'Your Instances'} />
-                <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3">
-                  {cards.map((i) => (
-                    <InstanceCard key={i.id} inst={i} />
-                  ))}
-                </div>
-              </section>
-            )}
-            <Updates />
+          <div className="flex flex-col gap-3 px-4 pt-3.5 pb-[18px]">
+            <Card title="Jump back in">
+              {recent.map((i) => (
+                <RecentRow key={i.id} inst={i} />
+              ))}
+            </Card>
+            <Updates instances={list} />
           </div>
         )}
       </div>
@@ -63,178 +56,131 @@ export function HomePage() {
   )
 }
 
-function SectionHeader({ id, title, action }: { id: string; title: string; action?: React.ReactNode }) {
-  return (
-    <div className="mb-2.5 flex items-baseline justify-between">
-      <h2 id={id} className="text-title3 font-semibold">
-        {title}
-      </h2>
-      {action}
-    </div>
-  )
+/**
+ * "1.21.1 · Fabric 0.16.9". No content counts: those would scan every listed instance's folders
+ * at startup, and Home makes no `resources.*` calls.
+ */
+function metaLine(inst: InstanceSummary): string {
+  const modded = inst.loader.kind !== 'vanilla'
+  return [inst.minecraft || 'Unknown version', modded ? [loaderName(inst.loader.kind), inst.loader.version].filter(Boolean).join(' ') : 'Vanilla'].join(' · ')
 }
 
-function PlayButton({ inst, size = 'lg' }: { inst: InstanceSummary; size?: 'lg' | 'xl' | 'md' }) {
+/** One instance: art, name, meta and last played. The row opens the instance; the trailing button plays it. */
+function RecentRow({ inst }: { inst: InstanceSummary }) {
   const actions = useInstanceActions()
-  const set = useUi((s) => s.set)
-  const progress = useInstanceTask(inst.state.kind === 'installing' ? inst.id : undefined)
-  switch (inst.state.kind) {
-    case 'running':
-      return (
-        <Button size={size} icon={<Square className="fill-current" />} onClick={() => actions.stop(inst)}>
-          Stop
-        </Button>
-      )
-    case 'launching':
-      return (
-        <Button size={size} onClick={() => actions.cancel(inst)} title="Click to cancel">
-          {inst.state.step ? `${STEP_LABELS[inst.state.step]}…` : 'Launching…'}
-        </Button>
-      )
-    case 'installing':
-      return (
-        <Button size={size} className="tabular" onClick={() => set({ activity: true })}>
-          {progress === undefined ? 'Installing…' : `Installing ${Math.round(progress * 100)}%`}
-        </Button>
-      )
-    case 'problem':
-      return (
-        <Button size={size} onClick={() => openInstance(inst.id, 'overview')}>
-          Show Problem
-        </Button>
-      )
-    default:
-      return (
-        <Button size={size} variant="primary" icon={<Play className="fill-current" />} aria-keyshortcuts="Meta+Enter" onClick={() => actions.launch(inst)}>
-          Play
-        </Button>
-      )
-  }
-}
-
-function ContinuePlaying({ inst }: { inst: InstanceSummary }) {
-  const { data: accounts = [] } = useAccounts()
-  const account = accounts.find((a) => a.active)
   return (
-    <section aria-label="Continue playing" className="relative overflow-hidden rounded-2xl shadow-card">
-      {/* The contract has no screenshot listing yet; the hero uses the instance's colour. */}
-      <div
-        className="absolute inset-0"
-        style={{
-          background: `radial-gradient(120% 140% at 85% 0%, hsl(${(inst.iconHue + 40) % 360} 55% 52%) 0%, transparent 60%), linear-gradient(115deg, hsl(${inst.iconHue} 45% 18%) 0%, hsl(${(inst.iconHue + 20) % 360} 50% 32%) 100%)`,
-        }}
-      />
-      <div className="absolute inset-0 bg-linear-to-r from-black/35 to-transparent" />
-      <div className="relative flex min-h-[200px] flex-col justify-end gap-4 p-6 text-white">
-        <p className="text-small font-semibold tracking-[0.06em] text-white/70 uppercase">{inst.lastPlayedAt ? 'Continue Playing' : 'Ready to Play'}</p>
-        <div className="flex items-center gap-4">
-          <BlockIcon hue={inst.iconHue} label={inst.name} src={inst.iconUrl} size={64} className="shadow-lg" />
-          <div className="min-w-0">
-            <h2 className="truncate text-large font-bold tracking-tight">{inst.name}</h2>
-            <p className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-body text-white/80">
-              <span>{versionLabel(inst)}</span>
-              {inst.lastPlayedAt && (
-                <span className="flex items-center gap-1">
-                  <Clock className="size-3.5" /> {formatRelative(inst.lastPlayedAt)}
-                </span>
-              )}
-              {inst.playTimeMs > 0 && (
-                <span className="flex items-center gap-1">
-                  <Timer className="size-3.5" /> {formatDuration(inst.playTimeMs)} played
-                </span>
-              )}
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
-          <PlayButton inst={inst} size="xl" />
+    <div data-instance-row className={`group relative ${cardRowClass(true)} last:rounded-b-[9px] hover:bg-hover has-[a:focus-visible]:bg-hover has-[a:focus-visible]:shadow-[inset_0_0_0_1.5px_var(--focus-ring)]`}>
+      <BlockIcon hue={inst.iconHue} label={inst.name} src={inst.iconUrl} size={28} />
+      <RowText
+        title={
           <Link
             to="/instances/$instanceId/overview"
             params={{ instanceId: inst.id }}
             onClick={(e) => {
               e.preventDefault()
+              // The header's tile flies in from this one (motion.ts).
+              flight.mark(inst.id, e.currentTarget.closest('[data-instance-row]')?.querySelector('[data-art]'))
               openInstance(inst.id, 'overview')
             }}
-            className="flex h-9 items-center rounded-lg bg-white/15 px-4 text-title3 font-medium backdrop-blur-md hover:bg-white/25"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && e.metaKey) {
+                e.preventDefault()
+                actions.launch(inst)
+              }
+            }}
+            className="text-label outline-none after:absolute after:inset-0"
           >
-            Open
+            {inst.name}
           </Link>
-          {account && (
-            <span className="ml-auto flex items-center gap-2 rounded-full bg-black/25 py-1 pr-3 pl-1 text-callout backdrop-blur-md">
-              <SkinHead skin={account.skinUrl} hue={account.hue} size={20} /> Playing as {account.name}
-            </span>
-          )}
-        </div>
-      </div>
-    </section>
-  )
-}
-
-function InstanceCard({ inst }: { inst: InstanceSummary }) {
-  return (
-    <div className="group relative flex items-center gap-3 rounded-xl bg-surface p-3 shadow-[inset_0_0_0_0.5px_var(--color-surface-border)] transition-colors duration-150 hover:bg-fill">
-      <BlockIcon hue={inst.iconHue} label={inst.name} src={inst.iconUrl} size={40} />
-      <div className="min-w-0 flex-1">
-        <Link
-          to="/instances/$instanceId/overview"
-          params={{ instanceId: inst.id }}
-          className="block truncate text-body font-semibold text-label outline-none after:absolute after:inset-0 after:rounded-xl focus-visible:after:outline-3 focus-visible:after:outline-[color-mix(in_srgb,var(--accent)_55%,transparent)]"
-        >
-          {inst.name}
-        </Link>
-        <p className="flex items-center gap-1.5 truncate text-small text-label-2">
-          {versionLabel(inst)}
-          <InstanceStateIndicator inst={inst} />
-        </p>
-        {inst.lastPlayedAt && <p className="truncate text-small text-label-3">{formatRelative(inst.lastPlayedAt)}</p>}
-      </div>
-      <div className="relative z-10">
-        <CardPlay inst={inst} />
+        }
+        subtitle={metaLine(inst)}
+      />
+      <RowStatus inst={inst} />
+      <div className="relative z-10 -mr-1.5 flex">
+        <RowPlay inst={inst} />
       </div>
     </div>
   )
 }
 
-function CardPlay({ inst }: { inst: InstanceSummary }) {
-  const actions = useInstanceActions()
-  if (inst.state.kind === 'running')
-    return (
-      <IconButton label={`Stop ${inst.name}`} variant="push" onClick={() => actions.stop(inst)}>
-        <Square className="fill-current" />
-      </IconButton>
-    )
+/** Last played, or what the instance is doing right now. */
+function RowStatus({ inst }: { inst: InstanceSummary }) {
+  const progress = useInstanceTask(inst.state.kind === 'installing' ? inst.id : undefined)
+  const s = inst.state
+  let text: string
+  if (s.kind === 'running') text = 'Running'
+  else if (s.kind === 'launching') text = 'Launching…'
+  else if (s.kind === 'installing') text = progress === undefined ? 'Installing…' : `Installing ${Math.round(progress * 100)}%`
+  else if (s.kind === 'problem') text = 'Needs attention'
+  else text = inst.lastPlayedAt ? formatRelative(inst.lastPlayedAt) : 'Never played'
   return (
-    <IconButton label={`Play ${inst.name}`} variant="primary" disabled={inst.state.kind !== 'idle'} onClick={() => actions.launch(inst)} className="rounded-full">
-      <Play className="translate-x-px fill-current" />
-    </IconButton>
+    <span className="flex shrink-0 items-center gap-1.5 text-meta whitespace-nowrap text-label-2 tabular">
+      {s.kind === 'running' ? <Dot tone="green" label="Running" /> : s.kind !== 'idle' && s.kind !== 'launching' && <InstanceStateIndicator inst={inst} />}
+      {text}
+    </span>
   )
 }
 
-function Updates() {
+/** The inline Play control. It follows the instance state like the sidebar row does. */
+function RowPlay({ inst }: { inst: InstanceSummary }) {
+  const actions = useInstanceActions()
+  const set = useUi((s) => s.set)
+  switch (inst.state.kind) {
+    case 'running':
+      return (
+        <IconButton label={`Stop ${inst.name}`} onClick={() => actions.stop(inst)}>
+          <Square className="fill-current" />
+        </IconButton>
+      )
+    case 'launching':
+      return (
+        <IconButton label={`Cancel launching ${inst.name}`} onClick={() => actions.cancel(inst)}>
+          <Spinner size={13} />
+        </IconButton>
+      )
+    case 'installing':
+      return (
+        <IconButton label="Show Activity" onClick={() => set({ activity: true })}>
+          <Play className="translate-x-px fill-current opacity-40" />
+        </IconButton>
+      )
+    case 'problem':
+      return (
+        <Button size="md" onClick={() => openInstance(inst.id, 'overview')}>
+          Show Problem
+        </Button>
+      )
+    default:
+      return (
+        <IconButton label={`Play ${inst.name}`} className="text-label! [&_svg]:size-[13px]" onClick={() => actions.launch(inst)}>
+          <Play className="translate-x-px fill-current" />
+        </IconButton>
+      )
+  }
+}
+
+function Updates({ instances }: { instances: InstanceSummary[] }) {
   const { data: updates = [], isPending } = useHomeUpdates()
   if (isPending || updates.length === 0) return null
+  const byId = new Map(instances.map((i) => [i.id, i]))
   return (
-    <section aria-labelledby="updates-h">
-      <SectionHeader id="updates-h" title="Updates Available" action={<Badge tone="accent">{updates.length}</Badge>} />
-      <ul className="divide-y divide-separator overflow-hidden rounded-xl bg-surface shadow-[inset_0_0_0_0.5px_var(--color-surface-border)]">
-        {updates.map((u) => (
-          <li key={u.id}>
-            <Link
-              to={u.tab === 'mods' ? '/instances/$instanceId/mods' : '/instances/$instanceId/overview'}
-              params={{ instanceId: u.instanceId }}
-              className="flex h-10 items-center gap-3 px-3 text-body hover:bg-fill focus-visible:bg-fill focus-visible:outline-none"
-            >
-              <span className="flex size-6 items-center justify-center rounded-md bg-accent-soft text-accent">
-                <Package className="size-3.5" />
-              </span>
-              <span className="flex-1 truncate">{u.text}</span>
-              <span className="text-small text-label-2">Review</span>
-              <ChevronRight className="size-3.5 text-label-3" />
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </section>
+    <Card title="Updates" count={updates.length}>
+      {updates.map((u) => {
+        const inst = byId.get(u.instanceId)
+        return (
+          <Link
+            key={u.id}
+            to={u.tab === 'mods' ? '/instances/$instanceId/mods' : '/instances/$instanceId/overview'}
+            params={{ instanceId: u.instanceId }}
+            className={`${cardRowClass()} outline-none last:rounded-b-[9px] hover:bg-hover focus-visible:bg-hover focus-visible:shadow-[inset_0_0_0_1.5px_var(--focus-ring)]`}
+          >
+            {inst ? <BlockIcon hue={inst.iconHue} label={inst.name} src={inst.iconUrl} size={18} /> : <Package className="size-[15px] text-label-2" strokeWidth={1.5} />}
+            <span className="min-w-0 flex-1 truncate">{u.text}</span>
+            <span className="flex h-[26px] shrink-0 items-center rounded-[7px] px-2.5 text-callout hairline-strong">Review</span>
+          </Link>
+        )
+      })}
+    </Card>
   )
 }
 
@@ -258,8 +204,8 @@ function FirstInstance() {
           <Button size="lg" icon={<FolderInput />} onClick={() => set({ newInstance: true, newInstanceSource: 'folder' })}>
             Add Existing Folder…
           </Button>
-          <Link to="/discover" search={{ type: 'modpack' }} className="flex h-7 items-center gap-1.5 rounded-[7px] px-3.5 text-body font-medium text-accent hover:bg-accent-soft">
-            <Compass className="size-4" /> Browse Modpacks
+          <Link to="/discover" search={{ type: 'modpack' }} className="flex h-7 items-center gap-1.5 rounded-[7px] px-3 text-compact font-medium text-label hover:bg-hover">
+            <Compass className="size-[15px]" strokeWidth={1.5} /> Browse Modpacks
           </Link>
         </>
       }
@@ -269,11 +215,19 @@ function FirstInstance() {
 
 function HomeSkeleton() {
   return (
-    <div className="mx-auto flex max-w-[1040px] flex-col gap-8 px-8 pt-6" role="status" aria-label="Loading">
-      <Skeleton className="h-[200px] rounded-2xl" />
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3">
+    <div className="flex flex-col gap-3 px-4 pt-3.5" role="status" aria-label="Loading">
+      <div className="overflow-hidden rounded-[10px] border border-separator">
+        <div className="flex h-8 items-center border-b border-separator px-3">
+          <Skeleton className="h-2.5 w-24" />
+        </div>
         {Array.from({ length: 4 }, (_, i) => (
-          <Skeleton key={i} className="h-[66px] rounded-xl" />
+          <div key={i} className="flex h-[46px] items-center gap-2.5 border-t border-separator px-3 first-of-type:border-t-0">
+            <Skeleton className="size-7 rounded-[7px]" />
+            <div className="flex flex-col gap-1.5">
+              <Skeleton className="h-2.5" style={{ width: 90 + ((i * 37) % 60) }} />
+              <Skeleton className="h-2 w-40" />
+            </div>
+          </div>
         ))}
       </div>
     </div>

@@ -97,3 +97,13 @@ This file is authoritative. Where another spec conflicts with it, this file wins
   - Microsoft login is shown as unavailable.
   - CurseForge is hidden.
   - Telemetry is a no-op.
+
+## Visual direction (2026-10-28)
+- The approved reference is `docs/design/mockup.html` (its top control strip is demo chrome). Native macOS apps, Linear/Raycast, Arc and Teenage Engineering/Nothing are the touchstones: compact, with blur, dither and purposeful motion.
+- **Neutral by default.** The default accent is the label colour (near-white in dark, near-black in light); primary fills are white with dark text in dark mode and near-black with white text in light mode. Colour comes from content (icons, screenshots) and from status only (red errors, yellow warnings, a small muted green running dot). Users can still pick an accent in Settings → Appearance; the "Neutral" swatch comes first.
+- **Rejected, never to appear:** purple/amethyst as accent, default, swatch or placeholder art; purple or decorative gradients; dot-matrix or novelty numerals.
+- **Surfaces.** Dark window `#0F0F11`, text `#ECECEF`, muted `#8E8E97`, faint `#5E5E67`, hairlines white 7% / 13%; light window `#FFFFFF`, text `#1C1C1F`, muted `#6B6B73`, faint `#A2A2A9`, hairlines black 7.5% / 13%. 13px base, 26px sidebar rows, 32px table rows, monospaced versions and dates, 6–10px radii, hairline-outlined cards without fills or shadows, 11.5px muted section headers.
+- **Blur only where it earns it:** the sidebar (native vibrancy), the ⌘K palette, popovers and menus, and the sticky table header (kept by choice despite its GPU memory cost, `docs/PERFORMANCE.md`). Never on other scrolling content.
+- **Dither.** Ordered Bayer 8×8 dithering on canvas for progress (the Play button's progress pill, Activity bars) and for seeded, muted placeholder art when an instance or project has no icon. Drawn once per change, at the device pixel ratio.
+- **Motion.** Springs as CSS `linear()` curves (UI 240/24, sheets 420/38). Purposeful morphs only: Play → progress → Running, sliding selection indicators, popovers and the palette growing from their trigger, the instance tile flying into the header. Reduce Motion makes them instant or a crossfade. Nothing loops: the small running indicator pulses three times when the game starts, then rests.
+- **Icons.** lucide-react at about 15px with a 1.5 stroke, muted unless active.

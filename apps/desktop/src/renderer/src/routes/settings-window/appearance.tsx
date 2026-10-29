@@ -57,7 +57,7 @@ export function AppearancePane() {
           scheme={previewScheme}
           translucent={a.vibrancy}
           background={{ kind: bg.kind, url, fit: bg.fit, blur, overlay: bg.overlay }}
-          className="h-[132px] w-[216px] rounded-lg shadow-card"
+          className="h-[112px] w-[184px] rounded-lg shadow-card"
         />
       </div>
 

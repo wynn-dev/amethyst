@@ -31,7 +31,8 @@ export const resourceKeys = {
   detail: (instanceId: string, kind: ResourceKind, id: string) => ['res', instanceId, kind, 'detail', id] as const,
   analysis: (instanceId: string) => ['res', instanceId, 'mods', 'analysis'] as const,
   backups: (instanceId: string, worldId?: string) => ['res', instanceId, 'saves', 'backups', worldId ?? '*'] as const,
-  counts: (instanceId: string) => ['res', instanceId, 'counts'] as const,
+  /** Content counts; without `modded`, the prefix covering both variants (for invalidation). */
+  counts: (instanceId: string, modded?: boolean) => (modded === undefined ? (['res', instanceId, 'counts'] as const) : (['res', instanceId, 'counts', modded] as const)),
 }
 
 /** Stable serialisation of a list query (the cache key part). */
@@ -276,7 +277,8 @@ export function useMods(instanceId: string) {
  */
 export function useContentCounts(id: string, modded: boolean) {
   return useQuery({
-    queryKey: resourceKeys.counts(id),
+    // Keyed on `modded` too: after Change Version (Vanilla → Fabric) the mod counts are fetched anew.
+    queryKey: resourceKeys.counts(id, modded),
     staleTime: 30_000,
     enabled: !!id,
     queryFn: async () => {

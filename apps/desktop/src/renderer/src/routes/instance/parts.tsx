@@ -96,11 +96,6 @@ export function CopyButton({ text, label }: { text: string; label: string }) {
 
 export const SOURCE_LABEL: Record<Source, string> = { modrinth: 'Modrinth', curseforge: 'CurseForge', local: 'Local' }
 
-/** Where a file came from, as plain muted text (no coloured pill). */
-export function SourceBadge({ source }: { source: Source }) {
-  return <span className="text-label-2">{SOURCE_LABEL[source]}</span>
-}
-
 /** Client-side sorting for a VirtualTable's rows. */
 export function useSorted<T>(rows: readonly T[], columns: Column<T>[], initial: SortState = null) {
   const [sort, setSort] = useState<SortState>(initial)

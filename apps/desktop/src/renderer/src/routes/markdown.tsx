@@ -57,7 +57,7 @@ function onClick(e: MouseEvent<HTMLDivElement>) {
  * Calm long-form typography (callers cap the measure at ~680px): 13px on a 1.6 line, paragraphs
  * spaced by rhythm rather than rules, small semibold headings, hairline code blocks, quotes and
  * tables, softly rounded images. Links are the label colour with a faint underline. Scoped to
- * this component (it replaces the old global `.md-body` rules).
+ * this component.
  */
 const prose = [
   'selectable min-w-0 text-body leading-[1.6] text-label break-words',

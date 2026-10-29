@@ -74,16 +74,18 @@ export interface DitherProgressProps {
   alpha?: number
   /** The dot colour, as a text-colour class (`text-accent` by default). */
   tone?: string
+  /** Hold the indeterminate band still (paused work). */
+  paused?: boolean
   className?: string
 }
 
 /**
  * Dithered progress: the fill is drawn as ordered-dither dots in the current text colour, with a
  * soft dithered edge. It fills its box (size it with `className`). Redrawn only when the value,
- * size or theme changes; the indeterminate band animates only while it is on screen, and stands
- * still under Reduce Motion.
+ * size or theme changes; the indeterminate band animates (at most ~30 fps) only while it is on
+ * screen and not `paused`, and stands still under Reduce Motion. No frames are requested otherwise.
  */
-export function DitherProgress({ value, label, cell = 1, soft = 18, alpha = 1, tone = 'text-accent', className }: DitherProgressProps) {
+export function DitherProgress({ value, label, cell = 1, soft = 18, alpha = 1, tone = 'text-accent', paused = false, className }: DitherProgressProps) {
   const box = useRef<HTMLDivElement>(null)
   const canvas = useRef<HTMLCanvasElement>(null)
   const { width, height } = useSize(box)
@@ -103,7 +105,7 @@ export function DitherProgress({ value, label, cell = 1, soft = 18, alpha = 1, t
     }
     const band = Math.min(width * 0.4, 120)
     const draw = (t: number) => drawDither(cv, { width, height, cell, palette, field: bandField(((t / 1600) % 1) * 1.6 - 0.3, width, band, soft) })
-    if (reducedMotion()) {
+    if (paused || reducedMotion()) {
       draw(800)
       return
     }
@@ -117,10 +119,28 @@ export function DitherProgress({ value, label, cell = 1, soft = 18, alpha = 1, t
       }
       raf = requestAnimationFrame(tick)
     }
-    raf = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(raf)
+    const start = () => {
+      if (!raf) raf = requestAnimationFrame(tick)
+    }
+    const stop = () => {
+      cancelAnimationFrame(raf)
+      raf = 0
+    }
+    // A frame now, so the band shows before the first visibility report.
+    draw(performance.now())
+    if (typeof IntersectionObserver === 'undefined') {
+      start()
+      return stop
+    }
+    // Off screen (scrolled away, in a hidden pane), the loop stops until the bar is visible again.
+    const io = new IntersectionObserver((entries) => (entries.at(-1)?.isIntersecting ? start() : stop()))
+    io.observe(el)
+    return () => {
+      io.disconnect()
+      stop()
+    }
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `theme` is the redraw trigger for colours read from CSS
-  }, [determinate, value, width, height, cell, soft, alpha, tone, theme])
+  }, [determinate, value, width, height, cell, soft, alpha, tone, paused, theme])
 
   return (
     <div
@@ -139,11 +159,11 @@ export function DitherProgress({ value, label, cell = 1, soft = 18, alpha = 1, t
   )
 }
 
-/** A dithered progress bar on a faint track (download rows, Activity). `muted` for paused work. */
+/** A dithered progress bar on a faint track (download rows, Activity). `muted` for paused work: grey, and an indeterminate band holds still. */
 export function DitherBar({ value, label, muted, className }: { value?: number; label: string; muted?: boolean; className?: string }) {
   return (
     <div className={cn('h-1.5 w-full overflow-hidden rounded-[2px] bg-fill', className)}>
-      <DitherProgress value={value} label={label} cell={2} soft={16} alpha={0.9} tone={muted ? 'text-label-3' : 'text-accent'} className="size-full" />
+      <DitherProgress value={value} label={label} cell={2} soft={16} alpha={0.9} tone={muted ? 'text-label-3' : 'text-accent'} paused={muted} className="size-full" />
     </div>
   )
 }

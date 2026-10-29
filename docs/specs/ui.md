@@ -786,7 +786,7 @@ The sidebar is a source list. From top to bottom:
 
 0. **Search** field with a ⌘K hint. It opens the command palette, which grows out of it.
 1. **Library**
-   - **Home**: a dashboard (B3.1).
+   - **Home**: recent instances and updates (B3.1).
    - **Discover**: browse Modrinth and CurseForge for modpacks, mods and so on (B5).
 2. **Instances**. The section header has a "+" button, which opens New Instance (⌘N).
    - Each row shows:
@@ -797,7 +797,7 @@ The sidebar is a source list. From top to bottom:
    - Rows can be dragged to reorder.
    - **Folders** are disclosure groups. They are created with "New Folder" or by choosing "Move to Folder…" from a context menu. They are named only; there is no colour picker. Their expanded state is persisted.
    - **Pinned** instances appear first, in an optional "Pinned" subsection.
-   - A filter field (⌘⌥F) filters the list. It appears under the Search field when invoked and stays while it holds a query.
+   - A filter field filters the list. It is hidden until invoked with ⌥⌘F or View ▸ Filter Instances, then appears under the Search field; it stays while it holds a query and hides when it loses focus empty.
    - **Instance context menu** (native):
      - Launch / Stop
      - Open in New Window: no. Amethyst is single-window, so this item is omitted.
@@ -823,15 +823,10 @@ Settings is **not** a sidebar destination. It is a separate Settings window (B7)
 
 ### B3.1 Home
 
-- **Continue playing.** A large hero for the most recently played instance, showing:
-  - icon, name and version
-  - last played and play time
-  - a big **Play** button (⌘Return)
-  - the selected account
-- **Recent instances.** A grid of up to 8 cards. Each card has a Play button, with the same behaviour as the sidebar.
-- **Updates available.** A compact list: "3 instances have mod updates", "Modpack X has version 1.4". Each row deep-links to the relevant place.
+- **Jump back in.** A card listing up to 8 instances, most recently played first (never-played ones follow, newest first). Each row shows the icon, name, "version · loader", last played (or what the instance is doing) and an inline Play control that behaves like the sidebar's. The row opens the instance's Overview.
+- **Updates.** A card shown only when there is something to update, e.g. "“Pack” has 3 mod updates". Each row deep-links to the relevant tab. The check is deferred and covers the few most recently played modded instances.
 - **Empty state (no instances).** The heading "Create your first instance". Buttons: New Instance, Import Modpack…, Add Existing Folder…, Browse Modpacks.
-- Not on Home: no news carousel, no draggable card grid, no focus mode.
+- Not on Home: no hero, no news carousel, no draggable card grid, no focus mode, and no content counts (Home starts no folder scans).
 
 ### B3.2 Instance detail
 
@@ -856,10 +851,11 @@ The toolbar shows the instance icon and name, with "version · loader version ·
 
 **Overview tab** contents:
 
-- A status card with problems and fixes, for example "2 files missing: Repair", "Java 21 required: Download", "3 mod updates: Review".
-- A summary with counts (mods enabled/total, packs, shaders, worlds), last played, play time and disk size.
-- A screenshots strip that opens Quick Look-style previews.
-- For modpack instances, an **Upstream** card: source and project, current version, the latest version, and "Update…" (B4.7). "Version history…" opens a sheet containing the version list.
+- A status line, "Ready to play", or a **Status** card with problems and fixes, for example "The game isn’t installed yet: Install", "The chosen Java runtime is missing: Use Automatic".
+- A **stat strip**: play time, mods (with how many are off; modded instances), worlds, resource packs, and shaders (vanilla instances). Count cells open their tab.
+- **Worlds** (the most recently played ones), **Runtime** (version, Java, memory, folder) and **Activity** (last session, total play time, created) cards.
+- For modpack instances, a **Modpack** card: project, source, current version and the latest version, with "Check for Updates…" and "Version History…" (B4.7).
+- No disk size and no screenshots strip.
 
 ### B3.3 Logs and crash view (instance tab 6)
 
@@ -933,6 +929,7 @@ The **Java issue** policy is built into the Java row. "Launch anyway" exists onl
 **Layout.**
 
 - Toolbar: search (⌘F) | filter popover | "Check for Updates" | **Add Mods** (opens Discover scoped to this instance, ⇧⌘A) | "+" menu (Add from Files…, Paste URL…).
+- Filter chips: All / Enabled / Disabled (one selected), plus a separate **Updates** toggle that combines with them. Updates filters on results already known from "Check for Updates" and is disabled until a check has run; the chips never check by themselves.
 - A table, not a card list. Columns:
   - enable checkbox
   - icon and name, with the version underneath
@@ -942,7 +939,7 @@ The **Java issue** policy is built into the Java row. "Launch anyway" exists onl
   - file size
   - date added
 - Columns can be sorted. Their visibility is set through the column header context menu.
-- Selecting a row shows the **inspector** on the trailing side:
+- The **inspector** (Mod details) appears on the trailing side only while rows are selected; with nothing selected the table takes the full width. One selected row shows:
   - description, author and links
   - installed version, with a "Change Version…" popup
   - dependencies (each shows ✓ when satisfied, or "Install" when not)
@@ -1080,7 +1077,7 @@ Buttons: Cancel / Change Version.
 
 ### B4.7 Modpack update and export
 
-- **Update modpack sheet**, opened from the Overview Upstream card or from Updates on Home:
+- **Update modpack sheet**, opened from the Overview Modpack card or from Updates on Home:
   - A version list. Each version shows its changelog, MC version and loader, and whether it is newer or older ("Downgrade").
   - Choosing one shows a **diff review**: Added N / Removed N / Updated N / Kept N, as an expandable tree, plus a loader-change callout.
   - User-added files are preserved, and the sheet says so. Overwritten configs are backed up.
@@ -1105,7 +1102,7 @@ One browser for every project type.
 
 **Target instance.** When Discover is opened from an instance ("Add Mods"), a **target bar** appears under the toolbar: "Installing to: [Instance ▾] · 1.21.1 · Fabric", with ✕ to clear it. While a target is set, filters default to that instance's game version and loader, and every result shows its compatibility. The instance-scoped content browser replaces the original's per-page market view.
 
-**Filter sidebar** (collapsible):
+**Filter sidebar** (collapsible, closed when Discover opens; the Filters button shows it):
 
 - sort: Relevance, Downloads, Follows, Recently Updated, Newest
 - game version

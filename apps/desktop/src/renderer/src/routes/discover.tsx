@@ -2,7 +2,7 @@ import { useDeferredValue, useEffect, useMemo, useState, useSyncExternalStore } 
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { AlertTriangle, Box, LayoutGrid, List, ListFilter, PanelLeftClose, SearchX, Star, WifiOff, X } from 'lucide-react'
 import type { MarketPlatform, MarketProjectRow, MarketProjectType, MarketSearchQuery } from '@shared/services'
-import { Banner, Button, Checkbox, EmptyState, IconButton, SearchField, Segmented, Select, Skeleton, Spinner, TabStrip, VirtualList, cn } from '@/ui'
+import { Banner, Button, Checkbox, EmptyState, IconButton, SearchField, Segmented, Select, Skeleton, Spinner, TabStrip, VirtualList, cn, tabPanelProps } from '@/ui'
 import { chipButtonClass } from '@/ui/Chips'
 import { useQuery } from '@tanstack/react-query'
 import { PageToolbar } from '@/app/PageToolbar'
@@ -216,6 +216,7 @@ export function DiscoverPage() {
       <div className="flex h-9 shrink-0 items-center gap-1.5 border-b border-separator pr-3 pl-2.5">
         <TabStrip
           aria-label="Project type"
+          panelId="discover-panel"
           value={type}
           onValueChange={(t) => {
             setFilters((f) => ({ ...f, categories: [] }))
@@ -253,7 +254,7 @@ export function DiscoverPage() {
           className="text-label-2"
         />
       </div>
-      <div className="flex min-h-0 flex-1">
+      <div {...tabPanelProps('discover-panel', type)} className="flex min-h-0 flex-1">
         {filtersOpen && <FilterSidebar type={type} filters={filters} setFilters={setFilters} target={target} onClose={() => setFiltersOpen(false)} />}
         <div className="flex min-w-0 flex-1 flex-col">
           {!online && (

@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from 'r
 import { Outlet, useNavigate, useRouterState } from '@tanstack/react-router'
 import { Folder, MoreHorizontal, Play, Square, X } from 'lucide-react'
 import { INSTANCE_TABS, type InstanceTab } from '@shared/menu'
-import { Alert, Button, ContextMenu, Dot, DitherProgress, EmptyState, IconButton, Menu, Skeleton, TabStrip, ToolbarTitle, cn, flight, flyFrom, type MenuEntry } from '@/ui'
+import { Alert, Button, ContextMenu, Dot, DitherProgress, EmptyState, IconButton, Menu, Skeleton, TabStrip, ToolbarTitle, tabPanelProps, cn, flight, flyFrom, type MenuEntry } from '@/ui'
 import { PageToolbar } from '@/app/PageToolbar'
 import { QueryError } from '@/app/RouteStates'
 import { TAB_LABELS, openInstance } from '@/app/commands'
@@ -122,13 +122,14 @@ function InstanceView({ inst, tab }: { inst: InstanceSummary; tab: InstanceTab }
       <div className="flex h-9 shrink-0 items-center border-b border-separator px-2.5">
         <TabStrip
           aria-label="Instance sections"
+          panelId="instance-panel"
           value={tab}
           onValueChange={(t) => openInstance(inst.id, t)}
           items={INSTANCE_TABS.map((t) => ({ value: t, label: TAB_LABELS[t], count: tabCounts[t] }))}
         />
       </div>
       {/* Each tab is its own route, so the pane enters fresh. */}
-      <div key={tab} className="flex min-h-0 flex-1 animate-enter flex-col">
+      <div key={tab} {...tabPanelProps('instance-panel', tab)} className="flex min-h-0 flex-1 animate-enter flex-col">
         <Outlet />
       </div>
     </>

@@ -76,15 +76,27 @@ export interface TabStripProps<V extends string> {
   onValueChange: (value: V) => void
   items: TabStripItem<V>[]
   'aria-label': string
+  /**
+   * The id of the panel the tabs switch. The selected tab points at it (`aria-controls`); render
+   * the panel with `tabPanelProps(panelId, value)`.
+   */
+  panelId?: string
   className?: string
+}
+
+const tabId = (panelId: string, value: string) => `${panelId}-tab-${value}`
+
+/** Props for the single panel a `TabStrip` switches (the route outlet under it). */
+export function tabPanelProps(panelId: string, value: string) {
+  return { id: panelId, role: 'tabpanel', 'aria-labelledby': tabId(panelId, value) } as const
 }
 
 /**
  * A row of tabs whose selection pill slides between them, for views whose panels are routes
- * (the tab buttons switch the route). ARIA tabs with roving focus: ←/→, Home and End move and
- * select.
+ * (the tab buttons switch the route, and one panel shows the selected route). ARIA tabs with
+ * roving focus and automatic activation: ←/→, Home and End move and select.
  */
-export function TabStrip<V extends string>({ value, onValueChange, items, className, ...aria }: TabStripProps<V>) {
+export function TabStrip<V extends string>({ value, onValueChange, items, panelId, className, ...aria }: TabStripProps<V>) {
   const list = useRef<HTMLDivElement>(null)
   const indicator = useSlidingIndicator(list, '[aria-selected="true"]', value)
   const onKeyDown = (e: KeyboardEvent) => {
@@ -106,8 +118,10 @@ export function TabStrip<V extends string>({ value, onValueChange, items, classN
             key={t.value}
             type="button"
             role="tab"
+            id={panelId ? tabId(panelId, t.value) : undefined}
             data-value={t.value}
             aria-selected={selected}
+            aria-controls={panelId && selected ? panelId : undefined}
             tabIndex={selected ? 0 : -1}
             onClick={() => onValueChange(t.value)}
             className={cn(

@@ -2,28 +2,32 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { useState } from 'react'
-import { TabStrip } from './Layout'
+import { TabStrip, tabPanelProps } from './Layout'
 
 afterEach(cleanup)
 
 type Tab = 'overview' | 'mods' | 'logs'
 
-function Harness({ onChange }: { onChange: (t: Tab) => void }) {
+function Harness({ onChange, panelId }: { onChange: (t: Tab) => void; panelId?: string }) {
   const [value, setValue] = useState<Tab>('overview')
   return (
-    <TabStrip
-      aria-label="Instance sections"
-      value={value}
-      onValueChange={(t) => {
-        setValue(t)
-        onChange(t)
-      }}
-      items={[
-        { value: 'overview', label: 'Overview' },
-        { value: 'mods', label: 'Mods', count: 47 },
-        { value: 'logs', label: 'Logs' },
-      ]}
-    />
+    <>
+      <TabStrip
+        panelId={panelId}
+        aria-label="Instance sections"
+        value={value}
+        onValueChange={(t) => {
+          setValue(t)
+          onChange(t)
+        }}
+        items={[
+          { value: 'overview', label: 'Overview' },
+          { value: 'mods', label: 'Mods', count: 47 },
+          { value: 'logs', label: 'Logs' },
+        ]}
+      />
+      {panelId && <div {...tabPanelProps(panelId, value)}>{value}</div>}
+    </>
   )
 }
 
@@ -55,5 +59,16 @@ describe('TabStrip', () => {
     fireEvent.keyDown(list, { key: 'Home' })
     expect(onChange).toHaveBeenLastCalledWith('overview')
     expect(screen.getByRole('tab', { name: 'Overview' }).getAttribute('aria-selected')).toBe('true')
+  })
+
+  it('wires the selected tab to the one panel it shows', () => {
+    render(<Harness onChange={() => {}} panelId="panel" />)
+    const panel = screen.getByRole('tabpanel', { name: 'Overview' })
+    expect(panel.id).toBe('panel')
+    expect(screen.getByRole('tab', { name: 'Overview' }).getAttribute('aria-controls')).toBe('panel')
+    expect(screen.getByRole('tab', { name: /Mods/ }).hasAttribute('aria-controls')).toBe(false)
+    fireEvent.click(screen.getByRole('tab', { name: 'Logs' }))
+    expect(screen.getByRole('tabpanel', { name: 'Logs' })).toBe(panel)
+    expect(screen.getByRole('tab', { name: 'Logs' }).getAttribute('aria-controls')).toBe('panel')
   })
 })

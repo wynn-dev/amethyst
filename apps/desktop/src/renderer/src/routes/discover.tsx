@@ -646,7 +646,7 @@ function GridCard({ project, target }: { project: MarketProjectRow; target?: Run
  */
 function FeaturedCard({ project, target }: { project: MarketProjectRow; target?: RuntimeInstanceRow }) {
   return (
-    <div className="relative flex h-[124px] flex-col rounded-[10px] border border-separator p-3 transition-colors duration-150 hover:bg-hover">
+    <div className="relative flex h-[124px] flex-col rounded-[10px] border border-separator p-3 transition-colors duration-150 hover:bg-hover has-[a:focus-visible]:bg-hover has-[a:focus-visible]:shadow-[inset_0_0_0_1.5px_var(--focus-ring)]">
       <div className="flex items-start gap-3">
         <ProjectIcon project={project} size={40} />
         <div className="min-w-0 flex-1 leading-tight">

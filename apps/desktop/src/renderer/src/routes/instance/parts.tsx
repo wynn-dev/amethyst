@@ -206,7 +206,7 @@ export function StatStrip({ items, label }: { items: StatItem[]; label: string }
         )
         const cell = 'flex min-w-0 flex-col items-start gap-[9px] px-3.5 pt-3 pb-[11px] border-l border-separator text-left first:border-l-0'
         return s.onClick ? (
-          <button key={s.label} type="button" onClick={s.onClick} className={cn(cell, 'outline-none hover:bg-hover focus-visible:bg-hover')}>
+          <button key={s.label} type="button" onClick={s.onClick} className={cn(cell, 'outline-none first:rounded-l-[9px] last:rounded-r-[9px] hover:bg-hover focus-visible:bg-hover focus-visible:shadow-[inset_0_0_0_1.5px_var(--focus-ring)]')}>
             {body}
           </button>
         ) : (

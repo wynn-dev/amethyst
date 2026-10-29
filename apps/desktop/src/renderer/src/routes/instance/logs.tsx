@@ -117,7 +117,7 @@ function NavButton({ current, onClick, icon, title, children }: { current: boole
       aria-current={current ? 'true' : undefined}
       title={title}
       onClick={onClick}
-      className={cn('flex h-6 items-center gap-1.5 rounded-md px-2 text-callout whitespace-nowrap text-label-2 outline-none hover:text-label focus-visible:bg-hover', current && 'bg-fill-2 text-label')}
+      className={cn('flex h-6 items-center gap-1.5 rounded-md px-2 text-callout whitespace-nowrap text-label-2 outline-none hover:text-label focus-visible:shadow-[inset_0_0_0_1.5px_var(--focus-ring)]', current && 'bg-fill-2 text-label')}
     >
       {icon}
       {children}

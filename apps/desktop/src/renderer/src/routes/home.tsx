@@ -69,7 +69,7 @@ function metaLine(inst: InstanceSummary): string {
 function RecentRow({ inst }: { inst: InstanceSummary }) {
   const actions = useInstanceActions()
   return (
-    <div data-instance-row className={`group relative ${cardRowClass(true)} hover:bg-hover has-[a:focus-visible]:bg-hover`}>
+    <div data-instance-row className={`group relative ${cardRowClass(true)} last:rounded-b-[9px] hover:bg-hover has-[a:focus-visible]:bg-hover has-[a:focus-visible]:shadow-[inset_0_0_0_1.5px_var(--focus-ring)]`}>
       <BlockIcon hue={inst.iconHue} label={inst.name} src={inst.iconUrl} size={28} />
       <RowText
         title={
@@ -172,7 +172,7 @@ function Updates({ instances }: { instances: InstanceSummary[] }) {
             key={u.id}
             to={u.tab === 'mods' ? '/instances/$instanceId/mods' : '/instances/$instanceId/overview'}
             params={{ instanceId: u.instanceId }}
-            className={`${cardRowClass()} outline-none hover:bg-hover focus-visible:bg-hover`}
+            className={`${cardRowClass()} outline-none last:rounded-b-[9px] hover:bg-hover focus-visible:bg-hover focus-visible:shadow-[inset_0_0_0_1.5px_var(--focus-ring)]`}
           >
             {inst ? <BlockIcon hue={inst.iconHue} label={inst.name} src={inst.iconUrl} size={18} /> : <Package className="size-[15px] text-label-2" strokeWidth={1.5} />}
             <span className="min-w-0 flex-1 truncate">{u.text}</span>

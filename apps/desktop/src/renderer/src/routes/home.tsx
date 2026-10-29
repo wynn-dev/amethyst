@@ -3,7 +3,6 @@ import { Link } from '@tanstack/react-router'
 import { Compass, FolderInput, Package, Play, Plus, Square } from 'lucide-react'
 import { Button, Dot, EmptyState, IconButton, Skeleton, Spinner, ToolbarTitle, flight } from '@/ui'
 import { loaderName, useInstanceActions, useInstances } from '@/data/instances'
-import { useContentCounts } from '@/data/content'
 import { useHomeUpdates } from '@/data/home'
 import { useInstanceTask } from '@/data/tasks'
 import type { InstanceSummary } from '@/data/types'
@@ -57,23 +56,18 @@ export function HomePage() {
   )
 }
 
-/** "1.21.1 · Fabric 0.16.9 · 47 mods", like the instance header. */
-function useMetaLine(inst: InstanceSummary): string {
+/**
+ * "1.21.1 · Fabric 0.16.9". No content counts: those would scan every listed instance's folders
+ * at startup, and Home makes no `resources.*` calls.
+ */
+function metaLine(inst: InstanceSummary): string {
   const modded = inst.loader.kind !== 'vanilla'
-  const { data: counts } = useContentCounts(inst.id, modded)
-  return [
-    inst.minecraft || 'Unknown version',
-    modded ? [loaderName(inst.loader.kind), inst.loader.version].filter(Boolean).join(' ') : 'Vanilla',
-    modded && counts?.mods !== undefined ? `${counts.mods} ${counts.mods === 1 ? 'mod' : 'mods'}` : undefined,
-  ]
-    .filter(Boolean)
-    .join(' · ')
+  return [inst.minecraft || 'Unknown version', modded ? [loaderName(inst.loader.kind), inst.loader.version].filter(Boolean).join(' ') : 'Vanilla'].join(' · ')
 }
 
 /** One instance: art, name, meta and last played. The row opens the instance; the trailing button plays it. */
 function RecentRow({ inst }: { inst: InstanceSummary }) {
   const actions = useInstanceActions()
-  const meta = useMetaLine(inst)
   return (
     <div data-instance-row className={`group relative ${cardRowClass(true)} hover:bg-hover has-[a:focus-visible]:bg-hover`}>
       <BlockIcon hue={inst.iconHue} label={inst.name} src={inst.iconUrl} size={28} />
@@ -99,7 +93,7 @@ function RecentRow({ inst }: { inst: InstanceSummary }) {
             {inst.name}
           </Link>
         }
-        subtitle={meta}
+        subtitle={metaLine(inst)}
       />
       <RowStatus inst={inst} />
       <div className="relative z-10 -mr-1.5 flex">

@@ -20,6 +20,9 @@ describe('theme application', () => {
   it('defaults to the neutral accent, offered first as “Neutral”, with no purple swatch', () => {
     expect(ACCENT_SWATCHES[0]).toEqual({ label: 'Neutral', color: DEFAULT_ACCENT })
     expect(ACCENT_SWATCHES.map((a) => a.label)).not.toContain('Amethyst')
+    // Indigo reads as purple next to the neutral UI.
+    expect(ACCENT_SWATCHES.map((a) => a.label)).not.toContain('Indigo')
+    expect(ACCENT_SWATCHES.map((a) => a.color)).not.toContain('#5856d6')
     expect(ACCENT_SWATCHES.map((a) => a.color)).not.toContain(LEGACY_DEFAULT_ACCENT)
     expect(isNeutralAccent(DEFAULT_ACCENT)).toBe(true)
     expect(isNeutralAccent('#007aff')).toBe(false)

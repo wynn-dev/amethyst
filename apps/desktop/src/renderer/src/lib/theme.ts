@@ -13,7 +13,6 @@ export { DEFAULT_ACCENT }
 export const ACCENT_SWATCHES: { label: string; color: string }[] = [
   { label: 'Neutral', color: DEFAULT_ACCENT },
   { label: 'Blue', color: '#007aff' },
-  { label: 'Indigo', color: '#5856d6' },
   { label: 'Pink', color: '#ff2d55' },
   { label: 'Red', color: '#ff3b30' },
   { label: 'Orange', color: '#ff9500' },

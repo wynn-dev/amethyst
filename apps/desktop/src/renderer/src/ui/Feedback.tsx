@@ -105,8 +105,11 @@ export interface ProgressRingProps {
   className?: string
 }
 
-/** Circular progress, or a spinner when indeterminate. */
-export function ProgressRing({ value, size = 16, stroke = 2, label, className }: ProgressRingProps) {
+/**
+ * Circular progress, or a spinner when indeterminate. Quiet and neutral: a hairline track with a
+ * thin arc in the secondary label colour (status colour belongs to the text beside it).
+ */
+export function ProgressRing({ value, size = 16, stroke = 1.5, label, className }: ProgressRingProps) {
   const r = (size - stroke) / 2
   const c = 2 * Math.PI * r
   const determinate = value !== undefined
@@ -119,9 +122,9 @@ export function ProgressRing({ value, size = 16, stroke = 2, label, className }:
       aria-label={label}
       aria-hidden={label ? undefined : true}
       aria-valuenow={determinate && label ? Math.round(value * 100) : undefined}
-      className={cn('shrink-0 -rotate-90', !determinate && 'animate-spin', className)}
+      className={cn('shrink-0 -rotate-90', !determinate && 'animate-[spin_1.2s_linear_infinite]', className)}
     >
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" strokeWidth={stroke} className="stroke-fill-3" />
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" strokeWidth={stroke} className="stroke-fill-2" />
       <circle
         cx={size / 2}
         cy={size / 2}
@@ -130,8 +133,8 @@ export function ProgressRing({ value, size = 16, stroke = 2, label, className }:
         strokeWidth={stroke}
         strokeLinecap="round"
         strokeDasharray={c}
-        strokeDashoffset={determinate ? c * (1 - Math.max(0, Math.min(1, value))) : c * 0.72}
-        className="stroke-accent transition-[stroke-dashoffset] duration-300"
+        strokeDashoffset={determinate ? c * (1 - Math.max(0, Math.min(1, value))) : c * 0.75}
+        className="stroke-label-2 transition-[stroke-dashoffset] duration-(--duration-spring) ease-spring"
       />
     </svg>
   )

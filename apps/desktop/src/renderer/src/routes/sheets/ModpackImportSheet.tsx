@@ -1,12 +1,12 @@
 import { useState } from 'react'
 import { AlertTriangle, Package } from 'lucide-react'
-import { Banner, Button, EmptyState, Sheet, Spinner, TextField } from '@/ui'
+import { Banner, Button, DitherBar, EmptyState, Sheet, TextField, recentTrigger } from '@/ui'
 import { openInstance } from '@/app/commands'
 import { BlockIcon } from '@/app/visuals'
 import { loaderLabel, useInstanceRows } from '@/data/instance-info'
 import { importModpack, useModpackPreview, useModpackUi } from '@/data/modpacks'
 import { errorMessage } from '@/lib/error-messages'
-import { PropertyList } from '@/routes/instance/parts'
+import { Card, InfoRow, Note, Row } from './parts'
 
 /** Import review (B4.5): preview a pack, confirm the name, then import it as one task. */
 export default function ModpackImportSheet() {
@@ -34,8 +34,9 @@ export default function ModpackImportSheet() {
       open={!!source}
       onOpenChange={(o) => !o && close()}
       title="Import Modpack"
-      description={fileName}
-      width={520}
+      description={fileName && <span className="font-mono text-meta">{fileName}</span>}
+      width={540}
+      origin={recentTrigger}
       footer={
         <>
           <Button onClick={close}>Cancel</Button>
@@ -46,39 +47,49 @@ export default function ModpackImportSheet() {
       }
     >
       {preview.isPending ? (
-        <div className="flex h-40 flex-col items-center justify-center gap-2">
-          <Spinner label="Reading the modpack" />
-          <p className="text-small text-label-2">{source && 'url' in source ? 'Downloading and reading the modpack…' : 'Reading the modpack…'}</p>
+        <div className="flex h-36 flex-col items-center justify-center gap-3">
+          <DitherBar label="Reading the modpack" className="w-40" />
+          <p className="text-meta text-label-2">{source && 'url' in source ? 'Downloading and reading the modpack…' : 'Reading the modpack…'}</p>
         </div>
       ) : preview.isError ? (
-        <EmptyState icon={<AlertTriangle className="text-orange" />} title="This modpack can’t be imported" description={errorMessage(preview.error)} className="py-6" />
+        <EmptyState icon={<AlertTriangle className="text-orange" strokeWidth={1.5} />} title="This modpack can’t be imported" description={errorMessage(preview.error)} className="py-6" />
       ) : p ? (
-        <div className="flex flex-col gap-4">
+        <div className="flex animate-enter flex-col gap-3">
           <div className="flex items-start gap-3">
-            <BlockIcon hue={(p.name.length * 47) % 360} label={p.name} size={48} />
+            <BlockIcon hue={(p.name.length * 47) % 360} label={p.name} size={40} />
             <div className="min-w-0 flex-1">
-              <p className="truncate text-title3 font-semibold">{p.name}</p>
-              <p className="text-small text-label-2">
+              <p className="truncate text-headline font-semibold">{p.name}</p>
+              <p className="text-meta text-label-2 tabular">
                 {p.version && `Version ${p.version}`}
                 {p.author && ` · by ${p.author}`}
               </p>
-              {p.summary && <p className="mt-1 line-clamp-2 text-callout text-label">{p.summary}</p>}
+              {p.summary && <p className="mt-1 line-clamp-2 text-compact text-label">{p.summary}</p>}
             </div>
           </div>
-          <PropertyList
-            rows={[
-              { label: 'Format', value: p.format === 'modrinth' ? 'Modrinth (.mrpack)' : 'CurseForge' },
-              { label: 'Minecraft', value: p.minecraft },
-              { label: 'Loader', value: p.loader ? `${loaderLabel(p.loader.kind)} ${p.loader.version}` : 'Vanilla' },
-              { label: 'Files', value: `${p.fileCount} downloaded · ${p.overrideCount} included` },
-            ]}
-          />
+          <Card title="Contents">
+            <InfoRow label="Format" value={p.format === 'modrinth' ? 'Modrinth (.mrpack)' : 'CurseForge'} />
+            <InfoRow label="Minecraft" value={<span className="font-mono text-meta">{p.minecraft}</span>} />
+            <InfoRow
+              label="Loader"
+              value={
+                p.loader ? (
+                  <>
+                    {loaderLabel(p.loader.kind)} <span className="font-mono text-meta text-label-2">{p.loader.version}</span>
+                  </>
+                ) : (
+                  'Vanilla'
+                )
+              }
+            />
+            <InfoRow label="Files" value={<span className="tabular">{`${p.fileCount} downloaded · ${p.overrideCount} included`}</span>} />
+          </Card>
           {existing && (
-            <Banner tone="info" icon={<Package />} title={`This modpack is already installed as “${existing.name}”`}>
-              Importing creates a separate instance. To move “{existing.name}” to a new version, use Update on its Overview.
-              <div className="mt-2">
+            <Banner
+              tone="info"
+              icon={<Package />}
+              title={`This modpack is already installed as “${existing.name}”`}
+              actions={
                 <Button
-                  size="sm"
                   onClick={() => {
                     close()
                     openInstance(existing.id, 'overview')
@@ -86,7 +97,9 @@ export default function ModpackImportSheet() {
                 >
                   Open “{existing.name}”
                 </Button>
-              </div>
+              }
+            >
+              Importing creates a separate instance. To move “{existing.name}” to a new version, use Update on its Overview.
             </Banner>
           )}
           {p.warnings.length > 0 && (
@@ -98,8 +111,19 @@ export default function ModpackImportSheet() {
               </ul>
             </Banner>
           )}
-          <TextField label="Instance name" value={name} onChange={(e) => setName(e.target.value)} error={nameError} />
-          <p className="text-small text-label-2">The game version and files install in the background; progress is shown in Activity. Files a CurseForge author doesn’t allow launchers to download are listed afterwards.</p>
+          <Card>
+            <Row label="Instance name" htmlFor="mp-import-name" hintId="mp-import-name-msg" hint={nameError && <span className="text-red">{nameError}</span>}>
+              <TextField
+                id="mp-import-name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                aria-invalid={nameError ? true : undefined}
+                aria-describedby={nameError ? 'mp-import-name-msg' : undefined}
+                className="flex-1"
+              />
+            </Row>
+          </Card>
+          <Note>The game version and files install in the background; progress is shown in Activity. Files a CurseForge author doesn’t allow launchers to download are listed afterwards.</Note>
         </div>
       ) : null}
     </Sheet>
@@ -113,7 +137,7 @@ export function ImportUrlSheet() {
   const value = url.trim()
   const error = !value ? undefined : /^https:\/\//i.test(value) ? undefined : 'Enter an https:// link to a .mrpack or .zip file.'
   return (
-    <Sheet open onOpenChange={(o) => !o && set({ importUrl: false })} title="Import Modpack from URL" width={480}>
+    <Sheet open onOpenChange={(o) => !o && set({ importUrl: false })} title="Import Modpack from URL" width={500} origin={recentTrigger} bodyClassName="!pb-0">
       <form
         className="flex flex-col gap-3"
         onSubmit={(e) => {
@@ -122,9 +146,23 @@ export function ImportUrlSheet() {
           set({ importUrl: false, importing: { url: value } })
         }}
       >
-        <TextField label="Link" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://cdn.modrinth.com/…/pack.mrpack" error={error} autoFocus />
-        <p className="text-small text-label-2">The file is downloaded and previewed before anything is created. For Modrinth projects you can also install from Discover.</p>
-        <div className="-mx-5 -mb-4 mt-2 flex justify-end gap-2 border-t border-separator px-5 py-3">
+        <Card>
+          <Row label="Link" htmlFor="mp-url" hintId="mp-url-msg" hint={error && <span className="text-red">{error}</span>}>
+            <TextField
+              id="mp-url"
+              monospace
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="https://cdn.modrinth.com/…/pack.mrpack"
+              aria-invalid={error ? true : undefined}
+              aria-describedby={error ? 'mp-url-msg' : undefined}
+              className="flex-1"
+              autoFocus
+            />
+          </Row>
+        </Card>
+        <Note>The file is downloaded and previewed before anything is created. For Modrinth projects you can also install from Discover.</Note>
+        <div className="-mx-5 mt-1 flex justify-end gap-2 border-t border-separator px-4 py-2.5">
           <Button onClick={() => set({ importUrl: false })}>Cancel</Button>
           <Button type="submit" variant="primary" disabled={!value || !!error}>
             Continue

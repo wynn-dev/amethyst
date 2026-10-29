@@ -87,6 +87,33 @@ export function growFrom(el: HTMLElement, trigger: Box, content?: HTMLElement | 
 }
 
 /*
+ * The control the user just activated (a click, or Return/Space on a focused button), so a
+ * surface it opens can grow out of it. Shortcuts with modifiers and the palette record nothing,
+ * so what they open just pops in.
+ */
+let lastTrigger: { el: Element; at: number } | null = null
+const TRIGGERS = 'button, a, [role="button"], [role="menuitem"], [role="tab"], [role="option"]'
+
+function recordTrigger(e: Event): void {
+  if (e instanceof KeyboardEvent && (e.metaKey || e.ctrlKey || e.altKey || (e.key !== 'Enter' && e.key !== ' '))) return
+  const el = e.target instanceof Element ? e.target.closest(TRIGGERS) : null
+  lastTrigger = el ? { el, at: performance.now() } : null
+}
+if (typeof document !== 'undefined') {
+  document.addEventListener('pointerdown', recordTrigger, true)
+  document.addEventListener('keydown', recordTrigger, true)
+}
+
+/**
+ * The control activated in the last moment, if it is still on screen: pass as a sheet's or
+ * dialog's `origin` so it grows from what opened it. Stable (module-level).
+ */
+export function recentTrigger(): Element | undefined {
+  if (!lastTrigger || performance.now() - lastTrigger.at > 1500 || !lastTrigger.el.isConnected) return undefined
+  return lastTrigger.el
+}
+
+/*
  * Flight sources: a control that starts a navigation marks the element the destination should
  * fly in from (the sidebar tile of an instance); the destination takes it once. Nothing is marked
  * for keyboard shortcuts or the palette, so those just switch.

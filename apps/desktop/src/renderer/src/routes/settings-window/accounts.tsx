@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { AlertTriangle, Minus, Plus, UserRound } from 'lucide-react'
-import { Alert, Button, EmptyState, Form, Skeleton, cn } from '@/ui'
+import { Alert, Button, EmptyState, Form, IconButton, Skeleton, cn } from '@/ui'
 import { accountActions, useAccounts } from '@/data/accounts'
 import { useSettings } from '@/data/settings'
 import type { Account } from '@/data/types'
@@ -10,6 +10,7 @@ import { SkinHead } from '@/app/skin/SkinHead'
 import { QueryError } from '@/app/RouteStates'
 import { useRowHighlight } from './context'
 import { SkinEditor } from './SkinEditor'
+import { CardHeader } from '@/routes/sheets/parts'
 
 export function AccountsPane() {
   const { data: accounts, isPending, isError, error, refetch } = useAccounts()
@@ -25,19 +26,35 @@ export function AccountsPane() {
 
   return (
     <Form>
-      <section id="row-accounts" aria-label="Accounts" className="flex flex-col gap-1.5">
-        <div
-          role="listbox"
-          aria-label="Accounts"
-          className={cn(
-            'divide-y divide-separator overflow-hidden rounded-lg bg-surface shadow-[inset_0_0_0_0.5px_var(--color-surface-border)] transition-colors duration-500',
-            listHighlighted && 'bg-accent-soft',
-          )}
-        >
+      <section
+        id="row-accounts"
+        aria-label="Accounts"
+        className={cn('overflow-hidden rounded-[10px] border border-separator transition-colors duration-500', listHighlighted && 'bg-accent-soft')}
+      >
+        <CardHeader
+          title="Accounts"
+          count={isPending ? undefined : list.length}
+          action={
+            <div className="flex items-center gap-0.5">
+              {selected && !selected.active && (
+                <Button size="sm" variant="borderless" className="mr-1 text-label-2" onClick={() => void accountActions.select(selected)}>
+                  Use This Account
+                </Button>
+              )}
+              <IconButton label="Add Account" size="sm" onClick={() => setUi({ addAccount: true })}>
+                <Plus strokeWidth={1.75} />
+              </IconButton>
+              <IconButton label="Remove Account" size="sm" disabled={!selected} onClick={() => selected && setRemoving(selected)}>
+                <Minus strokeWidth={1.75} />
+              </IconButton>
+            </div>
+          }
+        />
+        <div role="listbox" aria-label="Accounts" className="flex flex-col divide-y divide-separator">
           {isPending &&
             [0, 1].map((i) => (
-              <div key={i} className="flex h-12 items-center gap-3 px-3">
-                <Skeleton className="size-8 rounded-[5px]" />
+              <div key={i} className="flex h-[46px] items-center gap-3 px-3">
+                <Skeleton className="size-7 rounded-[5px]" />
                 <Skeleton className="h-2.5 w-32" />
               </div>
             ))}
@@ -46,7 +63,7 @@ export function AccountsPane() {
               icon={<UserRound />}
               title="No accounts"
               description="Add a Microsoft account to play online, or an offline account for single-player."
-              className="py-8"
+              className="py-7 [&_svg]:!size-5"
             />
           )}
           {list.map((a) => {
@@ -69,64 +86,31 @@ export function AccountsPane() {
                     }
                   }
                 }}
-                className={cn('flex h-12 items-center gap-3 px-3 outline-none focus-visible:bg-fill', isSel && 'bg-selection')}
+                className={cn('flex h-[46px] items-center gap-3 px-3 outline-none hover:bg-hover focus-visible:shadow-[inset_0_0_0_1.5px_var(--focus-ring)]', isSel && 'bg-selection hover:bg-selection')}
               >
-                <SkinHead skin={a.skinUrl} hue={a.hue} size={30} />
-                <div className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate text-body font-medium">
+                <SkinHead skin={a.skinUrl} hue={a.hue} size={26} />
+                <div className="flex min-w-0 flex-1 flex-col leading-tight">
+                  <span className="truncate text-compact font-medium">
                     {displayName(a.name, streamer)}
-                    {a.active && <span className="ml-2 text-small font-normal text-label-2">In use</span>}
+                    {a.active && <span className="ml-2 text-meta font-normal text-label-2">In use</span>}
                   </span>
-                  <span className="text-small text-label-2">{a.kind === 'microsoft' ? 'Microsoft' : 'Offline'}</span>
+                  <span className="text-meta text-label-2">{a.kind === 'microsoft' ? 'Microsoft account' : 'Offline account'}</span>
                 </div>
                 {a.status === 'needs-sign-in' ? (
                   <span className="flex items-center gap-2">
-                    <span className="flex items-center gap-1 text-small text-orange">
-                      <AlertTriangle className="size-3.5" /> Session expired
+                    <span className="flex items-center gap-1 text-meta text-orange">
+                      <AlertTriangle className="size-3.5" strokeWidth={1.75} /> Session expired
                     </span>
                     <Button size="sm" onClick={() => setUi({ addAccount: true, reauth: a.id })}>
                       Sign In
                     </Button>
                   </span>
                 ) : (
-                  <span className="text-small text-label-2">{a.kind === 'offline' ? 'Ready' : 'Signed in'}</span>
+                  <span className="text-meta text-label-3">{a.kind === 'offline' ? 'Ready' : 'Signed in'}</span>
                 )}
               </div>
             )
           })}
-        </div>
-        <div className="flex items-center gap-2 px-0.5">
-          <div className="flex overflow-hidden rounded-[5px] bg-control shadow-control">
-            <button
-              type="button"
-              aria-label="Add Account"
-              title="Add Account"
-              onClick={() => setUi({ addAccount: true })}
-              className="flex h-5 w-6 items-center justify-center text-label-2 hover:text-label active:bg-control-pressed"
-            >
-              <Plus className="size-3" strokeWidth={2.5} />
-            </button>
-            <span className="w-px bg-separator" />
-            <button
-              type="button"
-              aria-label="Remove Account"
-              title="Remove Account"
-              disabled={!selected}
-              onClick={() => selected && setRemoving(selected)}
-              className="flex h-5 w-6 items-center justify-center text-label-2 hover:text-label active:bg-control-pressed disabled:opacity-40"
-            >
-              <Minus className="size-3" strokeWidth={2.5} />
-            </button>
-          </div>
-          {selected && !selected.active && (
-            <Button
-              size="sm"
-              variant="borderless"
-              onClick={() => void accountActions.select(selected)}
-            >
-              Use This Account
-            </Button>
-          )}
         </div>
       </section>
 

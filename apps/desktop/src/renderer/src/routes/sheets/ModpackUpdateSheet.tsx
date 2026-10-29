@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { AlertTriangle, ArrowRight, CheckCircle2 } from 'lucide-react'
 import type { ModpackChangeRow, ModpackUpdatePlanView } from '@shared/services'
-import { Badge, Banner, Button, Checkbox, EmptyState, RadioList, Segmented, Sheet, Spinner } from '@/ui'
+import { Banner, Button, Checkbox, DitherBar, EmptyState, RadioList, Segmented, Sheet, cn, recentTrigger } from '@/ui'
 import { QueryError } from '@/app/RouteStates'
 import { formatDate } from '@/app/visuals'
 import { loaderLabel, useInstanceInfo } from '@/data/instance-info'
@@ -10,6 +10,7 @@ import { reportUpdateResult, useModpackUi, useModpackUpdateCheck } from '@/data/
 import { useRunningTask } from '@/data/tasks'
 import { api } from '@/lib/rpc'
 import { errorMessage, toastError } from '@/lib/error-messages'
+import { CardHeader, Note } from './parts'
 
 const ACTION: Record<ModpackChangeRow['action'], string> = { add: 'Added', update: 'Updated', remove: 'Removed', conflict: 'Conflict' }
 const CONFLICT: Record<NonNullable<ModpackChangeRow['conflict']>, string> = {
@@ -82,6 +83,7 @@ export default function ModpackUpdateSheet() {
       title={plan ? `Update to ${plan.target.name}` : `Update “${target?.name}”`}
       description={plan ? 'Review what changes. Files you added yourself are kept; replaced and removed files are backed up first, so you can roll back.' : undefined}
       width={620}
+      origin={recentTrigger}
       footer={
         plan ? (
           <>
@@ -105,20 +107,22 @@ export default function ModpackUpdateSheet() {
       }
     >
       {!info.data ? (
-        <Spinner label="Loading" />
+        <div className="flex h-24 items-center justify-center">
+          <DitherBar label="Loading" className="w-40" />
+        </div>
       ) : !up ? (
         <EmptyState title="This instance doesn’t follow a modpack" description="Only instances installed from Modrinth or CurseForge can be updated this way." className="py-6" />
       ) : plan ? (
-        <div className="flex flex-col gap-3">
-          <div className="grid grid-cols-4 gap-2">
+        <div className="flex animate-enter flex-col gap-3">
+          <div className="grid grid-cols-4 rounded-[10px] border border-separator">
             {(['add', 'update', 'remove', 'conflict'] as const).map((a) => (
-              <div key={a} className="rounded-lg bg-surface px-3 py-2 shadow-[inset_0_0_0_0.5px_var(--color-surface-border)]">
-                <p className="text-small text-label-2">{ACTION[a]}</p>
-                <p className={a === 'conflict' && counts.conflict ? 'text-title2 font-semibold text-orange tabular' : 'text-title2 font-semibold tabular'}>{counts[a]}</p>
+              <div key={a} className="flex flex-col gap-2 px-3.5 pt-3 pb-2.5 [&+&]:border-l [&+&]:border-separator">
+                <p className={cn('h-[21px] text-[19px] leading-[21px] font-medium tracking-[-0.02em] tabular', a === 'conflict' && counts.conflict > 0 && 'text-orange')}>{counts[a]}</p>
+                <p className="text-meta text-label-2">{ACTION[a]}</p>
               </div>
             ))}
           </div>
-          <p className="text-small text-label-2">{plan.unchanged} files stay as they are.</p>
+          <Note>{plan.unchanged} files stay as they are.</Note>
           {plan.runtime && (
             <Banner tone="info" icon={<ArrowRight />} title="The game version changes">
               {plan.runtime.from ? `Minecraft ${plan.runtime.from.minecraft}${plan.runtime.from.loader ? ` · ${loaderLabel(plan.runtime.from.loader.kind)} ${plan.runtime.from.loader.version}` : ''}` : 'Unknown'} →{' '}
@@ -131,8 +135,8 @@ export default function ModpackUpdateSheet() {
             </Banner>
           )}
           {plan.changes.length > 0 && (
-            <>
-              <div className="flex items-center justify-between">
+            <section aria-label="Changes" className="overflow-hidden rounded-[10px] border border-separator">
+              <div className="flex h-9 items-center justify-between gap-2 border-b border-separator px-2">
                 <Segmented
                   aria-label="Show changes"
                   size="sm"
@@ -146,13 +150,13 @@ export default function ModpackUpdateSheet() {
                     { value: 'conflict', label: 'Conflicts' },
                   ]}
                 />
-                {skip.size > 0 && <span className="text-small text-label-2">{skip.size} left alone</span>}
+                <span className="pr-1 font-mono text-[10.5px] text-label-3 tabular">{skip.size > 0 ? `${skip.size} left alone` : plan.changes.length}</span>
               </div>
-              <ul className="flex max-h-[280px] flex-col divide-y divide-separator overflow-y-auto rounded-lg bg-surface shadow-[inset_0_0_0_0.5px_var(--color-surface-border)]">
+              <ul className="flex max-h-[260px] flex-col divide-y divide-separator overflow-y-auto">
                 {plan.changes
                   .filter((c) => show === 'all' || c.action === show)
                   .map((c) => (
-                    <li key={c.path} className="flex items-center gap-2.5 px-3 py-1.5">
+                    <li key={c.path} className="flex min-h-8 items-center gap-2.5 px-3 py-1 hover:bg-hover">
                       <Checkbox
                         checked={!skip.has(c.path)}
                         aria-label={`Apply the change to ${c.path}`}
@@ -166,35 +170,40 @@ export default function ModpackUpdateSheet() {
                         }
                       />
                       <div className="min-w-0 flex-1">
-                        <p className="truncate font-mono text-callout">{c.path}</p>
-                        {c.conflict && <p className="text-small text-orange">{CONFLICT[c.conflict]}</p>}
+                        <p className={cn('truncate font-mono text-meta', skip.has(c.path) && 'text-label-3')}>{c.path}</p>
+                        {c.conflict && <p className="text-meta text-orange">{CONFLICT[c.conflict]}</p>}
                       </div>
-                      <Badge tone={c.action === 'add' ? 'success' : c.action === 'remove' ? 'error' : c.action === 'conflict' ? 'warning' : 'accent'}>{ACTION[c.action]}</Badge>
+                      <span className={cn('shrink-0 text-meta', c.action === 'conflict' ? 'text-orange' : 'text-label-2')}>{ACTION[c.action]}</span>
                     </li>
                   ))}
               </ul>
-              <p className="text-small text-label-2">Untick a file to leave it as it is.</p>
-            </>
+              <p className="border-t border-separator px-3 py-2 text-meta text-label-2">Untick a file to leave it as it is.</p>
+            </section>
           )}
         </div>
       ) : versions.isPending || check.isPending ? (
-        <div className="flex h-40 items-center justify-center">
-          <Spinner label="Checking for updates" />
+        <div className="flex h-36 items-center justify-center">
+          <DitherBar label="Checking for updates" className="w-40" />
         </div>
       ) : versions.isError ? (
         <QueryError error={new Error(errorMessage(versions.error))} onRetry={() => versions.refetch()} what="the modpack’s versions" />
       ) : (
-        <div className="flex flex-col gap-3">
+        <div className="flex animate-enter flex-col gap-3">
           {check.data ? (
-            <Banner tone="info" title={`${check.data.latest.name} is available`}>
-              Published {formatDate(Date.parse(check.data.latest.publishedAt))} for Minecraft {check.data.latest.gameVersions.join(', ')}.
-            </Banner>
+            <div className="flex flex-col gap-0.5 px-0.5">
+              <p className="text-compact font-medium">{check.data.latest.name} is available</p>
+              <p className="text-meta text-label-2">
+                Published {formatDate(Date.parse(check.data.latest.publishedAt))} for Minecraft {check.data.latest.gameVersions.join(', ')}.
+              </p>
+            </div>
           ) : (
-            <p className="flex items-center gap-1.5 text-body text-label-2">
-              <CheckCircle2 className="size-4 text-green" /> “{target?.name}” is up to date{current ? ` (${current.name || current.versionNumber})` : ''}. You can still switch to another version.
+            <p className="flex items-center gap-1.5 px-0.5 text-compact text-label-2">
+              <CheckCircle2 className="size-3.5 text-green" strokeWidth={1.75} /> “{target?.name}” is up to date{current ? ` (${current.name || current.versionNumber})` : ''}. You can still switch to another version.
             </p>
           )}
-          <div className="max-h-[320px] overflow-y-auto">
+          <section aria-label="Versions" className="overflow-hidden rounded-[10px] border border-separator">
+            <CardHeader title="Versions" count={Math.min(list.length, 40)} />
+            <div className="max-h-[300px] overflow-y-auto px-3 py-2.5">
             <RadioList
               aria-label="Version"
               value={selected ?? ''}
@@ -207,15 +216,16 @@ export default function ModpackUpdateSheet() {
                   label: (
                     <span className="flex items-center gap-2">
                       {v.name || v.versionNumber}
-                      {v.id === currentId ? <Badge>Installed</Badge> : newer ? <Badge tone="success">Newer</Badge> : <Badge tone="warning">Downgrade</Badge>}
-                      {v.releaseType !== 'release' && <Badge tone="warning">{v.releaseType}</Badge>}
+                      <span className={cn('text-meta', v.id !== currentId && !newer ? 'text-orange' : 'text-label-3')}>{v.id === currentId ? 'Installed' : newer ? 'Newer' : 'Downgrade'}</span>
+                      {v.releaseType !== 'release' && <span className="text-meta text-orange">{v.releaseType}</span>}
                     </span>
                   ),
                   description: `${v.gameVersions.join(', ')}${v.loaders.length ? ` · ${v.loaders.join(', ')}` : ''} · ${formatDate(Date.parse(v.publishedAt))}`,
                 }
               })}
             />
-          </div>
+            </div>
+          </section>
         </div>
       )}
     </Sheet>

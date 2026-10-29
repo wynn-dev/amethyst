@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { Compass } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
-import { Alert, Button, EmptyState, Form, FormSection, Spinner, Stepper, Switch, TextField, toast } from '@/ui'
+import { Alert, Button, DitherBar, EmptyState, Form, FormSection, Spinner, Stepper, Switch, TextField, toast } from '@/ui'
 import { api } from '@/lib/rpc'
 import { errorDetails, errorMessage, toastError } from '@/lib/error-messages'
 import { openDataFolder, openExternal } from '@/app/commands'
@@ -101,7 +101,7 @@ function GeneralPane() {
         <SettingRow
           row="data-location"
           label="Data location"
-          description={<span className="selectable font-mono text-small">{paths.data?.dataRoot ?? (paths.isError ? errorMessage(paths.error) : '…')}</span>}
+          description={<span className="selectable font-mono text-[11px]">{paths.data?.dataRoot ?? (paths.isError ? errorMessage(paths.error) : '…')}</span>}
         >
           <Button disabled={!paths.data} onClick={() => void openDataFolder('dataRoot')}>
             Show in Finder
@@ -203,7 +203,7 @@ function PrivacyPane() {
         footer={
           <span>
             Both are off unless you turn them on, and changes take effect immediately.{' '}
-            <Button variant="link" onClick={() => setDetails(true)} className="text-small">
+            <Button variant="link" onClick={() => setDetails(true)} className="text-meta">
               Learn more…
             </Button>
           </span>
@@ -231,7 +231,12 @@ function UpdatesPane() {
         <Spinner size={11} /> Checking for updates…
       </span>
     ) : state.status === 'downloading' ? (
-      `Downloading ${state.version ?? 'the update'}… ${state.percent}%`
+      <span className="flex items-center gap-2">
+        <DitherBar value={state.percent / 100} label={`Downloading ${state.version ?? 'the update'}`} className="w-24" />
+        <span className="tabular">
+          Downloading {state.version ?? 'the update'}… {state.percent}%
+        </span>
+      </span>
     ) : state.status === 'ready' ? (
       `${state.version} is ready. Restart to update.`
     ) : state.status === 'error' ? (
@@ -332,15 +337,21 @@ function AboutPane() {
   const { data: info } = useAppInfo()
   return (
     <Form>
-      <div id="row-version" className="flex flex-col items-center pt-4 text-center">
-        <AmethystMark size={96} />
-        <h2 className="mt-3 text-title1 font-semibold">Amethyst</h2>
-        <p className="selectable mt-0.5 text-body text-label-2">Version {info?.version ?? '—'}</p>
-        {info && <p className="selectable mt-0.5 text-small text-label-3">Electron {info.electron} · Chromium {info.chrome} · Node {info.node}</p>}
-        <p className="mt-3 max-w-[380px] text-small text-label-2">
-          Not an official Minecraft product. Not approved by or associated with Mojang or Microsoft.
-        </p>
+      <div id="row-version" className="flex items-center gap-4 px-1 pt-1 pb-1">
+        <AmethystMark size={56} />
+        <div className="flex min-w-0 flex-col">
+          <h2 className="text-title3 font-semibold">Amethyst</h2>
+          <p className="selectable text-compact text-label-2">
+            Version <span className="font-mono text-meta">{info?.version ?? '—'}</span>
+          </p>
+          {info && (
+            <p className="selectable mt-0.5 font-mono text-[11px] text-label-3">
+              Electron {info.electron} · Chromium {info.chrome} · Node {info.node}
+            </p>
+          )}
+        </div>
       </div>
+      <p className="-mt-2 px-1 text-meta text-label-2">Not an official Minecraft product. Not approved by or associated with Mojang or Microsoft.</p>
       <FormSection title="Licence">
         <SettingRow row="licence" label="GNU General Public License v3.0" description="Amethyst is free software. You can redistribute and modify it under the terms of the GPL-3.0.">
           <Button onClick={() => openExternal('https://www.gnu.org/licenses/gpl-3.0.html')}>View</Button>
@@ -348,7 +359,7 @@ function AboutPane() {
       </FormSection>
       <FormSection title="Acknowledgements" footer="Thanks to the authors of these open-source projects.">
         {ACKNOWLEDGEMENTS.map((a) => (
-          <SettingRow key={a} row={`ack-${a}`} label={a} />
+          <SettingRow key={a} row={`ack-${a}`} label={a} className="min-h-8 py-1" />
         ))}
       </FormSection>
     </Form>

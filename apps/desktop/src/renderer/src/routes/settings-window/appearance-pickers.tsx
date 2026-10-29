@@ -101,8 +101,8 @@ export function ModePicker({ value, onValueChange, size = 'md' }: { value: Theme
             className={cn(
               'relative block overflow-hidden rounded-[7px] ring-offset-2 ring-offset-[var(--color-window)] transition-shadow duration-150',
               w,
-              'shadow-[0_0_0_0.5px_rgb(0_0_0/0.2)] group-data-[state=checked]:ring-[3px] group-data-[state=checked]:ring-accent',
-              'group-focus-visible:ring-[3px] group-focus-visible:ring-[color-mix(in_srgb,var(--accent)_55%,transparent)]',
+              'shadow-[0_0_0_0.5px_rgb(0_0_0/0.2)] group-data-[state=checked]:ring-[1.5px] group-data-[state=checked]:ring-accent',
+              'group-focus-visible:ring-2 group-focus-visible:ring-[color-mix(in_srgb,var(--accent)_55%,transparent)]',
             )}
           >
             {m.value === 'system' ? (
@@ -114,7 +114,7 @@ export function ModePicker({ value, onValueChange, size = 'md' }: { value: Theme
               <MiniWindow scheme={m.value} className="absolute inset-0" />
             )}
           </span>
-          <span className="text-small text-label group-data-[state=checked]:font-semibold">{m.label}</span>
+          <span className="text-meta text-label-2 group-data-[state=checked]:font-medium group-data-[state=checked]:text-label">{m.label}</span>
         </RadioGroup.Item>
       ))}
     </RadioGroup.Root>
